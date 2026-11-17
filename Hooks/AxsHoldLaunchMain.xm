@@ -239,8 +239,10 @@ static void axs_setPreferenceValue_imp(id self, SEL _cmd, id value, id specifier
 // One pending dismiss per picker session, keyed on the settings controller.
 // A monotonically increasing generation makes stale dispatch_after blocks
 // no-ops, so continuous dragging only auto-closes on the LAST color change.
-static NSString * const AxsRingPickerDismissGenKey = @"axsRingPickerDismissGen";
-static NSString * const AxsRingPickerActiveKey = @"axsRingPickerActive";
+// Associated-object keys must be const void * under ARC; @selector(...) matches
+// the style already used by the ring rows (@selector(axsRingColorKey) etc.).
+#define AxsRingPickerDismissGenKey  @selector(axsRingPickerDismissGen)
+#define AxsRingPickerActiveKey      @selector(axsRingPickerActive)
 
 static void axs_holdlaunch_invalidatePickerDismiss(id self) {
     NSNumber *gen = objc_getAssociatedObject(self, AxsRingPickerDismissGenKey);
