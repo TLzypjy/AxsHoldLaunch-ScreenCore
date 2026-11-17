@@ -1,0 +1,137 @@
+name: Build ScreenCore beautify.28 (rootless)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+  THEOS: ${{ github.workspace }}/theos-roothide
+
+jobs:
+  build:
+    name: Build rootless beautify.28
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "THEOS_IGNORE_PARALLEL_BUILDING_NOTICE=yes" >> "$HOME/.theosrc"
+
+      - name: Pin Package Version
+        run: |
+          # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
+          VERSION="2.0.5+beautify.28"
+          echo "Using version: $VERSION"
+          sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
+
+      - name: Checkout Theos (RootHide)
+        uses: actions/checkout@v4
+        with:
+          repository: roothide/theos
+          path: theos-roothide
+          submodules: recursive
+
+      - name: Install iOS SDK (iPhoneOS16.5)
+        run: |
+          set -euo pipefail
+          mkdir -p "$THEOS/sdks"
+          if [ -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
+            echo "iPhoneOS16.5.sdk already present"
+            exit 0
+          fi
+          SDK_STAGE="$(mktemp -d)"
+          trap 'rm -rf "$SDK_STAGE"' EXIT
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$SDK_STAGE/sdks"
+          git -C "$SDK_STAGE/sdks" sparse-checkout set iPhoneOS16.5.sdk
+          cp -R "$SDK_STAGE/sdks/iPhoneOS16.5.sdk" "$THEOS/sdks/"
+          ls -1 "$THEOS/sdks"
+
+      - name: Install build dependencies
+        run: |
+          brew install ldid dpkg xz
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+
+      - name: Build Tweak (rootless, arm64 + arm64e)
+        run: |
+          set -euo pipefail
+          sh build.sh rootless
+          echo "=== intermediate .deb files ==="
+          find ./packages -name "*.deb" -type f
+
+      - name: Verify compiled dylib (arches + symbols)
+        run: |
+          set -euo pipefail
+          EXTRACT="$(mktemp -d)"
+          DEB=$(find ./packages -name "*.deb" | head -n 1)
+          test -n "$DEB"
+          dpkg-deb -x "$DEB" "$EXTRACT"
+          DYLIB=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
+          test -n "$DYLIB"
+          echo "=== lipo -archs ==="
+          lipo -archs "$DYLIB"
+          lipo -archs "$DYLIB" | grep -q "arm64"
+          lipo -archs "$DYLIB" | grep -q "arm64e"
+          echo "=== required symbols ==="
+          for sym in splitBeautifyRingFrameColor UIColorPickerViewController com.susudear.screencoreprefs \
+                     colorPickerViewControllerDidFinish: colorPickerViewControllerDidSelectColor: \
+                     colorPickerControllerDidFinish: ; do
+            strings -a "$DYLIB" | grep -Fq "$sym" || { echo "MISSING symbol: $sym"; exit 1; }
+          done
+          echo "symbol check ok"
+          rm -rf "$EXTRACT"
+
+      - name: Collect Repack Files
+        run: |
+          set -euo pipefail
+          mkdir -p ./repack
+          DEB=$(find ./packages -name "*.deb" | head -n 1)
+          test -n "$DEB"
+          EXTRACT="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$EXTRACT"
+          find "$EXTRACT" -name "AxsHoldLaunch.dylib" -exec cp {} ./repack/ \;
+          find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
+          ls -la ./repack
+
+      - name: Package 2.0.5+beautify.28 (dpkg-deb)
+        env:
+          AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
+        run: |
+          set -euo pipefail
+          sh packaging/package_beautify.sh
+
+      - name: Verify final beautify deb
+        run: |
+          set -euo pipefail
+          DEB=$(find ./packaging/out -name "*.deb" | head -n 1)
+          test -n "$DEB"
+          echo "=== dpkg-deb -I ==="
+          dpkg-deb -I "$DEB"
+          echo "=== version check ==="
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.28"
+          echo "=== package contents ==="
+          dpkg-deb -c "$DEB"
+          echo "=== bplist check (panel plist/strings) ==="
+          EXTRACT="$(mktemp -d)"
+          dpkg-deb -x "$DEB" "$EXTRACT"
+          B="$EXTRACT/var/jb/Library/PreferenceBundles/ScreenCorePrefs.bundle"
+          head -c 8 "$B/SplitSettings.plist" | grep -q "bplist00"
+          head -c 8 "$B/zh-Hans.lproj/SplitSettings.strings" | grep -q "bplist00"
+          head -c 8 "$B/en.lproj/SplitSettings.strings" | grep -q "bplist00"
+          echo "final verify ok"
+          rm -rf "$EXTRACT"
+
+      - name: Upload Beautify Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: beautify-package
+          path: packaging/out/*.deb
+          if-no-files-found: error

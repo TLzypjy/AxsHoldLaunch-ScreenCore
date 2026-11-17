@@ -1,0 +1,39 @@
+#pragma once
+
+#import <UIKit/UIKit.h>
+
+// Declare only private interfaces confirmed on the target iOS version.
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// MobileSubstrate (linked via -lsubstrate).
+void MSHookMessageEx(Class _class, SEL message, IMP hook, IMP *old);
+
+#ifdef __cplusplus
+}
+#endif
+
+// ScreenCore hook targets (classes are discovered at runtime in SpringBoard;
+// only the selectors are known statically from the unstripped binary).
+#define AxsHoldLaunchSelSetSelectedBundle   @"setSelectedBundleIdentifier:"
+
+// Preferences framework (Settings process only). Declaring the interface is
+// safe; the class must only ever be resolved at runtime (objc_getClass), never
+// referenced by name, so the SpringBoard slice keeps no PS link dependency.
+@interface PSSpecifier : NSObject
++ (instancetype)preferenceSpecifierNamed:(NSString *)name target:(id)target set:(SEL)set get:(SEL)get detail:(id)detail cell:(NSInteger)cell edit:(id)edit;
+- (void)setProperty:(id)property forKey:(NSString *)key;
+- (id)propertyForKey:(NSString *)key;
+- (id)identifier;
+- (void)setIdentifier:(id)identifier;
+@end
+
+@interface PSListController : UIViewController
+- (id)readPreferenceValue:(PSSpecifier *)specifier;
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier;
+- (PSSpecifier *)specifierAtIndexPath:(id)indexPath;
+- (void)reloadSpecifiers;
+- (NSBundle *)bundle;
+@end
