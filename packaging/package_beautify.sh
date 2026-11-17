@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.31"
+VERSION="2.0.5+beautify.32"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -79,6 +79,7 @@ check "filter has springboard" sh -c "plutil -p '$DYLIB_DIR/AxsHoldLaunch.plist'
 check "filter has preferences" sh -c "plutil -p '$DYLIB_DIR/AxsHoldLaunch.plist' | grep -q 'com.apple.Preferences'"
 check "plist has beautify switches" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyRingFrameEnabled'"
 check "plist has beautify sliders" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyGlowRadius'"
+check "plist has glow brightness slider" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyGlowBrightness'"
 check "zh strings localized" sh -c "plutil -p '$BUNDLE/zh-Hans.lproj/SplitSettings.strings' | grep -q '美化'"
 check "en strings localized" sh -c "plutil -p '$BUNDLE/en.lproj/SplitSettings.strings' | grep -q 'Beautify'"
 check "dylib has beautify color key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyRingFrameColor'"
@@ -87,6 +88,7 @@ check "dylib has glow enabled key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.d
 check "dylib has glow custom key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowCustomEnabled'"
 check "dylib has glow color key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowColor'"
 check "dylib has glow radius key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowRadius'"
+check "dylib has glow brightness key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowBrightness'"
 check "dylib has real picker finish handler" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'colorPickerViewControllerDidFinish:'"
 check "dylib has real picker select-color handler" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'colorPickerViewControllerDidSelectColor:'"
 check "dylib has no overlay engine marker" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'ring engine start') -eq 0"
