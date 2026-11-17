@@ -235,6 +235,52 @@ static void axs_setPreferenceValue_imp(id self, SEL _cmd, id value, id specifier
 
 // --- color picker (shared by the ring page color rows) ---
 
+// beautify.29 auto-close plumbing -------------------------------------------
+// One pending dismiss per picker session, keyed on the settings controller.
+// A monotonically increasing generation makes stale dispatch_after blocks
+// no-ops, so continuous dragging only auto-closes on the LAST color change.
+static NSString * const AxsRingPickerDismissGenKey = @"axsRingPickerDismissGen";
+static NSString * const AxsRingPickerActiveKey = @"axsRingPickerActive";
+
+static void axs_holdlaunch_invalidatePickerDismiss(id self) {
+    NSNumber *gen = objc_getAssociatedObject(self, AxsRingPickerDismissGenKey);
+    unsigned long long next = [(gen ?: @0) unsignedLongLongValue] + 1ULL;
+    objc_setAssociatedObject(self, AxsRingPickerDismissGenKey, @(next), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// Clean up references held by the picker before it is closed, so no delegate
+// or associated key lingers (beautify.29 二.3).
+static void axs_holdlaunch_detachPicker(id self, id picker) {
+    if (picker == nil) return;
+    objc_setAssociatedObject(picker, @selector(axsRingColorKey), nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    if ([picker respondsToSelector:@selector(setDelegate:)]) {
+        ((void(*)(id, SEL, id))objc_msgSend)(picker, @selector(setDelegate:), nil);
+    }
+    if (self != nil && objc_getAssociatedObject(self, AxsRingPickerActiveKey) == picker) {
+        objc_setAssociatedObject(self, AxsRingPickerActiveKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
+
+// Debounced auto-close. 0.22s sits in the requested 0.20-0.25s window: grid /
+// preset taps settle into a close, and a spectrum/slider drag only closes once
+// the finger stops (each new color supersedes the pending block).
+static void axs_holdlaunch_schedulePickerDismiss(id self, id picker) {
+    if (picker == nil) return;
+    axs_holdlaunch_invalidatePickerDismiss(self);
+    NSNumber *gen = objc_getAssociatedObject(self, AxsRingPickerDismissGenKey);
+    unsigned long long captured = [(gen ?: @0) unsignedLongLongValue];
+    objc_setAssociatedObject(self, AxsRingPickerActiveKey, picker, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.22 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        NSNumber *current = objc_getAssociatedObject(self, AxsRingPickerDismissGenKey);
+        if ([(current ?: @0) unsignedLongLongValue] != captured) return;  // superseded
+        id livePicker = objc_getAssociatedObject(self, AxsRingPickerActiveKey);
+        if (livePicker == nil) return;                                    // already closed
+        axs_holdlaunch_detachPicker(self, livePicker);
+        [livePicker dismissViewControllerAnimated:YES completion:nil];
+    });
+}
+
 static void axs_holdlaunch_presentColorPicker(id self, NSString *title, NSString *key) {
     if (!objc_getClass("UIColorPickerViewController")) return;
     UIViewController *picker = [[objc_getClass("UIColorPickerViewController") alloc] init];
@@ -255,6 +301,10 @@ static void axs_holdlaunch_presentColorPicker(id self, NSString *title, NSString
     if ([picker respondsToSelector:@selector(setDelegate:)]) {
         ((void(*)(id, SEL, id))objc_msgSend)(picker, @selector(setDelegate:), self);
     }
+    // beautify.29: invalidate any debounced dismiss left over from a previous
+    // picker session so a stale block cannot close the newly presented one.
+    axs_holdlaunch_invalidatePickerDismiss(self);
+    objc_setAssociatedObject(self, AxsRingPickerActiveKey, picker, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [self presentViewController:picker animated:YES completion:nil];
 }
 
@@ -283,13 +333,22 @@ static void axs_holdlaunch_applyPickedColor(id self, id picker) {
 }
 
 static void axs_holdlaunch_colorPickerDidFinish_imp(id self, SEL _cmd, id picker) {
-    axs_holdlaunch_applyPickedColor(self, picker);
+    // beautify.29: the real close signal from the system (user tapped X or the
+    // picker was dismissed). Do NOT write back here: every chosen color was
+    // already persisted live in DidSelectColor. If the user opened the picker
+    // and tapped X without picking, there is nothing to write, so the original
+    // preference is preserved. Just invalidate any pending debounce and close.
+    axs_holdlaunch_invalidatePickerDismiss(self);
+    axs_holdlaunch_detachPicker(self, picker);
     [picker dismissViewControllerAnimated:YES completion:nil];
 }
 
 static void axs_holdlaunch_colorPickerDidSelectColor_imp(id self, SEL _cmd, id picker) {
-    // Live-update the swatch/hex while dragging; persistence on DidFinish.
+    // Fires on grid/preset taps and continuously while dragging the spectrum.
+    // Write back live (ring + swatch update immediately), then debounce the
+    // auto-close: the last color change wins and closes after 0.22s.
     axs_holdlaunch_applyPickedColor(self, picker);
+    axs_holdlaunch_schedulePickerDismiss(self, picker);
 }
 
 // --- ring rows: rendering hooks on SCSplitSettingsController ----------------
