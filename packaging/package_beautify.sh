@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.29"
+VERSION="2.0.5+beautify.30"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -83,6 +83,9 @@ check "zh strings localized" sh -c "plutil -p '$BUNDLE/zh-Hans.lproj/SplitSettin
 check "en strings localized" sh -c "plutil -p '$BUNDLE/en.lproj/SplitSettings.strings' | grep -q 'Beautify'"
 check "dylib has beautify color key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyRingFrameColor'"
 check "dylib has color picker" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'UIColorPickerViewController'"
+check "dylib has glow enabled key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowEnabled'"
+check "dylib has glow color key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowColor'"
+check "dylib has glow radius key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowRadius'"
 check "dylib has real picker finish handler" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'colorPickerViewControllerDidFinish:'"
 check "dylib has real picker select-color handler" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'colorPickerViewControllerDidSelectColor:'"
 check "dylib has no overlay engine marker" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'ring engine start') -eq 0"
