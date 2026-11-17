@@ -1,4 +1,5 @@
 #import <UIKit/UIKit.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
 #import "AxsHoldLaunchConfig.h"
 #import "AxsHoldLaunchPreferences.h"
@@ -128,17 +129,48 @@ static double axs_ring_glowRadiusValue(void) {
     return axs_ring_clamp(r, 0.0, 200.0);
 }
 
-static UIColor *axs_ring_glowColor(void) {
-    if (!axs_ring_glowCustomColor()) return [UIColor whiteColor];
+// beautify.31 修复：光晕颜色来源。
+// - 自定义开：glowColor（保留 RGB，alpha 过低补回基础不透明度）
+// - 自定义关：跟随光圈边框色——边框单色用 ringFrameColor；边框彩虹按与
+//   conic 渐变同一 4.0s 旋转周期采样当前色相；光圈关闭拿不到色则回退白。
+static UIColor *axs_ring_glowCustomColorValue(void) {
     id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowColor" defaultValue:@"#FFFFFF"];
-    return axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil, [UIColor whiteColor]);
+    UIColor *c = axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil, [UIColor whiteColor]);
+    CGFloat r = 0, g = 0, b = 0, a = 0;
+    if ([c getRed:&r green:&g blue:&b alpha:&a] && a < 0.35) {
+        // alpha 过低时补回基础不透明度，避免发光几乎消失
+        return [UIColor colorWithRed:r green:g blue:b alpha:0.6];
+    }
+    return c;
 }
 
-// 光晕扩散半径（屏幕点）：面板 0–200 → 外扩 0–56，116(默认)≈32.5 柔和范围。
-static CGFloat axs_ring_glowSpread(void) {
-    double r = axs_ring_glowRadiusValue();
-    if (r <= 0.5) return 0.0;
-    return (CGFloat)axs_ring_clamp(r * 0.28, 0.0, 56.0);
+static UIColor *axs_ring_glowColor(void) {
+    if (axs_ring_glowCustomColor()) return axs_ring_glowCustomColorValue();
+
+    // 跟随边框：光圈必须开着才有边框色可跟
+    if (axs_ring_enabled()) {
+        if (axs_ring_customColor()) {
+            return axs_ring_color();                 // 边框单色 = ringFrameColor
+        }
+        // 彩虹跑马灯：conic 渐变每 4.0s 转一圈（见 makeGradient 的 spin.duration）
+        // 用同一周期与起点算当前色相，光晕与边框色相同步，且仅设颜色、不另加动画
+        double period = 4.0;
+        double t = fmod(CACurrentMediaTime(), period) / period;
+        if (t < 0) t += 1.0;
+        return [UIColor colorWithHue:t saturation:1.0 brightness:1.0 alpha:1.0];
+    }
+    return [UIColor whiteColor];                     // 光圈关闭兜底
+}
+
+// 是否处于「跟随边框彩虹」：需要每帧刷新光晕色相（不重建几何、不另加动画）
+static BOOL axs_ring_glowFollowsRainbow(void) {
+    return axs_ring_glowEnabled() && !axs_ring_glowCustomColor()
+        && axs_ring_enabled() && !axs_ring_customColor();
+}
+
+// 光晕范围（面板 0–200，默认 116）。radius=0 不显示。
+static double axs_ring_glowRange(void) {
+    return axs_ring_glowRadiusValue();
 }
 
 // --- 跑马灯：conic 闭环取色 + 渐变层线性旋转（TXT beautify.24 三.3.A） --------
@@ -273,12 +305,13 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 @property (nonatomic, weak) UIView *overlay;            // SCFloatingInteractionOverlayView
 @property (nonatomic, weak) CALayer *realLayer;         // 真实裁剪层（bbox≈容器 bounds，几何源）
 @property (nonatomic, weak) CALayer *mountLayer;        // 挂载层（非裁剪祖先，masksToBounds=0）
-@property (nonatomic, strong) CAShapeLayer *glow;        // beautify.30 光晕层（外发光）
+@property (nonatomic, strong) CAShapeLayer *glowInner;   // beautify.31 内层柔光（贴边）
+@property (nonatomic, strong) CAShapeLayer *glowOuter;   // beautify.31 外层宽扩散
 @property (nonatomic, assign) CGFloat overlayR;         // overlay mask 当前半径（对照日志）
 @property (nonatomic, assign) CGRect lastBounds;        // 上帧应用的 presentation bounds
 @property (nonatomic, assign) CGFloat lastRadius;       // 上帧应用的环圆角
 @property (nonatomic, assign) CGFloat lastLineWidth;
-@property (nonatomic, assign) CGFloat lastGlowSpread;   // 上帧光晕扩散（0=未显示）
+@property (nonatomic, assign) double lastGlowRange;     // 上帧光晕范围（0=未显示）
 @property (nonatomic, assign) BOOL lastGlowEnabled;
 @property (nonatomic, copy) NSString *radiusSource;     // overlayMask|config
 @property (nonatomic, assign) BOOL loggedAttach;
@@ -291,67 +324,97 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 }
 @end
 
-// --- 光晕层 (beautify.30) ----------------------------------------------------
-// 纯 CAShapeLayer 外发光：用不透明填充 + shadow 产生扩散，再用 even-odd
-// 环形 mask 挖空内部，只保留窗口外围的发光。因此不会染色窗口内容/按钮/文字，
-// 不包裹 UIView、不接管触摸；放在 ring 下层，描边始终盖在光晕之上。
-static CAShapeLayer *axs_ring_makeGlow(void) {
+// --- 光晕层 (beautify.31) ----------------------------------------------------
+// 纯 CAShapeLayer 同色柔光，两层同路径：内层紧贴边框（较高不透明/小 blur），
+// 外层宽扩散（低不透明/大 blur）。shadowColor 始终是边框色或所选光晕色，
+// 绝不用黑/灰。填充 alpha 压到 ~0.01（几乎透明、不染窗口内部），用显式
+// shadowPath = 窗口圆角矩形投光，mask 挖空窗口内部；不包 UIView、不接管触摸。
+static CAShapeLayer *axs_ring_makeGlowLayer(NSString *name) {
     CAShapeLayer *glow = [CAShapeLayer layer];
-    glow.name = AXS_RING_GLOW_NAME;
-    glow.fillColor = [UIColor whiteColor].CGColor;   // 仅作 shadow 源，内部被 mask 挖空
+    glow.name = name;
     glow.strokeColor = nil;
     glow.lineWidth = 0.0;
-    glow.shadowColor = [UIColor whiteColor].CGColor;
-    glow.shadowOpacity = 0.45;                       // 柔和固定值（0.35–0.55）
-    glow.shadowRadius = 12.0;
     glow.shadowOffset = CGSizeZero;
+    glow.shadowRadius = 8.0;
+    glow.shadowOpacity = 0.30;
+    glow.shadowColor = [UIColor whiteColor].CGColor;
+    glow.fillColor = [[UIColor whiteColor] colorWithAlphaComponent:0.01].CGColor;
     glow.masksToBounds = NO;                         // 外发光不被自身边界裁掉
     glow.contentsScale = [UIScreen mainScreen].scale;
 
-    CAShapeLayer *donut = [CAShapeLayer layer];
+    CAShapeLayer *donut = [CAShapeLayer layer];      // even-odd 挖空窗口内部
     donut.fillColor = [UIColor whiteColor].CGColor;
     donut.fillRule = kCAFillRuleEvenOdd;
     glow.mask = donut;
     return glow;
 }
 
-// 用窗口换算矩形 + 圆角 + 扩散，更新光晕层几何与颜色。
-// bounds 已是 mountLayer 坐标系下的窗口矩形；spread<=0 表示关闭。
-static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
-                               CGFloat pathRadius, CGFloat spread) {
-    CAShapeLayer *glow = driver.glow;
-    if (glow == nil) return;
-    if (spread <= 0.5) {
-        glow.hidden = YES;
-        return;
-    }
-    glow.hidden = NO;
+// 大半径降低不透明度，防止亮部爆白/爆色（116 默认 1.0，200 约 0.65）。
+static CGFloat axs_ring_glowOpacityScale(double range) {
+    if (range <= 116.0) return 1.0;
+    return (CGFloat)axs_ring_clamp(1.0 - (range - 116.0) / 84.0 * 0.35, 0.6, 1.0);
+}
 
-    // 外扩 frame，容纳外发光，避免被挂载层/自身边界裁掉
-    CGRect outer = CGRectMake(bounds.origin.x - spread,
-                              bounds.origin.y - spread,
-                              bounds.size.width + 2 * spread,
-                              bounds.size.height + 2 * spread);
+// 用窗口矩形 + 圆角 + 外扩余量，配置一层柔光的 frame / shadowPath / mask / 颜色。
+// bounds 是 mountLayer 坐标系下的窗口矩形；pad 已含 blur + 线宽 + 8pt 余量。
+static void axs_ring_configGlowLayer(CAShapeLayer *glow, CGRect bounds,
+                                     CGFloat pathRadius, CGFloat pad,
+                                     CGFloat blur, CGFloat opacity, UIColor *color) {
+    if (glow == nil) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    glow.frame = outer;
+    glow.frame = CGRectMake(bounds.origin.x - pad, bounds.origin.y - pad,
+                            bounds.size.width + 2 * pad, bounds.size.height + 2 * pad);
 
-    // 填充路径 = 窗口矩形（外扩坐标里相对偏移 spread）
-    CGRect innerInGlow = CGRectMake(spread, spread, bounds.size.width, bounds.size.height);
-    UIBezierPath *winPath = [UIBezierPath bezierPathWithRoundedRect:innerInGlow cornerRadius:pathRadius];
+    // shadowPath 在层自身坐标系里 = 窗口圆角矩形（相对外扩 pad），不随放大 frame 变形
+    CGRect win = CGRectMake(pad, pad, bounds.size.width, bounds.size.height);
+    UIBezierPath *winPath = [UIBezierPath bezierPathWithRoundedRect:win cornerRadius:pathRadius];
     glow.path = winPath.CGPath;
+    glow.shadowPath = winPath.CGPath;
 
-    // even-odd 环形 mask：外框(整层) + 内孔(窗口圆角矩形) → 只留外围
+    // even-odd mask：外框(整层) + 内孔(窗口圆角矩形) → 内部完全不染色
     UIBezierPath *maskPath = [UIBezierPath bezierPathWithRect:glow.bounds];
-    [maskPath appendPath:[UIBezierPath bezierPathWithRoundedRect:innerInGlow cornerRadius:pathRadius]];
+    [maskPath appendPath:winPath];
     ((CAShapeLayer *)glow.mask).frame = glow.bounds;
     ((CAShapeLayer *)glow.mask).path = maskPath.CGPath;
 
-    glow.shadowRadius = spread;
-    UIColor *glowColor = axs_ring_glowColor();
-    glow.fillColor = glowColor.CGColor;
-    glow.shadowColor = glowColor.CGColor;
+    glow.shadowRadius = blur;
+    glow.shadowOpacity = opacity;
+    glow.shadowColor = color.CGColor;
+    glow.fillColor = [color colorWithAlphaComponent:0.01].CGColor;  // 近透明，不染内部
+    glow.hidden = NO;
     [CATransaction commit];
+}
+
+// 每帧只更新光晕颜色（彩虹跟随用），不重建几何、不留隐式动画。
+static void axs_ring_updateGlowColor(AXSRingLinkDriver *driver) {
+    UIColor *color = axs_ring_glowColor();
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    driver.glowInner.fillColor = [color colorWithAlphaComponent:0.01].CGColor;
+    driver.glowInner.shadowColor = color.CGColor;
+    driver.glowOuter.fillColor = [color colorWithAlphaComponent:0.01].CGColor;
+    driver.glowOuter.shadowColor = color.CGColor;
+    [CATransaction commit];
+}
+
+// 用窗口矩形 + 圆角 + 范围配置两层柔光；range<=0 或关闭则隐藏两层。
+static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
+                               CGFloat pathRadius, double range, CGFloat lineWidth) {
+    if (driver.glowInner == nil || driver.glowOuter == nil) return;
+    if (range <= 0.5 || !axs_ring_glowEnabled()) {
+        driver.glowInner.hidden = YES;
+        driver.glowOuter.hidden = YES;
+        return;
+    }
+    CGFloat r = (CGFloat)axs_ring_clamp(range, 0.0, 200.0);
+    CGFloat innerBlur = (CGFloat)axs_ring_clamp(r * 0.30, 1.0, 60.0);
+    CGFloat outerBlur = (CGFloat)axs_ring_clamp(r * 0.85, 2.0, 170.0);
+    CGFloat pad = MAX(innerBlur, outerBlur) + lineWidth + 8.0;   // 最大 blur + 线宽 + 余量
+    CGFloat scale = axs_ring_glowOpacityScale(range);
+    UIColor *color = axs_ring_glowColor();
+    axs_ring_configGlowLayer(driver.glowInner, bounds, pathRadius, pad, innerBlur, 0.35 * scale, color);
+    axs_ring_configGlowLayer(driver.glowOuter, bounds, pathRadius, pad, outerBlur, 0.14 * scale, color);
 }
 
 static NSMutableDictionary<NSString *, AXSRingLinkDriver *> *axs_ring_drivers = nil;
@@ -580,12 +643,16 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
         driver.radiusSource = source;
 
         BOOL glowOn = axs_ring_glowEnabled();
-        CGFloat glowSpread = glowOn ? axs_ring_glowSpread() : 0.0;
+        double glowRange = glowOn ? axs_ring_glowRange() : 0.0;
+        // 彩虹跟随模式：颜色每帧随 conic 旋转变化，需要逐帧更新光晕色相
+        if (glowOn && axs_ring_glowFollowsRainbow()) {
+            axs_ring_updateGlowColor(driver);
+        }
         BOOL changed = !CGRectEqualToRect(bounds, driver.lastBounds)
                     || fabs(driver.lastRadius - radius) > 0.05
                     || driver.lastLineWidth != (CGFloat)lineWidth
                     || driver.lastGlowEnabled != glowOn
-                    || fabs(driver.lastGlowSpread - glowSpread) > 0.5;
+                    || fabs(driver.lastGlowRange - glowRange) > 0.5;
         if (!changed) return; // 静止状态：bounds/圆角/光晕未变就跳过本帧刷新
 
         [CATransaction begin];
@@ -611,13 +678,13 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
         [CATransaction commit];
 
         // 光晕：与描边同帧、同一 presentation 矩形与圆角；不摘层、不停 link
-        axs_ring_applyGlow(driver, bounds, (CGFloat)pathRadius, glowSpread);
+        axs_ring_applyGlow(driver, bounds, (CGFloat)pathRadius, glowRange, (CGFloat)lineWidth);
 
         driver.lastBounds = bounds;
         driver.lastRadius = radius;
         driver.lastLineWidth = (CGFloat)lineWidth;
         driver.lastGlowEnabled = glowOn;
-        driver.lastGlowSpread = glowSpread;
+        driver.lastGlowRange = glowRange;
     } @catch (NSException *exception) {
         axs_ring_log(@"ring sync exception: %@", exception);
     }
@@ -664,15 +731,21 @@ static void axs_ring_attachContainer(UIView *container) {
     ring.hidden = !axs_ring_enabled();       // beautify.30：光圈可独立于光晕关闭
     [mount addSublayer:ring];                // 挂非裁剪祖先层，置最上层（TXT 二.1/二.3）
 
-    // beautify.30：光晕层挂 ring 之下（描边盖在光晕上），同一 mountLayer
-    CAShapeLayer *glow = axs_ring_makeGlow();
-    glow.hidden = !axs_ring_glowEnabled();
-    [mount insertSublayer:glow below:ring];
+    // beautify.31：两层柔光挂 ring 之下（描边盖在光晕上），同一 mountLayer。
+    // 可见性只由 glowEnabled 决定；自定义开关只决定颜色来源，不影响显隐。
+    BOOL showGlow = axs_ring_glowEnabled();
+    CAShapeLayer *glowInner = axs_ring_makeGlowLayer(AXS_RING_GLOW_NAME);
+    CAShapeLayer *glowOuter = axs_ring_makeGlowLayer([AXS_RING_GLOW_NAME stringByAppendingString:@"Outer"]);
+    glowInner.hidden = !showGlow;
+    glowOuter.hidden = !showGlow;
+    [mount insertSublayer:glowOuter below:ring];     // 外层宽扩散在下
+    [mount insertSublayer:glowInner below:ring];     // 内层贴边在上（仍在描边下）
 
     driver.ring = ring;
     driver.shape = shape;
     driver.gradient = grad;
-    driver.glow = glow;
+    driver.glowInner = glowInner;
+    driver.glowOuter = glowOuter;
 
     driver.link = [CADisplayLink displayLinkWithTarget:driver selector:@selector(tick)];
     [driver.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -724,9 +797,12 @@ static void axs_ring_detachDriver(NSString *key) {
     [driver.link invalidate];                // displayLink 随容器生命周期停止
     driver.ring.mask = nil;
     [driver.ring removeFromSuperlayer];      // 摘环、清动画、释放图层
-    driver.glow.mask = nil;                  // beautify.30：摘光晕，不留残影
-    [driver.glow removeFromSuperlayer];
-    driver.glow = nil;
+    driver.glowInner.mask = nil;             // beautify.31：摘两层光晕，不留残影
+    [driver.glowInner removeFromSuperlayer];
+    driver.glowInner = nil;
+    driver.glowOuter.mask = nil;
+    [driver.glowOuter removeFromSuperlayer];
+    driver.glowOuter = nil;
     [axs_ring_drivers removeObjectForKey:key];
     axs_ring_log(@"ring detach: scan container=%p", driver.container);
 }
@@ -849,7 +925,7 @@ static AXSRingHealthTarget *axs_ring_healthTarget = nil;
 // （自定义单色 ↔ 彩虹跑马灯互切），挂载/几何/圆角结构不动，环不断
 static void axs_ring_refreshAppearance(void) {
     BOOL glowOn = axs_ring_glowEnabled();
-    CGFloat spread = glowOn ? axs_ring_glowSpread() : 0.0;
+    double glowRange = glowOn ? axs_ring_glowRange() : 0.0;
     UIColor *glowColor = axs_ring_glowColor();
     BOOL ringOn = axs_ring_enabled();
     for (AXSRingLinkDriver *d in axs_ring_drivers) {
@@ -862,17 +938,19 @@ static void axs_ring_refreshAppearance(void) {
         [old removeFromSuperlayer];          // 旧层连同旧动画一起移除
         d.gradient = g;
 
-        // beautify.30：光晕开关/颜色/半径即时刷新（不摘层、不停 displayLink）。
-        // 几何细节由下一帧 syncDriver 按同一 presentation 矩形补齐。
-        if (d.glow != nil) {
-            [CATransaction begin];
-            [CATransaction setDisableActions:YES];
-            d.glow.hidden = (spread <= 0.5);
-            d.glow.fillColor = glowColor.CGColor;
-            d.glow.shadowColor = glowColor.CGColor;
-            d.glow.shadowRadius = spread;
-            [CATransaction commit];
-        }
+        // beautify.31：任一相关开关/颜色变化都即时刷新光晕颜色与显隐；
+        // 可见性只看 glowEnabled + 范围，自定义开关仅切换颜色来源。
+        // 几何/半径由下一帧 syncDriver 按同一 presentation 矩形补齐，不摘层。
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        BOOL showGlow = glowOn && glowRange > 0.5;
+        d.glowInner.hidden = !showGlow;
+        d.glowOuter.hidden = !showGlow;
+        d.glowInner.fillColor = [glowColor colorWithAlphaComponent:0.01].CGColor;
+        d.glowInner.shadowColor = glowColor.CGColor;
+        d.glowOuter.fillColor = [glowColor colorWithAlphaComponent:0.01].CGColor;
+        d.glowOuter.shadowColor = glowColor.CGColor;
+        [CATransaction commit];
     }
 }
 

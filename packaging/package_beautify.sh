@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.30"
+VERSION="2.0.5+beautify.31"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -84,6 +84,7 @@ check "en strings localized" sh -c "plutil -p '$BUNDLE/en.lproj/SplitSettings.st
 check "dylib has beautify color key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyRingFrameColor'"
 check "dylib has color picker" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'UIColorPickerViewController'"
 check "dylib has glow enabled key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowEnabled'"
+check "dylib has glow custom key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowCustomEnabled'"
 check "dylib has glow color key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowColor'"
 check "dylib has glow radius key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowRadius'"
 check "dylib has real picker finish handler" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'colorPickerViewControllerDidFinish:'"

@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.30 (rootless)
+name: Build ScreenCore beautify.31 (rootless)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.30
+    name: Build rootless beautify.31
     runs-on: macos-15
 
     steps:
@@ -29,7 +29,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.30"
+          VERSION="2.0.5+beautify.31"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -84,7 +84,8 @@ jobs:
           for sym in splitBeautifyRingFrameColor UIColorPickerViewController com.susudear.screencoreprefs \
                      colorPickerViewControllerDidFinish: colorPickerViewControllerDidSelectColor: \
                      colorPickerControllerDidFinish: \
-                     splitBeautifyGlowEnabled splitBeautifyGlowColor splitBeautifyGlowRadius ; do
+                     splitBeautifyGlowEnabled splitBeautifyGlowCustomEnabled \
+                     splitBeautifyGlowColor splitBeautifyGlowRadius ; do
             strings -a "$DYLIB" | grep -Fq "$sym" || { echo "MISSING symbol: $sym"; exit 1; }
           done
           echo "symbol check ok"
@@ -102,7 +103,7 @@ jobs:
           find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
           ls -la ./repack
 
-      - name: Package 2.0.5+beautify.30 (dpkg-deb)
+      - name: Package 2.0.5+beautify.31 (dpkg-deb)
         env:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
@@ -117,7 +118,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.30"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.31"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
