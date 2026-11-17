@@ -486,7 +486,10 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
 
         UILabel *title = [UILabel new];
         title.tag = 101;
-        title.font = [UIFont systemFontOfSize:17];
+        // beautify.34: match system PSSwitchCell/PSSliderCell titles exactly
+        // (17pt regular, labelColor, vertically centered with the system baseline)
+        title.font = [UIFont systemFontOfSize:17 weight:UIFontWeightRegular];
+        title.textColor = [UIColor labelColor];
         title.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:title];
 
@@ -542,9 +545,14 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
         ]];
     }
 
+    // beautify.34: reset BOTH text representations on reuse so a recycled
+    // slider row can never inherit stale text/attributedText (including the
+    // gray duplicate title a previous layout pass may have set).
     UILabel *title = (UILabel *)[cell viewWithTag:101];
+    title.attributedText = nil;
     title.text = axs_ring_page_localized(self, [spec propertyForKey:@"label"]);
-
+    UILabel *valueLabel = (UILabel *)[cell viewWithTag:105];
+    valueLabel.attributedText = nil;
     double min = [[spec propertyForKey:@"min"] doubleValue];
     double max = [[spec propertyForKey:@"max"] doubleValue];
     if (max <= min) max = min + 1;
@@ -563,7 +571,7 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
     objc_setAssociatedObject(slider, @selector(axsRingSpec), spec, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject([cell viewWithTag:102], @selector(axsRingSpec), spec, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject([cell viewWithTag:104], @selector(axsRingSpec), spec, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    ((UILabel *)[cell viewWithTag:105]).text = [NSString stringWithFormat:@"%.2f", value];
+    valueLabel.text = [NSString stringWithFormat:@"%.2f", value];
     return cell;
 }
 
@@ -587,8 +595,10 @@ static UITableViewCell *axs_ringPage_colorCell(id self, SEL _cmd, id tableView, 
 
     UIView *accessory = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 112, 30)];
     UILabel *hexLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 66, 22)];
+    hexLabel.attributedText = nil;
     hexLabel.text = (hex.length > 0) ? hex : fallback;
-    hexLabel.font = [UIFont monospacedDigitSystemFontOfSize:13 weight:UIFontWeightRegular];
+    // beautify.34: hex text unified to 15pt secondary gray (was 13pt)
+    hexLabel.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightRegular];
     hexLabel.textColor = [UIColor secondaryLabelColor];
     hexLabel.textAlignment = NSTextAlignmentRight;
     [accessory addSubview:hexLabel];
@@ -618,7 +628,9 @@ static UITableViewCell *axs_ringPage_noteSwitchCell(id self, UITableView *tableV
 
         UILabel *title = [UILabel new];
         title.tag = 211;
-        title.font = [UIFont systemFontOfSize:17];
+        // beautify.34: same 17pt regular / labelColor as switch & slider titles
+        title.font = [UIFont systemFontOfSize:17 weight:UIFontWeightRegular];
+        title.textColor = [UIColor labelColor];
         title.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:title];
 
@@ -649,9 +661,12 @@ static UITableViewCell *axs_ringPage_noteSwitchCell(id self, UITableView *tableV
         ]];
     }
 
+    // beautify.34: clear both text representations before reuse
     UILabel *title = (UILabel *)[cell viewWithTag:211];
+    title.attributedText = nil;
     title.text = axs_ring_page_localized(self, [spec propertyForKey:@"label"]);
     UILabel *note = (UILabel *)[cell viewWithTag:212];
+    note.attributedText = nil;
     note.text = axs_ring_page_localized(self, [spec propertyForKey:@"note"]);
 
     UISwitch *toggle = (UISwitch *)[cell viewWithTag:213];
@@ -752,7 +767,13 @@ static void axs_ringPage_applySliderValue(id self, UISlider *slider, double valu
         CFSTR("com.susudear.screencoreprefs/saved"), NULL, NULL, true);
 
     UILabel *valueLabel = (UILabel *)[(UIView *)slider.superview viewWithTag:105];
-    valueLabel.text = [NSString stringWithFormat:@"%.2f", value];
+    if (valueLabel != nil) {
+        // beautify.34: always exactly two decimals, and clear any stale
+        // attributedText so a "%!f(MISSING)"-style corrupted string can never
+        // survive reuse. Dragging, minus and plus all funnel through here.
+        valueLabel.attributedText = nil;
+        valueLabel.text = [NSString stringWithFormat:@"%.2f", value];
+    }
 }
 
 static void axs_ringPage_sliderChanged_imp(id self, SEL _cmd, UISlider *sender) {
