@@ -486,16 +486,15 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
 
         UILabel *title = [UILabel new];
         title.tag = 101;
-        // beautify.34: match system PSSwitchCell/PSSliderCell titles exactly
-        // (17pt regular, labelColor, vertically centered with the system baseline)
-        title.font = [UIFont systemFontOfSize:17 weight:UIFontWeightRegular];
+        // beautify.35: whole panel unified to 12pt
+        title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         title.textColor = [UIColor labelColor];
         title.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:title];
 
         UIButton *minus = [UIButton buttonWithType:UIButtonTypeSystem];
         minus.tag = 102;
-        minus.titleLabel.font = [UIFont systemFontOfSize:20];
+        minus.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         [minus setTitle:@"−" forState:UIControlStateNormal];
         minus.translatesAutoresizingMaskIntoConstraints = NO;
         [minus addTarget:self action:@selector(axs_ringMinus:) forControlEvents:UIControlEventTouchUpInside];
@@ -509,7 +508,7 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
 
         UIButton *plus = [UIButton buttonWithType:UIButtonTypeSystem];
         plus.tag = 104;
-        plus.titleLabel.font = [UIFont systemFontOfSize:20];
+        plus.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         [plus setTitle:@"+" forState:UIControlStateNormal];
         plus.translatesAutoresizingMaskIntoConstraints = NO;
         [plus addTarget:self action:@selector(axs_ringPlus:) forControlEvents:UIControlEventTouchUpInside];
@@ -517,42 +516,47 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
 
         UILabel *value = [UILabel new];
         value.tag = 105;
-        value.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightRegular];
+        value.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
         value.textColor = [UIColor secondaryLabelColor];
         value.textAlignment = NSTextAlignmentRight;
         value.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:value];
 
         UILayoutGuide *margin = cell.contentView.layoutMarginsGuide;
-        NSLayoutConstraint *titleWidth = [title.widthAnchor constraintLessThanOrEqualToConstant:118];
-        titleWidth.priority = UILayoutPriorityDefaultHigh;
+        // beautify.35: one fixed geometry for EVERY slider row so all track
+        // lengths match (row 44, title 88, buttons 22x22, slider h28, value 44)
         [NSLayoutConstraint activateConstraints:@[
             [title.leadingAnchor constraintEqualToAnchor:margin.leadingAnchor],
+            [title.widthAnchor constraintEqualToConstant:88],
             [title.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            titleWidth,
             [minus.leadingAnchor constraintEqualToAnchor:title.trailingAnchor constant:4],
             [minus.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [minus.widthAnchor constraintEqualToConstant:26],
+            [minus.widthAnchor constraintEqualToConstant:22],
+            [minus.heightAnchor constraintEqualToConstant:22],
             [slider.leadingAnchor constraintEqualToAnchor:minus.trailingAnchor constant:2],
+            [slider.trailingAnchor constraintEqualToAnchor:plus.leadingAnchor constant:-2],
             [slider.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
+            [slider.heightAnchor constraintEqualToConstant:28],
             [plus.leadingAnchor constraintEqualToAnchor:slider.trailingAnchor constant:2],
             [plus.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [plus.widthAnchor constraintEqualToConstant:26],
+            [plus.widthAnchor constraintEqualToConstant:22],
+            [plus.heightAnchor constraintEqualToConstant:22],
             [value.leadingAnchor constraintEqualToAnchor:plus.trailingAnchor constant:4],
             [value.trailingAnchor constraintEqualToAnchor:margin.trailingAnchor],
             [value.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [value.widthAnchor constraintEqualToConstant:50],
+            [value.widthAnchor constraintEqualToConstant:44],
         ]];
     }
 
-    // beautify.34: reset BOTH text representations on reuse so a recycled
-    // slider row can never inherit stale text/attributedText (including the
-    // gray duplicate title a previous layout pass may have set).
+    // beautify.34/35: reset BOTH text representations AND font on reuse so a
+    // recycled slider row can never inherit stale text/attributedText/size.
     UILabel *title = (UILabel *)[cell viewWithTag:101];
     title.attributedText = nil;
+    title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
     title.text = axs_ring_page_localized(self, [spec propertyForKey:@"label"]);
     UILabel *valueLabel = (UILabel *)[cell viewWithTag:105];
     valueLabel.attributedText = nil;
+    valueLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
     double min = [[spec propertyForKey:@"min"] doubleValue];
     double max = [[spec propertyForKey:@"max"] doubleValue];
     if (max <= min) max = min + 1;
@@ -575,10 +579,22 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
     return cell;
 }
 
+// beautify.35: unified 12pt for pass-through system cells (nil-safe; rows we
+// cannot touch are simply left to the system renderer).
+static void axs_ring_page_applyUnifiedFont(UITableViewCell *cell) {
+    if (cell.textLabel != nil) {
+        cell.textLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    }
+    if (cell.detailTextLabel != nil) {
+        cell.detailTextLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    }
+}
+
 // Color row in the base package's own layout: plain row, gray "#RRGGBB"
 // text plus a round swatch on the right; tapping opens the color picker.
 static UITableViewCell *axs_ringPage_colorCell(id self, SEL _cmd, id tableView, id indexPath, PSSpecifier *spec) {
     UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, id, id))axs_ringPage_origCellForRow)(self, _cmd, tableView, indexPath);
+    axs_ring_page_applyUnifiedFont(cell);
     NSString *key = [spec propertyForKey:@"key"];
     NSString *hex = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:key defaultValue:nil];
     NSString *fallback = [spec propertyForKey:@"default"] ?: @"#FFFFFF";
@@ -597,8 +613,8 @@ static UITableViewCell *axs_ringPage_colorCell(id self, SEL _cmd, id tableView, 
     UILabel *hexLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 4, 66, 22)];
     hexLabel.attributedText = nil;
     hexLabel.text = (hex.length > 0) ? hex : fallback;
-    // beautify.34: hex text unified to 15pt secondary gray (was 13pt)
-    hexLabel.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightRegular];
+    // beautify.35: hex text unified to 12pt secondary gray
+    hexLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightRegular];
     hexLabel.textColor = [UIColor secondaryLabelColor];
     hexLabel.textAlignment = NSTextAlignmentRight;
     [accessory addSubview:hexLabel];
@@ -629,14 +645,15 @@ static UITableViewCell *axs_ringPage_noteSwitchCell(id self, UITableView *tableV
         UILabel *title = [UILabel new];
         title.tag = 211;
         // beautify.34: same 17pt regular / labelColor as switch & slider titles
-        title.font = [UIFont systemFontOfSize:17 weight:UIFontWeightRegular];
+        title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         title.textColor = [UIColor labelColor];
         title.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:title];
 
         UILabel *note = [UILabel new];
         note.tag = 212;
-        note.font = [UIFont systemFontOfSize:11];
+        // beautify.35: note text unified to 12pt (was 11pt)
+        note.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
         note.textColor = [UIColor secondaryLabelColor];
         note.numberOfLines = 0;
         note.translatesAutoresizingMaskIntoConstraints = NO;
@@ -661,12 +678,14 @@ static UITableViewCell *axs_ringPage_noteSwitchCell(id self, UITableView *tableV
         ]];
     }
 
-    // beautify.34: clear both text representations before reuse
+    // beautify.34/35: clear both text representations and reset fonts on reuse
     UILabel *title = (UILabel *)[cell viewWithTag:211];
     title.attributedText = nil;
+    title.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
     title.text = axs_ring_page_localized(self, [spec propertyForKey:@"label"]);
     UILabel *note = (UILabel *)[cell viewWithTag:212];
     note.attributedText = nil;
+    note.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
     note.text = axs_ring_page_localized(self, [spec propertyForKey:@"note"]);
 
     UISwitch *toggle = (UISwitch *)[cell viewWithTag:213];
@@ -685,19 +704,24 @@ static void axs_ringPage_switchChanged_imp(id self, SEL _cmd, UISwitch *sender) 
         CFSTR("com.susudear.screencoreprefs/saved"), NULL, NULL, true);
 }
 
-// note rows grow with their inline gray text
+// note rows grow with their inline gray text; slider rows are fixed 44pt
 static CGFloat axs_ringPage_height_imp(id self, SEL _cmd, id tableView, id indexPath) {
     @try {
         PSSpecifier *spec = nil;
         if ([self respondsToSelector:@selector(specifierAtIndexPath:)]) {
             spec = [self specifierAtIndexPath:indexPath];
         }
+        // beautify.35: every PSSliderCell row is exactly 44pt tall so all
+        // slider tracks share the same geometry
+        if ([[spec propertyForKey:@"cell"] isEqualToString:@"PSSliderCell"]) {
+            return 44.0;
+        }
         NSString *note = [spec propertyForKey:@"note"];
         if (note != nil) {
             NSString *text = axs_ring_page_localized(self, note);
             CGRect bounds = [text boundingRectWithSize:CGSizeMake(300, CGFLOAT_MAX)
                                                options:NSStringDrawingUsesLineFragmentOrigin
-                                            attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:11]}
+                                            attributes:@{NSFontAttributeName: [UIFont systemFontOfSize:12 weight:UIFontWeightRegular]}
                                                context:nil];
             return ceil(bounds.size.height) + 30.0;
         }
@@ -724,6 +748,8 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
         }
 
         UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, id, id))axs_ringPage_origCellForRow)(self, _cmd, tableView, indexPath);
+        // beautify.35: unify pass-through system rows to 12pt (nil-safe)
+        axs_ring_page_applyUnifiedFont(cell);
 
         if ([key isEqualToString:AxsHoldLaunchKeyExclude]) {
             NSString *subtitle = axs_ringPage_subtitle_imp(self, _cmd, spec);
