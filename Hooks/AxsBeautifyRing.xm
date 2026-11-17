@@ -56,6 +56,20 @@ static void axs_ring_log(NSString *format, ...) {
     }
 }
 
+// beautify.33：异常诊断日志（只写日志，绝不 rethrow，绝不中断主队列）。
+// 捕获时记录 exception.name/reason、调用栈、以及涉及的 driver/container/layer 类名。
+static void axs_ring_logException(NSString *where, NSException *ex, id obj) {
+    @try {
+        NSString *cls = obj ? NSStringFromClass([obj class]) : @"nil";
+        NSArray *syms = [ex callStackSymbols];
+        NSString *top = syms.count > 0 ? [[syms subarrayWithRange:NSMakeRange(0, MIN(4, syms.count))] componentsJoinedByString:@" | "] : @"(no symbols)";
+        axs_ring_log(@"EXC %@ name=%@ reason=%@ objClass=%@ stack=%@",
+                     where, ex.name ?: @"?", ex.reason ?: @"?", cls, top);
+    } @catch (NSException *ignored) {
+        // 日志本身出错也必须吞掉
+    }
+}
+
 // --- config (com.susudear.screencoreprefs, live via cfprefsd snapshot) ------
 
 static double axs_ring_clamp(double v, double lo, double hi) {
@@ -942,35 +956,75 @@ static AXSRingHealthTarget *axs_ring_healthTarget = nil;
 // 偏好变更后刷新已有存活环的颜色（TXT beautify.26 三.4）：重建渐变层
 // （自定义单色 ↔ 彩虹跑马灯互切），挂载/几何/圆角结构不动，环不断
 static void axs_ring_refreshAppearance(void) {
+    if (![axs_ring_drivers isKindOfClass:[NSDictionary class]]) return;
+
+    // 先在锁外取一份 key 快照：fast-enumeration 一个 NSDictionary 得到的是 KEY
+    // （NSString），不是 VALUE。beautify.33 崩溃根因正是此处误把 key 当 driver，
+    // 对 NSString 发 -ring/-gradient → unrecognized selector → ___forwarding___。
+    NSArray *keys = [axs_ring_drivers.allKeys copy];
+    if (![keys isKindOfClass:[NSArray class]]) return;
+
     BOOL glowOn = axs_ring_glowEnabled();
     double glowRange = glowOn ? axs_ring_glowRange() : 0.0;
     double glowBright = axs_ring_glowBrightness();
     UIColor *glowColor = axs_ring_glowColor();
     BOOL ringOn = axs_ring_enabled();
-    for (AXSRingLinkDriver *d in axs_ring_drivers) {
-        if (d.ring == nil) continue;
-        d.ring.hidden = !ringOn;             // 光圈开关独立生效
-        CAGradientLayer *old = d.gradient;
-        CAGradientLayer *g = axs_ring_makeGradient(axs_ring_customColor(), axs_ring_color());
-        g.frame = (old != nil) ? old.frame : d.ring.bounds;
-        [d.ring insertSublayer:g atIndex:0];
-        [old removeFromSuperlayer];          // 旧层连同旧动画一起移除
-        d.gradient = g;
 
-        // beautify.31/32：任一相关开关/颜色/亮度变化都即时刷新光晕颜色与显隐；
-        // 可见性看 glowEnabled + 范围 + 亮度(>0)，自定义开关仅切换颜色来源。
-        // 几何/半径/opacity 由下一帧 syncDriver 按同一 presentation 矩形补齐，不摘层。
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        BOOL showGlow = glowOn && glowRange > 0.5 && glowBright > 0.5;
-        d.glowInner.hidden = !showGlow;
-        d.glowOuter.hidden = !showGlow;
-        CGFloat fillAlpha = 0.01 * (CGFloat)(glowBright / 100.0);
-        d.glowInner.fillColor = [glowColor colorWithAlphaComponent:fillAlpha].CGColor;
-        d.glowInner.shadowColor = glowColor.CGColor;
-        d.glowOuter.fillColor = [glowColor colorWithAlphaComponent:fillAlpha].CGColor;
-        d.glowOuter.shadowColor = glowColor.CGColor;
-        [CATransaction commit];
+    for (id key in keys) {
+        @autoreleasepool {
+            AXSRingLinkDriver *d = nil;
+            @try {
+                if (![key isKindOfClass:[NSString class]]) continue;
+                id candidate = axs_ring_drivers[key];
+                if (![candidate isKindOfClass:[AXSRingLinkDriver class]]) {
+                    axs_ring_log(@"refresh skip non-driver key=%@ class=%@",
+                                 key, NSStringFromClass([candidate class]));
+                    continue;                       // 类型不符：只跳过，不影响主队列
+                }
+                d = (AXSRingLinkDriver *)candidate;
+                CALayer *ring = d.ring;             // 弱引用先取局部并判空
+                if (![ring isKindOfClass:[CALayer class]]) continue;
+
+                ring.hidden = !ringOn;              // 光圈开关独立生效
+
+                // 先 retain 新层，再移除旧层，避免中间空引用
+                CAGradientLayer *old = d.gradient;
+                CAGradientLayer *g = axs_ring_makeGradient(axs_ring_customColor(), axs_ring_color());
+                if (![g isKindOfClass:[CAGradientLayer class]]) { g = old; }
+                g.frame = (old != nil) ? old.frame : ring.bounds;
+                g.zPosition = 0;
+                [ring insertSublayer:g atIndex:0];
+                if ([old isKindOfClass:[CALayer class]] && old != g) {
+                    [old removeFromSuperlayer];
+                }
+                d.gradient = g;
+
+                // beautify.31/32：即时刷新光晕颜色与显隐；几何/半径/opacity 由
+                // 下一帧 syncDriver 按同一 presentation 矩形补齐，不摘层、不停 link。
+                CAShapeLayer *gi = d.glowInner;
+                CAShapeLayer *go = d.glowOuter;
+                BOOL showGlow = glowOn && glowRange > 0.5 && glowBright > 0.5;
+                [CATransaction begin];
+                [CATransaction setDisableActions:YES];
+                if ([gi isKindOfClass:[CAShapeLayer class]]) {
+                    gi.hidden = !showGlow;
+                    CGFloat fa = 0.01 * (CGFloat)(glowBright / 100.0);
+                    gi.fillColor = [glowColor colorWithAlphaComponent:fa].CGColor;
+                    gi.shadowColor = glowColor.CGColor;
+                }
+                if ([go isKindOfClass:[CAShapeLayer class]]) {
+                    go.hidden = !showGlow;
+                    CGFloat fa = 0.01 * (CGFloat)(glowBright / 100.0);
+                    go.fillColor = [glowColor colorWithAlphaComponent:fa].CGColor;
+                    go.shadowColor = glowColor.CGColor;
+                }
+                [CATransaction commit];
+            } @catch (NSException *exception) {
+                // 只跳过当前 driver 的本次刷新，不 rethrow、不中断 SpringBoard 主队列；
+                // 保留现有光圈/光晕层与 displayLink 原样。
+                axs_ring_logException(@"refreshAppearance driver", exception, d ?: key);
+            }
+        }
     }
 }
 
@@ -980,9 +1034,18 @@ static void axs_ring_refreshAppearance(void) {
 static void axs_ring_prefsChanged(CFNotificationCenterRef center, void *observer,
                                   CFStringRef name, const void *object, CFDictionaryRef info) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_reload];
-        axs_ring_scanTick();
-        axs_ring_refreshAppearance();
+        // beautify.33：整个主队列 block 加异常保护。连续拖动滑条会高频触发本回调，
+        // 任一步异常都只记录并吞掉，绝不 rethrow 到 SpringBoard 主队列。
+        @try {
+            AxsHoldLaunchConfig *cfg = [AxsHoldLaunchConfig axs_holdlaunch_shared];
+            if ([cfg respondsToSelector:@selector(axs_holdlaunch_reload)]) {
+                [cfg axs_holdlaunch_reload];
+            }
+            axs_ring_scanTick();
+            axs_ring_refreshAppearance();
+        } @catch (NSException *exception) {
+            axs_ring_logException(@"prefsChanged main", exception, nil);
+        }
     });
 }
 
