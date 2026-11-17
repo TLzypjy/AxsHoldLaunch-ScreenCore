@@ -1,10 +1,10 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.35
+版本：2.0.5+beautify.36
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
      packaging/package_beautify.sh、基线 deb（packaging/base/）、GitHub Actions 工作流。
 
 打包日期：2026-11-17
-构建产物：com.susudear.screencore_2.0.5+beautify.35_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.36_iphoneos-arm64.deb（CI 交付）

@@ -178,6 +178,11 @@ static void axs_holdlaunch_installSpringBoardHooks(void) {
 // ---------------------------------------------------------------------------
 
 static NSString * const AxsHoldLaunchKeyThreshold = @"HoldPressThreshold";
+// beautify.36: UI-positive wrapper for the negative-semantic key below.
+// Panel label reads "fullscreen-floating animation"; ON = animation ON =
+// underlying disabled=NO, OFF = animation OFF = disabled=YES. Read/write are
+// inverted at the PSListController hook so the panel never lies about effect.
+static NSString * const AxsHoldLaunchKeyFullscreenAnimInvert = @"splitFullscreenToFloatingAnimationDisabled";
 
 static IMP axs_origReadPrefValue = NULL;
 static IMP axs_origSetPrefValue = NULL;
@@ -222,6 +227,11 @@ static id axs_readPreferenceValue_imp(id self, SEL _cmd, id specifier) {
     if ([key isEqualToString:AxsHoldLaunchKeyThreshold] && [value isKindOfClass:[NSNumber class]]) {
         return @(axs_holdlaunch_quantizeThreshold([value doubleValue]));
     }
+    // beautify.36: invert the negative-semantic key for the panel:
+    // disabled=NO (animation on) must display as ON.
+    if ([key isEqualToString:AxsHoldLaunchKeyFullscreenAnimInvert] && [value isKindOfClass:[NSNumber class]]) {
+        return @(!([value boolValue]));
+    }
     return value;
 }
 
@@ -229,6 +239,10 @@ static void axs_setPreferenceValue_imp(id self, SEL _cmd, id value, id specifier
     NSString *key = [specifier propertyForKey:@"key"];
     if ([key isEqualToString:AxsHoldLaunchKeyThreshold] && [value isKindOfClass:[NSNumber class]]) {
         value = @(axs_holdlaunch_quantizeThreshold([value doubleValue]));
+    }
+    // beautify.36: panel ON writes disabled=NO, panel OFF writes disabled=YES.
+    if ([key isEqualToString:AxsHoldLaunchKeyFullscreenAnimInvert] && [value isKindOfClass:[NSNumber class]]) {
+        value = @(!([value boolValue]));
     }
     ((void(*)(id, SEL, id, id))axs_origSetPrefValue)(self, _cmd, value, specifier);
 }
@@ -492,13 +506,21 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
         title.translatesAutoresizingMaskIntoConstraints = NO;
         [cell.contentView addSubview:title];
 
-        UIButton *minus = [UIButton buttonWithType:UIButtonTypeSystem];
+        // beautify.36: 30x30 touch hot zone with a centered 22x22 visual glyph
+        UIButton *minus = [UIButton buttonWithType:UIButtonTypeCustom];
         minus.tag = 102;
-        minus.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-        [minus setTitle:@"−" forState:UIControlStateNormal];
         minus.translatesAutoresizingMaskIntoConstraints = NO;
         [minus addTarget:self action:@selector(axs_ringMinus:) forControlEvents:UIControlEventTouchUpInside];
         [cell.contentView addSubview:minus];
+
+        UILabel *minusGlyph = [UILabel new];
+        minusGlyph.tag = 122;
+        minusGlyph.text = @"−";
+        minusGlyph.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+        minusGlyph.textColor = [UIColor labelColor];
+        minusGlyph.textAlignment = NSTextAlignmentCenter;
+        minusGlyph.translatesAutoresizingMaskIntoConstraints = NO;
+        [minus addSubview:minusGlyph];
 
         UISlider *slider = [UISlider new];
         slider.tag = 103;
@@ -506,13 +528,20 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
         [slider addTarget:self action:@selector(axs_ringSliderChanged:) forControlEvents:UIControlEventValueChanged];
         [cell.contentView addSubview:slider];
 
-        UIButton *plus = [UIButton buttonWithType:UIButtonTypeSystem];
+        UIButton *plus = [UIButton buttonWithType:UIButtonTypeCustom];
         plus.tag = 104;
-        plus.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
-        [plus setTitle:@"+" forState:UIControlStateNormal];
         plus.translatesAutoresizingMaskIntoConstraints = NO;
         [plus addTarget:self action:@selector(axs_ringPlus:) forControlEvents:UIControlEventTouchUpInside];
         [cell.contentView addSubview:plus];
+
+        UILabel *plusGlyph = [UILabel new];
+        plusGlyph.tag = 124;
+        plusGlyph.text = @"+";
+        plusGlyph.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+        plusGlyph.textColor = [UIColor labelColor];
+        plusGlyph.textAlignment = NSTextAlignmentCenter;
+        plusGlyph.translatesAutoresizingMaskIntoConstraints = NO;
+        [plus addSubview:plusGlyph];
 
         UILabel *value = [UILabel new];
         value.tag = 105;
@@ -523,24 +552,33 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
         [cell.contentView addSubview:value];
 
         UILayoutGuide *margin = cell.contentView.layoutMarginsGuide;
-        // beautify.35: one fixed geometry for EVERY slider row so all track
-        // lengths match (row 44, title 88, buttons 22x22, slider h28, value 44)
+        // beautify.36: one fixed geometry for EVERY slider row so all track
+        // lengths match (row 44, title 92, buttons 30x30 hot zone with 22x22
+        // glyph, slider h28, value 44)
         [NSLayoutConstraint activateConstraints:@[
             [title.leadingAnchor constraintEqualToAnchor:margin.leadingAnchor],
-            [title.widthAnchor constraintEqualToConstant:88],
+            [title.widthAnchor constraintEqualToConstant:92],
             [title.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             [minus.leadingAnchor constraintEqualToAnchor:title.trailingAnchor constant:4],
             [minus.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [minus.widthAnchor constraintEqualToConstant:22],
-            [minus.heightAnchor constraintEqualToConstant:22],
+            [minus.widthAnchor constraintEqualToConstant:30],
+            [minus.heightAnchor constraintEqualToConstant:30],
+            [minusGlyph.centerXAnchor constraintEqualToAnchor:minus.centerXAnchor],
+            [minusGlyph.centerYAnchor constraintEqualToAnchor:minus.centerYAnchor],
+            [minusGlyph.widthAnchor constraintEqualToConstant:22],
+            [minusGlyph.heightAnchor constraintEqualToConstant:22],
             [slider.leadingAnchor constraintEqualToAnchor:minus.trailingAnchor constant:2],
             [slider.trailingAnchor constraintEqualToAnchor:plus.leadingAnchor constant:-2],
             [slider.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             [slider.heightAnchor constraintEqualToConstant:28],
             [plus.leadingAnchor constraintEqualToAnchor:slider.trailingAnchor constant:2],
             [plus.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [plus.widthAnchor constraintEqualToConstant:22],
-            [plus.heightAnchor constraintEqualToConstant:22],
+            [plus.widthAnchor constraintEqualToConstant:30],
+            [plus.heightAnchor constraintEqualToConstant:30],
+            [plusGlyph.centerXAnchor constraintEqualToAnchor:plus.centerXAnchor],
+            [plusGlyph.centerYAnchor constraintEqualToAnchor:plus.centerYAnchor],
+            [plusGlyph.widthAnchor constraintEqualToConstant:22],
+            [plusGlyph.heightAnchor constraintEqualToConstant:22],
             [value.leadingAnchor constraintEqualToAnchor:plus.trailingAnchor constant:4],
             [value.trailingAnchor constraintEqualToAnchor:margin.trailingAnchor],
             [value.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
