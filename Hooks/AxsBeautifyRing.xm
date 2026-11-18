@@ -538,10 +538,9 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 @property (nonatomic, assign) double lastGlowRange;     // 上帧光晕范围（0=未显示）
 @property (nonatomic, assign) double lastGlowBrightness;// 上帧光晕亮度（0–100）
 @property (nonatomic, assign) BOOL lastGlowEnabled;
-@property (nonatomic, assign) BOOL lastDocked;          // beautify.41：上帧侧贴/居中分类，变化才写日志
-@property (nonatomic, assign) BOOL needsSync;           // beautify.42：待同步标记（事件唤醒入口置位）
-@property (nonatomic, assign) BOOL wasAnimating;        // beautify.42：上帧在动画中（结束时补一次 model 同步）
-@property (nonatomic, assign) CGRect lastContFrame;     // beautify.42：上帧容器 model frame（扫描兜底比对）
+@property (nonatomic, assign) BOOL lastIsDocked;        // beautify.43：上帧侧贴/居中分类（每帧重算，记录不门控）
+@property (nonatomic, assign) BOOL lastRingAllowed;     // beautify.43：上帧光圈可见性（记录不门控）
+@property (nonatomic, assign) BOOL lastGlowAllowed;     // beautify.43：上帧光晕可见性（记录不门控）
 @property (nonatomic, assign) CGRect lastPathBounds;    // beautify.42：上帧描边路径矩形（未变不重建 CGPath）
 @property (nonatomic, assign) double lastPathRadius;    // beautify.42：上帧描边路径圆角
 @property (nonatomic, assign) CGFloat lastGradientDiag; // beautify.42：上帧渐变层对角线（未变不更新 frame）
@@ -558,36 +557,13 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 @end
 
 @implementation AXSRingLinkDriver
-// beautify.42：静止暂停——动画中每帧跟 presentation；动画刚结束补一次
-// model 同步（wasAnimating），静止一拍即暂停本 driver 的 displayLink。
-// 恢复入口：attach、layoutSubviews 钩子、窗口 key/可见性通知、偏好 saved、
-// 回窗、侧贴/居中分类变化（见各事件点）；暂停后不再读 presentationLayer、
-// 不再 convertRect、不再做任何层级查找。
+// beautify.43：恢复 .41 的 displayLink 刷新时机——driver 存活期间每帧同步，
+// 不因“静止”暂停、不早退。大窗贴边变小窗时 docked/allowed 必须在同一帧
+// 重新计算并提交 hidden/alpha；.42 的静止暂停与待同步门控正是贴边后
+// 边框/光晕残留 0.2–0.3s 的回归根因，本版整体回退（指令 三.1/三.2）。
 - (void)tick {
     @try {
-        UIView *c = self.container;
-        if (c == nil || c.window == nil || self.ring == nil || self.link == nil) return;
-
-        CALayer *src = self.realLayer ?: c.layer;
-        BOOL animating = ([src animationForKey:@"bounds"] != nil
-                          || [src animationForKey:@"position"] != nil);
-        if (animating) {
-            self.wasAnimating = YES;
-            self.needsSync = NO;
-            axs_ring_syncDriver(self);       // 动画跟帧（presentation 优先）
-            return;
-        }
-        if (self.wasAnimating) {
-            // 动画刚结束：补一次 model 值同步，确保静止态与最终模型一致
-            self.wasAnimating = NO;
-            self.needsSync = YES;
-        }
-        if (!self.needsSync) {
-            self.link.paused = YES;          // 静止：暂停本 driver 的 displayLink
-            return;
-        }
-        self.needsSync = NO;
-        axs_ring_syncDriver(self);           // 恢复后先同步一拍再评估是否静止
+        axs_ring_syncDriver(self);
     } @catch (NSException *exception) {
         axs_ring_log(@"ring tick exception: %@", exception);
     }
@@ -725,17 +701,7 @@ static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
 
 static NSMutableDictionary<NSString *, AXSRingLinkDriver *> *axs_ring_drivers = nil;
 
-// beautify.42：恢复全部在册 driver 的 displayLink（窗口通知/偏好 saved 等
-// 事件唤醒入口共用）；恢复后 tick 先同步一拍再评估是否重新静止
-static void axs_ring_resumeAllLinks(void) {
-    for (AXSRingLinkDriver *dd in [axs_ring_drivers.allValues copy]) {
-        if (![dd isKindOfClass:[AXSRingLinkDriver class]] || dd.link == nil) continue;
-        dd.needsSync = YES;
-        if (dd.link.paused) dd.link.paused = NO;
-    }
-}
-
-// beautify.42：扫描去重——同一轮多条通知（窗口可见性/saved 连发）只排一次
+// beautify.43：扫描去重——同一轮多条通知（窗口可见性/saved 连发）只排一次
 // 主队列 scanTick，避免重复 dispatch（指令 六.3）
 static BOOL axs_ring_scanQueued = NO;
 static void axs_ring_queueScan(void) {
@@ -745,6 +711,16 @@ static void axs_ring_queueScan(void) {
         axs_ring_scanQueued = NO;
         axs_ring_scanTick();
     });
+}
+
+// beautify.43：窗口通知/偏好 saved 回调内，对所有在册 driver 立即按当前
+// docked/allowed 重算并同步提交可见性（指令 三.5/六.2）。displayLink 每帧
+// 也做同样提交，这里只是事件到达时的即时补一拍，不引入任何延迟或状态缓存。
+static void axs_ring_syncAllDriversNow(void) {
+    for (AXSRingLinkDriver *dd in [axs_ring_drivers.allValues copy]) {
+        if (![dd isKindOfClass:[AXSRingLinkDriver class]]) continue;
+        axs_ring_syncDriver(dd);
+    }
 }
 
 // 容器子树里找 interaction overlay（一层即中，找不到再进一层）
@@ -889,26 +865,56 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
     if (container == nil || driver.ring == nil) return;
     if (container.window == nil) return; // 离层：等扫描/布局钩子 detach
 
-    // beautify.41：每帧重判侧贴/居中（指令 二），装饰层可见性无条件应用——
-    // 拖动贴边/脱离侧边/切换 master 立即生效；分类变化才写日志
+    // beautify.43：每帧先算 docked 与 ringAllowed/glowAllowed 并同步提交可见性，
+    // 先于一切几何 changed 判断、独立执行（指令 三.3/三.4、六.2/六.5）。
+    // 状态变化视为 changed 项（visChanged 参与下方 changed 判断），但绝不以
+    // lastBounds/lastRadius/lastLineWidth 未变跳过 hidden/alpha 提交。
     BOOL docked = axs_ring_containerIsDocked(container);
-    if (docked != driver.lastDocked) {
-        driver.lastDocked = docked;
+    BOOL ringAllowed = axs_ring_ringAllowedFor(docked);
+    BOOL glowAllowed = axs_ring_glowAllowedFor(docked);
+    BOOL visChanged = (docked != driver.lastIsDocked)
+                   || (ringAllowed != driver.lastRingAllowed)
+                   || (glowAllowed != driver.lastGlowAllowed);
+    if (visChanged) {
         UIWindow *w = container.window;
         CGFloat sw = (w != nil) ? w.bounds.size.width : 0;
         CGFloat wRatio = (sw > 0) ? container.bounds.size.width / sw : 0;
         axs_ring_log(@"decor classify: container=%p frame=%@ wRatio=%.2f docked=%d master=%d ringAllowed=%d glowAllowed=%d",
                      container, NSStringFromCGRect(container.bounds), wRatio,
                      docked ? 1 : 0, axs_ring_decorEnabled() ? 1 : 0,
-                     axs_ring_ringAllowedFor(docked) ? 1 : 0,
-                     axs_ring_glowAllowedFor(docked) ? 1 : 0);
+                     ringAllowed ? 1 : 0, glowAllowed ? 1 : 0);
     }
-    driver.ring.hidden = !axs_ring_ringAllowedFor(docked);
-    driver.lastContFrame = container.layer.frame;    // beautify.42：扫描兜底比对用
-    if (!axs_ring_glowAllowedFor(docked)) {
-        if (driver.glowInner != nil) driver.glowInner.hidden = YES;
-        if (driver.glowOuter != nil) driver.glowOuter.hidden = YES;
+    // CATransaction 关隐式动画：隐藏 hidden=YES + alpha=0，恢复 hidden=NO + alpha=1，
+    // 同一帧同步生效、无 fade 残留；只操作插件自建装饰层（ring/gradient/shape/glow），
+    // 绝不触碰原始容器、宿主 root view/window 或应用内容（指令 三.6/六.6）。
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    driver.ring.hidden = !ringAllowed;
+    driver.ring.opacity = ringAllowed ? 1.0 : 0.0;
+    if (driver.gradient != nil) {
+        driver.gradient.hidden = !ringAllowed;
+        driver.gradient.opacity = ringAllowed ? 1.0 : 0.0;
     }
+    if (driver.shape != nil) {
+        driver.shape.hidden = !ringAllowed;
+        driver.shape.opacity = ringAllowed ? 1.0 : 0.0;
+    }
+    // beautify.43：glow 的 hidden/alpha 在此双向显式提交，完全脱离光晕几何
+    // 缓存（.42 的 geomChanged 早退曾使隐藏后 hidden=NO 无法恢复）。applyGlow
+    // 仍会按 range/brightness 做二次拦截，两者一致；glowAllowed=NO（含 master
+    // OFF 的侧贴小窗）强制隐藏，恢复时同帧设回（指令 三.6/六.3/六.4）
+    if (driver.glowInner != nil) {
+        driver.glowInner.hidden = !glowAllowed;
+        driver.glowInner.opacity = glowAllowed ? 1.0 : 0.0;
+    }
+    if (driver.glowOuter != nil) {
+        driver.glowOuter.hidden = !glowAllowed;
+        driver.glowOuter.opacity = glowAllowed ? 1.0 : 0.0;
+    }
+    [CATransaction commit];
+    driver.lastIsDocked = docked;
+    driver.lastRingAllowed = ringAllowed;
+    driver.lastGlowAllowed = glowAllowed;
     @try {
         double lineWidth = axs_ring_thickness();
         if (lineWidth < 0.5) lineWidth = 0.5;
@@ -1012,13 +1018,17 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
         if (glowOn && axs_ring_glowFollowsRainbow()) {
             axs_ring_updateGlowColor(driver);
         }
-        BOOL changed = !CGRectEqualToRect(bounds, driver.lastBounds)
+        // beautify.43：visChanged（docked/allowed 状态变化）本身即 changed 项，
+        // 不能被 lastBounds/lastRadius/lastLineWidth 未变跳过；可见性提交已在
+        // 上方无条件完成，这里只决定是否重建几何（指令 六.5）。
+        BOOL changed = visChanged
+                    || !CGRectEqualToRect(bounds, driver.lastBounds)
                     || fabs(driver.lastRadius - radius) > 0.05
                     || driver.lastLineWidth != (CGFloat)lineWidth
                     || driver.lastGlowEnabled != glowOn
                     || fabs(driver.lastGlowRange - glowRange) > 0.5
                     || fabs(driver.lastGlowBrightness - glowBright) > 0.5;  // beauty.32 亮度
-        if (!changed) return; // 静止状态：bounds/圆角/光晕未变就跳过本帧刷新
+        if (!changed) return; // 静止：几何/光晕未变只跳过几何重建（可见性已在上方提交）
 
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
@@ -1143,7 +1153,7 @@ static void axs_ring_attachContainer(UIView *container) {
 
     driver.link = [CADisplayLink displayLinkWithTarget:driver selector:@selector(tick)];
     [driver.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
-    driver.needsSync = YES;                  // beautify.42：首次 attach 即需同步
+    // beautify.43：link 常驻不暂停，首帧同步由下方 axs_ring_syncDriver 完成
     axs_ring_drivers[key] = driver;
 
     // 全树一次性探针（进程内仅首次 attach）：定位真实圆角来源
@@ -1237,23 +1247,9 @@ static void axs_ring_scanTick(void) {
             axs_ring_detachDriver(key);
         }
 
-        // beautify.42：0.5s 扫描对在册 driver 只做轻量唤醒——不查层级、
-        // 不重建装饰层；仅当侧贴/居中分类变化、有模型 frame 变化（兜底：
-        // 未走布局钩子的移动动画）或有待同步时恢复 displayLink
-        for (NSString *key in [axs_ring_drivers.allKeys copy]) {
-            AXSRingLinkDriver *dd = axs_ring_drivers[key];
-            if (![dd isKindOfClass:[AXSRingLinkDriver class]] || dd.link == nil) continue;
-            BOOL docked = axs_ring_containerIsDocked(dd.container);
-            if (docked != dd.lastDocked) {
-                dd.lastDocked = docked;
-                dd.needsSync = YES;
-            }
-            if (dd.link.paused && dd.container != nil
-                && !CGRectEqualToRect(dd.container.layer.frame, dd.lastContFrame)) {
-                dd.needsSync = YES;
-            }
-            if (dd.needsSync && dd.link.paused) dd.link.paused = NO;
-        }
+        // beautify.43：定时器只做新旧容器 attach/detach 对比（指令 四.5）；
+        // docked/allowed 状态与 hidden/alpha 提交由每个 driver 的 displayLink
+        // 每帧同步完成，不依赖 0.5s 扫描，杜绝贴边后迟到的边框/光晕。
 
         if (!axs_ring_enabled()) {
             // TXT 二.6：开关关闭 → 全部摘除，完全无副作用
@@ -1292,9 +1288,8 @@ static void axs_ring_hook_layoutSubviews(id self, SEL _cmd) {
         } else {
             // 手势改 bounds 触发的布局：模型即最新值，环与卡片同 commit 生效，
             // 右/下边（origin+size）不再滞后一帧（TXT beautify.22 三.3）
-            // beautify.42：布局变化唤醒（可能处于静止暂停态）
-            d.needsSync = YES;
-            if (d.link != nil && d.link.paused) d.link.paused = NO;
+            // beautify.43：布局回调内直接重算 docked/allowed 并同步提交可见性，
+            // 不等 displayLink 下一帧、不依赖唤醒（指令 三.5）
             axs_ring_syncDriver2(d, YES);
         }
     } @catch (NSException *exception) {
@@ -1330,10 +1325,10 @@ static void axs_ring_installLayoutHook(void) {
 @implementation AXSRingHealthTarget
 - (void)axsRingTick { axs_ring_scanTick(); }
 - (void)axsRingWindowNote:(NSNotification *)note {
-    // beautify.42：窗口 key/可见性变化唤醒全部 driver（回窗/离层场景），
-    // 扫描去重——同一轮多条通知只排一次 scanTick（指令 六.3）
+    // beautify.43：窗口 key/可见性变化——当前回调内同步提交各 driver 可见性
+    // （回窗/贴边即时生效），并做去重扫描处理新旧容器 attach/detach（指令 三.5/四.5）
     dispatch_async(dispatch_get_main_queue(), ^{
-        axs_ring_resumeAllLinks();
+        axs_ring_syncAllDriversNow();
         axs_ring_queueScan();
     });
 }
@@ -1436,10 +1431,11 @@ static void axs_ring_prefsChanged(CFNotificationCenterRef center, void *observer
             if ([cfg respondsToSelector:@selector(axs_holdlaunch_reload)]) {
                 [cfg axs_holdlaunch_reload];
             }
-            // beautify.42：偏好快照随 saved 通知刷新（此后每帧 tick 零配置读取），
-            // 并唤醒全部 driver 重新评估可见性；扫描去重（同一轮连发只排一次）
+            // beautify.43：偏好快照随 saved 通知刷新（安全优化，保留），并在
+            // 当前回调内同步提交各 driver 可见性（总开关/子开关即时生效），
+            // 刷新颜色 + 去重扫描（指令 四.4/六.2）
             axs_ring_refreshConfigSnapshot();
-            axs_ring_resumeAllLinks();
+            axs_ring_syncAllDriversNow();
             axs_ring_refreshAppearance();
             axs_ring_queueScan();
         } @catch (NSException *exception) {
