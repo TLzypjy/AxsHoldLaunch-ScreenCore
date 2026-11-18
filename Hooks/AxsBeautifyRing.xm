@@ -91,43 +91,40 @@ static BOOL axs_ring_decorEnabled(void);
 // 绝不能进入本函数，否则会经 scanTick 的 detach-all 分支与 attach 守卫
 // 泄漏进容器扫描/挂载/摘除路径，误伤浮窗本体（.39 真机回归根因）。
 // 总闸只在装饰层可见性判断处与子开关做与运算（见 attach/applyGlow/refresh）。
+// beautify.42：偏好快照前置声明（定义在 parseHex 之后）
+static void axs_ring_refreshConfigSnapshot(void);
+
 static BOOL axs_ring_enabled(void) {
-    // 面板默认 YES：域里还没写入时按面板默认走，不能按 NO 静默关闭
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameEnabled" defaultValue:@YES];
-    return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : YES;
+    // beautify.42：读快照，每帧 tick 零配置读取；saved 通知/挂载时刷新
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_ringOn;
 }
 
 // beautify.39：美化总开关（小窗边框美化）。beautify.40 起只用于装饰层可见性：
 // 缺省 YES（旧用户该 key 不存在时保持现有显示效果）；NSNumber 按布尔解析，
 // NSString 兼容 "0"/"no"/"false"/"off" 等写法，其余类型回退默认。
 static BOOL axs_ring_decorEnabled(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyDecorEnabled" defaultValue:@YES];
-    if ([v isKindOfClass:[NSNumber class]]) return [v boolValue];
-    if ([v isKindOfClass:[NSString class]]) {
-        NSString *s = [(NSString *)v lowercaseString];
-        return !(s.length > 0
-                 && ([s isEqualToString:@"0"] || [s isEqualToString:@"no"]
-                     || [s isEqualToString:@"false"] || [s isEqualToString:@"off"]));
-    }
-    return YES;
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_decor;
 }
 
 static double axs_ring_thickness(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyRingThickness" defaultValue:@5.0];
-    double t = [v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 5.0;
-    return axs_ring_clamp(t, 0.5, 30.0);
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_thickness;
 }
 
 static BOOL axs_ring_customColor(void) {
-    // 面板开关默认 YES（plist），渲染侧同默认闭环：未写入时按单色走
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyRingCustomColorEnabled" defaultValue:@YES];
-    return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : YES;
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_ringCustom;
 }
 
 static double axs_ring_configRadius(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitWindowCornerRadius" defaultValue:@8.0];
-    double r = [v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 8.0;
-    return axs_ring_clamp(r, 0.0, 60.0);
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_configRadius;
 }
 
 static UIColor *axs_ring_parseHex(NSString *hex, UIColor *fallback) {
@@ -147,18 +144,87 @@ static UIColor *axs_ring_parseHex(NSString *hex, UIColor *fallback) {
     return fallback;
 }
 
+// --- beautify.42：偏好快照（saved 通知/挂载时刷新一次，每帧 tick 零配置读取、
+// 零字符串解析；颜色只在快照刷新时 parseHex 一次） ------------------------------
+static BOOL   axs_snap_loaded = NO;
+static BOOL   axs_snap_decor = YES;
+static BOOL   axs_snap_ringOn = YES;
+static BOOL   axs_snap_glowOn = NO;
+static BOOL   axs_snap_ringCustom = YES;
+static BOOL   axs_snap_glowCustom = NO;
+static double axs_snap_thickness = 5.0;
+static double axs_snap_glowRadius = 116.0;
+static double axs_snap_glowBrightness = 100.0;
+static double axs_snap_configRadius = 8.0;
+static UIColor *axs_snap_ringColor = nil;       // 解析后的光圈颜色
+static UIColor *axs_snap_glowColorBase = nil;   // 解析+alpha 补偿后的自定义光晕色
+
+static void axs_ring_refreshConfigSnapshot(void) {
+    @try {
+        AxsHoldLaunchConfig *cfg = [AxsHoldLaunchConfig axs_holdlaunch_shared];
+        if (![cfg respondsToSelector:@selector(axs_holdlaunch_theirValueForKey:defaultValue:)]) return;
+        id v;
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyDecorEnabled" defaultValue:@YES];
+        if ([v isKindOfClass:[NSNumber class]]) axs_snap_decor = [v boolValue];
+        else if ([v isKindOfClass:[NSString class]]) {
+            NSString *s = [(NSString *)v lowercaseString];
+            axs_snap_decor = !(s.length > 0
+                               && ([s isEqualToString:@"0"] || [s isEqualToString:@"no"]
+                                   || [s isEqualToString:@"false"] || [s isEqualToString:@"off"]));
+        } else axs_snap_decor = YES;
+
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameEnabled" defaultValue:@YES];
+        axs_snap_ringOn = [v isKindOfClass:[NSNumber class]] ? [v boolValue] : YES;
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowEnabled" defaultValue:@NO];
+        axs_snap_glowOn = [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyRingCustomColorEnabled" defaultValue:@YES];
+        axs_snap_ringCustom = [v isKindOfClass:[NSNumber class]] ? [v boolValue] : YES;
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowCustomEnabled" defaultValue:@NO];
+        axs_snap_glowCustom = [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
+
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyRingThickness" defaultValue:@5.0];
+        axs_snap_thickness = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 5.0, 0.5, 30.0);
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowRadius" defaultValue:@116.0];
+        axs_snap_glowRadius = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 116.0, 0.0, 200.0);
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowBrightness" defaultValue:@100.0];
+        axs_snap_glowBrightness = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 100.0, 0.0, 100.0);
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitWindowCornerRadius" defaultValue:@8.0];
+        axs_snap_configRadius = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 8.0, 0.0, 60.0);
+
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameColor" defaultValue:@"#93E3FD"];
+        axs_snap_ringColor = axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil,
+                                               [UIColor colorWithRed:0.576 green:0.890 blue:0.992 alpha:1.0]);
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowColor" defaultValue:@"#FFFFFF"];
+        UIColor *gc = axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil, [UIColor whiteColor]);
+        CGFloat r = 0, g = 0, b = 0, a = 0;
+        if ([gc getRed:&r green:&g blue:&b alpha:&a] && a < 0.35) {
+            gc = [UIColor colorWithRed:r green:g blue:b alpha:0.6];   // alpha 过低补回基础不透明度
+        }
+        axs_snap_glowColorBase = gc;
+        axs_snap_loaded = YES;
+    } @catch (NSException *exception) {
+        // 快照失败沿用上次值；首次失败用默认兜底，绝不让 SpringBoard 出错
+        if (!axs_snap_loaded) {
+            axs_snap_ringColor = [UIColor colorWithRed:0.576 green:0.890 blue:0.992 alpha:1.0];
+            axs_snap_glowColorBase = [UIColor whiteColor];
+            axs_snap_loaded = YES;
+        }
+    }
+}
+
 static UIColor *axs_ring_color(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameColor" defaultValue:@"#93E3FD"];
-    return axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil,
-                             [UIColor colorWithRed:0.576 green:0.890 blue:0.992 alpha:1.0]);
+    // beautify.42：读快照（解析只在快照刷新时做一次）
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_ringColor;
 }
 
 // --- 光晕配置 (beautify.30)：独立于光圈外框，沿用同一偏好域与快照 -------------
 
 static BOOL axs_ring_glowEnabled(void) {
     // beautify.40：同 axs_ring_enabled——总闸不进本函数（纯子开关读取）
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowEnabled" defaultValue:@NO];
-    return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_glowOn;
 }
 
 // --- beautify.41：单个容器的侧贴小窗分类 --------------------------------------
@@ -265,14 +331,15 @@ static BOOL axs_ring_glowAllowedFor(BOOL docked) {
 }
 
 static BOOL axs_ring_glowCustomColor(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowCustomEnabled" defaultValue:@NO];
-    return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_glowCustom;
 }
 
 static double axs_ring_glowRadiusValue(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowRadius" defaultValue:@116.0];
-    double r = [v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 116.0;
-    return axs_ring_clamp(r, 0.0, 200.0);
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_glowRadius;
 }
 
 // beautify.31 修复：光晕颜色来源。
@@ -280,14 +347,9 @@ static double axs_ring_glowRadiusValue(void) {
 // - 自定义关：跟随光圈边框色——边框单色用 ringFrameColor；边框彩虹按与
 //   conic 渐变同一 4.0s 旋转周期采样当前色相；光圈关闭拿不到色则回退白。
 static UIColor *axs_ring_glowCustomColorValue(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowColor" defaultValue:@"#FFFFFF"];
-    UIColor *c = axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil, [UIColor whiteColor]);
-    CGFloat r = 0, g = 0, b = 0, a = 0;
-    if ([c getRed:&r green:&g blue:&b alpha:&a] && a < 0.35) {
-        // alpha 过低时补回基础不透明度，避免发光几乎消失
-        return [UIColor colorWithRed:r green:g blue:b alpha:0.6];
-    }
-    return c;
+    // beautify.42：读快照（解析+alpha 补偿只在快照刷新时做一次）
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_glowColorBase;
 }
 
 static UIColor *axs_ring_glowColor(void) {
@@ -322,9 +384,9 @@ static double axs_ring_glowRange(void) {
 // beautify.32 光晕亮度：面板 0–100，默认 100 → 系数 0.0–1.0。
 // 只缩放光晕不透明度/alpha，不改色相、范围、模糊半径或光圈描边。
 static double axs_ring_glowBrightness(void) {
-    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowBrightness" defaultValue:@100.0];
-    double b = [v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 100.0;
-    return axs_ring_clamp(b, 0.0, 100.0);
+    // beautify.42：读快照
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_glowBrightness;
 }
 
 static CGFloat axs_ring_glowBrightnessFactor(void) {
@@ -473,14 +535,58 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 @property (nonatomic, assign) double lastGlowBrightness;// 上帧光晕亮度（0–100）
 @property (nonatomic, assign) BOOL lastGlowEnabled;
 @property (nonatomic, assign) BOOL lastDocked;          // beautify.41：上帧侧贴/居中分类，变化才写日志
+@property (nonatomic, assign) BOOL needsSync;           // beautify.42：待同步标记（事件唤醒入口置位）
+@property (nonatomic, assign) BOOL wasAnimating;        // beautify.42：上帧在动画中（结束时补一次 model 同步）
+@property (nonatomic, assign) CGRect lastContFrame;     // beautify.42：上帧容器 model frame（扫描兜底比对）
+@property (nonatomic, assign) CGRect lastPathBounds;    // beautify.42：上帧描边路径矩形（未变不重建 CGPath）
+@property (nonatomic, assign) double lastPathRadius;    // beautify.42：上帧描边路径圆角
+@property (nonatomic, assign) CGFloat lastGradientDiag; // beautify.42：上帧渐变层对角线（未变不更新 frame）
+@property (nonatomic, assign) CGRect lastGlowGeomBounds;   // beautify.42：上帧光晕几何矩形
+@property (nonatomic, assign) CGFloat lastGlowGeomRadius;  // beautify.42：上帧光晕几何圆角
+@property (nonatomic, assign) CGFloat lastGlowInnerBlur;   // beautify.42
+@property (nonatomic, assign) CGFloat lastGlowOuterBlur;   // beautify.42
+@property (nonatomic, assign) CGFloat lastGlowInnerOp;     // beautify.42
+@property (nonatomic, assign) CGFloat lastGlowOuterOp;     // beautify.42
+@property (nonatomic, strong) UIColor *lastGlowColorObj;   // beautify.42：上帧光晕颜色
 @property (nonatomic, copy) NSString *radiusSource;     // overlayMask|config
 @property (nonatomic, assign) BOOL loggedAttach;
 - (void)tick;
 @end
 
 @implementation AXSRingLinkDriver
+// beautify.42：静止暂停——动画中每帧跟 presentation；动画刚结束补一次
+// model 同步（wasAnimating），静止一拍即暂停本 driver 的 displayLink。
+// 恢复入口：attach、layoutSubviews 钩子、窗口 key/可见性通知、偏好 saved、
+// 回窗、侧贴/居中分类变化（见各事件点）；暂停后不再读 presentationLayer、
+// 不再 convertRect、不再做任何层级查找。
 - (void)tick {
-    axs_ring_syncDriver(self);
+    @try {
+        UIView *c = self.container;
+        if (c == nil || c.window == nil || self.ring == nil || self.link == nil) return;
+
+        CALayer *src = self.realLayer ?: c.layer;
+        BOOL animating = ([src animationForKey:@"bounds"] != nil
+                          || [src animationForKey:@"position"] != nil);
+        if (animating) {
+            self.wasAnimating = YES;
+            self.needsSync = NO;
+            axs_ring_syncDriver(self);       // 动画跟帧（presentation 优先）
+            return;
+        }
+        if (self.wasAnimating) {
+            // 动画刚结束：补一次 model 值同步，确保静止态与最终模型一致
+            self.wasAnimating = NO;
+            self.needsSync = YES;
+        }
+        if (!self.needsSync) {
+            self.link.paused = YES;          // 静止：暂停本 driver 的 displayLink
+            return;
+        }
+        self.needsSync = NO;
+        axs_ring_syncDriver(self);           // 恢复后先同步一拍再评估是否静止
+    } @catch (NSException *exception) {
+        axs_ring_log(@"ring tick exception: %@", exception);
+    }
 }
 @end
 
@@ -517,31 +623,37 @@ static CGFloat axs_ring_glowOpacityScale(double range) {
 
 // 用窗口矩形 + 圆角 + 外扩余量，配置一层柔光的 frame / shadowPath / mask / 颜色。
 // bounds 是 mountLayer 坐标系下的窗口矩形；pad 已含 blur + 线宽 + 8pt 余量。
+// beautify.42：几何（frame/shadowPath/mask）只在 bounds/圆角变化时重建；
+// 颜色/blur/opacity 只在偏好或缓存值变化时更新——两部分互相独立。
 static void axs_ring_configGlowLayer(CAShapeLayer *glow, CGRect bounds,
                                      CGFloat pathRadius, CGFloat pad,
-                                     CGFloat blur, CGFloat opacity, UIColor *color) {
+                                     CGFloat blur, CGFloat opacity, UIColor *color,
+                                     BOOL geomChanged, BOOL colorChanged) {
     if (glow == nil) return;
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    glow.frame = CGRectMake(bounds.origin.x - pad, bounds.origin.y - pad,
-                            bounds.size.width + 2 * pad, bounds.size.height + 2 * pad);
+    if (geomChanged) {
+        glow.frame = CGRectMake(bounds.origin.x - pad, bounds.origin.y - pad,
+                                bounds.size.width + 2 * pad, bounds.size.height + 2 * pad);
 
-    // shadowPath 在层自身坐标系里 = 窗口圆角矩形（相对外扩 pad），不随放大 frame 变形
-    CGRect win = CGRectMake(pad, pad, bounds.size.width, bounds.size.height);
-    UIBezierPath *winPath = [UIBezierPath bezierPathWithRoundedRect:win cornerRadius:pathRadius];
-    glow.path = winPath.CGPath;
-    glow.shadowPath = winPath.CGPath;
+        // shadowPath 在层自身坐标系里 = 窗口圆角矩形（相对外扩 pad），不随放大 frame 变形
+        CGRect win = CGRectMake(pad, pad, bounds.size.width, bounds.size.height);
+        UIBezierPath *winPath = [UIBezierPath bezierPathWithRoundedRect:win cornerRadius:pathRadius];
+        glow.path = winPath.CGPath;
+        glow.shadowPath = winPath.CGPath;
 
-    // even-odd mask：外框(整层) + 内孔(窗口圆角矩形) → 内部完全不染色
-    UIBezierPath *maskPath = [UIBezierPath bezierPathWithRect:glow.bounds];
-    [maskPath appendPath:winPath];
-    ((CAShapeLayer *)glow.mask).frame = glow.bounds;
-    ((CAShapeLayer *)glow.mask).path = maskPath.CGPath;
-
-    glow.shadowRadius = blur;
-    glow.shadowOpacity = opacity;                                    // 已含亮度系数
-    glow.shadowColor = color.CGColor;
-    glow.fillColor = [color colorWithAlphaComponent:0.01 * axs_ring_glowBrightnessFactor()].CGColor; // 近透明，不染内部
+        // even-odd mask：外框(整层) + 内孔(窗口圆角矩形) → 内部完全不染色
+        UIBezierPath *maskPath = [UIBezierPath bezierPathWithRect:glow.bounds];
+        [maskPath appendPath:winPath];
+        ((CAShapeLayer *)glow.mask).frame = glow.bounds;
+        ((CAShapeLayer *)glow.mask).path = maskPath.CGPath;
+    }
+    if (colorChanged) {
+        glow.shadowRadius = blur;
+        glow.shadowOpacity = opacity;                                    // 已含亮度系数
+        glow.shadowColor = color.CGColor;
+        glow.fillColor = [color colorWithAlphaComponent:0.01 * axs_ring_glowBrightnessFactor()].CGColor; // 近透明，不染内部
+    }
     glow.hidden = NO;
     [CATransaction commit];
 }
@@ -578,11 +690,58 @@ static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
     CGFloat scale = axs_ring_glowOpacityScale(range);
     CGFloat bright = axs_ring_glowBrightnessFactor();            // 亮度系数（不改 blur/色相）
     UIColor *color = axs_ring_glowColor();
-    axs_ring_configGlowLayer(driver.glowInner, bounds, pathRadius, pad, innerBlur, 0.35 * scale * bright, color);
-    axs_ring_configGlowLayer(driver.glowOuter, bounds, pathRadius, pad, outerBlur, 0.14 * scale * bright, color);
+    CGFloat innerOp = 0.35 * scale * bright;
+    CGFloat outerOp = 0.14 * scale * bright;
+
+    // beautify.42：几何/颜色/参数缓存比对——全未变则跳过整帧光晕重建
+    // （shadowPath 只在 bounds/圆角变化时重建，颜色/blur/opacity 只在
+    // 偏好或缓存值变化时更新）
+    BOOL geomChanged = !CGRectEqualToRect(bounds, driver.lastGlowGeomBounds)
+                    || fabs(driver.lastGlowGeomRadius - pathRadius) > 0.05;
+    BOOL colorChanged = driver.lastGlowColorObj == nil || ![color isEqual:driver.lastGlowColorObj];
+    BOOL innerChanged = fabs(driver.lastGlowInnerBlur - innerBlur) > 0.05
+                     || fabs(driver.lastGlowInnerOp - innerOp) > 0.002;
+    BOOL outerChanged = fabs(driver.lastGlowOuterBlur - outerBlur) > 0.05
+                     || fabs(driver.lastGlowOuterOp - outerOp) > 0.002;
+    if (!geomChanged && !colorChanged && !innerChanged && !outerChanged) return;
+
+    axs_ring_configGlowLayer(driver.glowInner, bounds, (CGFloat)pathRadius, pad,
+                             innerBlur, innerOp, color, geomChanged, colorChanged || innerChanged);
+    axs_ring_configGlowLayer(driver.glowOuter, bounds, (CGFloat)pathRadius, pad,
+                             outerBlur, outerOp, color, geomChanged, colorChanged || outerChanged);
+
+    driver.lastGlowGeomBounds = bounds;
+    driver.lastGlowGeomRadius = pathRadius;
+    driver.lastGlowInnerBlur = innerBlur;
+    driver.lastGlowOuterBlur = outerBlur;
+    driver.lastGlowInnerOp = innerOp;
+    driver.lastGlowOuterOp = outerOp;
+    driver.lastGlowColorObj = color;
 }
 
 static NSMutableDictionary<NSString *, AXSRingLinkDriver *> *axs_ring_drivers = nil;
+
+// beautify.42：恢复全部在册 driver 的 displayLink（窗口通知/偏好 saved 等
+// 事件唤醒入口共用）；恢复后 tick 先同步一拍再评估是否重新静止
+static void axs_ring_resumeAllLinks(void) {
+    for (AXSRingLinkDriver *dd in [axs_ring_drivers.allValues copy]) {
+        if (![dd isKindOfClass:[AXSRingLinkDriver class]] || dd.link == nil) continue;
+        dd.needsSync = YES;
+        if (dd.link.paused) dd.link.paused = NO;
+    }
+}
+
+// beautify.42：扫描去重——同一轮多条通知（窗口可见性/saved 连发）只排一次
+// 主队列 scanTick，避免重复 dispatch（指令 六.3）
+static BOOL axs_ring_scanQueued = NO;
+static void axs_ring_queueScan(void) {
+    if (axs_ring_scanQueued) return;
+    axs_ring_scanQueued = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        axs_ring_scanQueued = NO;
+        axs_ring_scanTick();
+    });
+}
 
 // 容器子树里找 interaction overlay（一层即中，找不到再进一层）
 static UIView *axs_ring_findOverlay(UIView *container) {
@@ -741,6 +900,7 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
                      axs_ring_glowAllowedFor(docked) ? 1 : 0);
     }
     driver.ring.hidden = !axs_ring_ringAllowedFor(docked);
+    driver.lastContFrame = container.layer.frame;    // beautify.42：扫描兜底比对用
     if (!axs_ring_glowAllowedFor(docked)) {
         if (driver.glowInner != nil) driver.glowInner.hidden = YES;
         if (driver.glowOuter != nil) driver.glowOuter.hidden = YES;
@@ -751,8 +911,12 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
 
         // 挂载层：非裁剪祖先（masksToBounds=0）——环挂进裁剪层会被自身圆角
         // mask 切到不可见（TXT beautify.23 二.1）；addSublayer 即置最上层（二.3）
-        CALayer *mount = axs_ring_findMount(container);
-        driver.mountLayer = mount;
+        // beautify.42：缓存优先——弱引用失效/离树/开始裁剪才重新查找
+        CALayer *mount = driver.mountLayer;
+        if (!(mount != nil && mount.superlayer != nil && !mount.masksToBounds)) {
+            mount = axs_ring_findMount(container);
+            driver.mountLayer = mount;
+        }
         if (driver.ring.superlayer != mount) {
             [driver.ring removeFromSuperlayer];
             [mount addSublayer:driver.ring];
@@ -760,22 +924,25 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
 
         // 几何源仍是真实裁剪层：presentation frame 经 convertRect:fromLayer:
         // 换算到挂载层坐标（TXT beautify.23 二.2）；右/下终点 = 换算后 origin+size
+        // beautify.42：静止优先读 model frame（presentation == model，零视觉
+        // 差异）；只有 bounds/position 存在 CA 动画时才读 presentationLayer
         CALayer *src = driver.realLayer ?: mount;
+        BOOL srcAnimating = ([src animationForKey:@"bounds"] != nil
+                             || [src animationForKey:@"position"] != nil);
+        if (preferModel && srcAnimating) {
+            return;                          // 弹簧动画进行中：displayLink 按 presentation 跟
+        }
         CGRect bounds;
-        if (preferModel) {
-            if ([src animationForKey:@"bounds"] != nil
-                || [src animationForKey:@"position"] != nil) {
-                return;                          // 弹簧动画进行中：displayLink 按 presentation 跟
-            }
-            bounds = [mount convertRect:src.frame fromLayer:src];
-        } else {
-            CALayer *pres = src.presentationLayer;     // 视觉矩形，静止时 == model
+        if (!preferModel && srcAnimating) {
+            CALayer *pres = src.presentationLayer;     // 视觉矩形
             CALayer *mp = mount.presentationLayer;
             if (pres != nil && mp != nil) {
                 bounds = [mp convertRect:pres.frame fromLayer:pres];
             } else {
                 bounds = [mount convertRect:src.frame fromLayer:src];
             }
+        } else {
+            bounds = [mount convertRect:src.frame fromLayer:src];
         }
         if (bounds.size.width < 20 || bounds.size.height < 20) return;
 
@@ -787,7 +954,10 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
         //   d) 配置圆角。逐帧重读，静止由 changed 检查跳过。
         CGFloat radius = 0;
         NSString *source = @"config";
-        if (driver.realLayer == nil) axs_ring_findRealClip(driver, container);
+        // beautify.42：缓存优先——realLayer 弱引用失效/离树才重新查找
+        if (driver.realLayer == nil || driver.realLayer.superlayer == nil) {
+            axs_ring_findRealClip(driver, container);
+        }
         if (driver.realLayer != nil && driver.realLayer.cornerRadius > 0.5) {
             radius = driver.realLayer.cornerRadius;
             source = @"realCorner";
@@ -809,7 +979,9 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
             }
         }
         if (radius <= 0.5) {
-            if (driver.radiusMask == nil || driver.radiusMask.path == nil) {
+            // beautify.42：缓存优先——radiusMask 失效/离树才重选
+            if (driver.radiusMask == nil || driver.radiusMask.path == nil
+                || driver.radiusMask.superlayer == nil) {
                 axs_ring_selectMask(driver, container);
             }
             if (driver.radiusMask != nil && driver.radiusMask.path != nil) {
@@ -852,17 +1024,28 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
         // 描边中心线贴窗口边，外半覆盖接缝，四角不再留空隙
         CGRect r = driver.ring.bounds;
         double pathRadius = axs_ring_clamp(radius, 1.0, MAX(MIN(r.size.width, r.size.height) / 2.0, 1.0));
-        UIBezierPath *p = [UIBezierPath bezierPathWithRoundedRect:r cornerRadius:pathRadius];
-        driver.shape.path = p.CGPath;
+        // beautify.42：bounds/圆角未变不重建 UIBezierPath/CGPath、不重设 shape.path
+        BOOL pathChanged = !CGRectEqualToRect(r, driver.lastPathBounds)
+                        || fabs(driver.lastPathRadius - pathRadius) > 0.05;
+        if (pathChanged) {
+            UIBezierPath *p = [UIBezierPath bezierPathWithRoundedRect:r cornerRadius:pathRadius];
+            driver.shape.path = p.CGPath;
+            driver.lastPathBounds = r;
+            driver.lastPathRadius = pathRadius;
+        }
         driver.shape.lineWidth = lineWidth;      // 描边宽度 = 配置值（固定屏幕点）
         // 渐变层铺对角线边长的居中正方形（TXT beautify.25 三.2）：长方形一转
         // 就盖不住整框（.24 断段根因），正方形任意旋转角都完整覆盖，conic
         // 圆心=环心不变，超出部分由 ring.mask 描边裁掉
+        // beautify.42：只对角线变化才更新渐变层 frame
         {
             CGFloat w = driver.ring.bounds.size.width;
             CGFloat h = driver.ring.bounds.size.height;
             CGFloat diag = (CGFloat)sqrt((double)w * w + (double)h * h) + 2.0;
-            driver.gradient.frame = CGRectMake((w - diag) / 2.0, (h - diag) / 2.0, diag, diag);
+            if (fabs(diag - driver.lastGradientDiag) > 0.5) {
+                driver.gradient.frame = CGRectMake((w - diag) / 2.0, (h - diag) / 2.0, diag, diag);
+                driver.lastGradientDiag = diag;
+            }
         }
         [CATransaction commit];
 
@@ -890,6 +1073,8 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver) {
 static void axs_ring_attachContainer(UIView *container) {
     NSString *key = [NSString stringWithFormat:@"%p", container];
     if (axs_ring_drivers[key] != nil) return;
+    // beautify.42：挂载时刷新一次偏好快照（兜底；正常由 saved 通知驱动）
+    axs_ring_refreshConfigSnapshot();
     // beautify.30：光圈与光晕可独立开关，任一开启即需一条 displayLink
     if (!axs_ring_enabled() && !axs_ring_glowEnabled()) return;
 
@@ -954,6 +1139,7 @@ static void axs_ring_attachContainer(UIView *container) {
 
     driver.link = [CADisplayLink displayLinkWithTarget:driver selector:@selector(tick)];
     [driver.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    driver.needsSync = YES;                  // beautify.42：首次 attach 即需同步
     axs_ring_drivers[key] = driver;
 
     // 全树一次性探针（进程内仅首次 attach）：定位真实圆角来源
@@ -1047,6 +1233,24 @@ static void axs_ring_scanTick(void) {
             axs_ring_detachDriver(key);
         }
 
+        // beautify.42：0.5s 扫描对在册 driver 只做轻量唤醒——不查层级、
+        // 不重建装饰层；仅当侧贴/居中分类变化、有模型 frame 变化（兜底：
+        // 未走布局钩子的移动动画）或有待同步时恢复 displayLink
+        for (NSString *key in [axs_ring_drivers.allKeys copy]) {
+            AXSRingLinkDriver *dd = axs_ring_drivers[key];
+            if (![dd isKindOfClass:[AXSRingLinkDriver class]] || dd.link == nil) continue;
+            BOOL docked = axs_ring_containerIsDocked(dd.container);
+            if (docked != dd.lastDocked) {
+                dd.lastDocked = docked;
+                dd.needsSync = YES;
+            }
+            if (dd.link.paused && dd.container != nil
+                && !CGRectEqualToRect(dd.container.layer.frame, dd.lastContFrame)) {
+                dd.needsSync = YES;
+            }
+            if (dd.needsSync && dd.link.paused) dd.link.paused = NO;
+        }
+
         if (!axs_ring_enabled()) {
             // TXT 二.6：开关关闭 → 全部摘除，完全无副作用
             for (NSString *key in [axs_ring_drivers.allKeys copy]) {
@@ -1084,6 +1288,9 @@ static void axs_ring_hook_layoutSubviews(id self, SEL _cmd) {
         } else {
             // 手势改 bounds 触发的布局：模型即最新值，环与卡片同 commit 生效，
             // 右/下边（origin+size）不再滞后一帧（TXT beautify.22 三.3）
+            // beautify.42：布局变化唤醒（可能处于静止暂停态）
+            d.needsSync = YES;
+            if (d.link != nil && d.link.paused) d.link.paused = NO;
             axs_ring_syncDriver2(d, YES);
         }
     } @catch (NSException *exception) {
@@ -1119,7 +1326,12 @@ static void axs_ring_installLayoutHook(void) {
 @implementation AXSRingHealthTarget
 - (void)axsRingTick { axs_ring_scanTick(); }
 - (void)axsRingWindowNote:(NSNotification *)note {
-    dispatch_async(dispatch_get_main_queue(), ^{ axs_ring_scanTick(); });
+    // beautify.42：窗口 key/可见性变化唤醒全部 driver（回窗/离层场景），
+    // 扫描去重——同一轮多条通知只排一次 scanTick（指令 六.3）
+    dispatch_async(dispatch_get_main_queue(), ^{
+        axs_ring_resumeAllLinks();
+        axs_ring_queueScan();
+    });
 }
 @end
 static NSTimer *axs_ring_scanTimer = nil;
@@ -1220,8 +1432,12 @@ static void axs_ring_prefsChanged(CFNotificationCenterRef center, void *observer
             if ([cfg respondsToSelector:@selector(axs_holdlaunch_reload)]) {
                 [cfg axs_holdlaunch_reload];
             }
-            axs_ring_scanTick();
+            // beautify.42：偏好快照随 saved 通知刷新（此后每帧 tick 零配置读取），
+            // 并唤醒全部 driver 重新评估可见性；扫描去重（同一轮连发只排一次）
+            axs_ring_refreshConfigSnapshot();
+            axs_ring_resumeAllLinks();
             axs_ring_refreshAppearance();
+            axs_ring_queueScan();
         } @catch (NSException *exception) {
             axs_ring_logException(@"prefsChanged main", exception, nil);
         }
@@ -1236,6 +1452,7 @@ static void axs_ring_prefsChanged(CFNotificationCenterRef center, void *observer
             axs_ring_drivers = [NSMutableDictionary new];
             axs_ring_healthTarget = [AXSRingHealthTarget new];
             axs_ring_installLayoutHook();        // 类已注册则立即装钩，未注册由扫描重试
+            axs_ring_refreshConfigSnapshot();    // beautify.42：启动即建偏好快照
             axs_ring_log(@"ring module loaded in SpringBoard");
             axs_ring_log(@"ring hooks ring=0 sessionHooks=0 layout=%d holdPress=1",
                          axs_ring_layoutHookInstalled ? 1 : 0);
