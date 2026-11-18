@@ -97,7 +97,10 @@ check "dylib has no overlay window marker" sh -c "test \$(strings -a '$DYLIB_DIR
 check "dylib has no overlay window class" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'AXSRingOverlayWindow') -eq 0"
 check "dylib has no sc_sessionDidBeginHosting selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_sessionDidBeginHosting:') -eq 0"
 check "dylib has no sc_closeSession selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_closeSession:') -eq 0"
-check "dylib has no sc_dockSession selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_dockSession:fromCorner:') -eq 0"
+# beautify.46: sc_* selectors are now probed for EXISTENCE only (NSSelectorFromString
+# + class_getInstanceMethod in axs_ring_probeNativeChainOnce), never hooked. Assert the
+# native-chain probe log is compiled in instead of forbidding the selector string.
+check "dylib has native chain probe log (beautify.46)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring native chain probe'"
 check "dylib has no sc_sessionForContainerView selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_sessionForContainerView:') -eq 0"
 check "dylib has ring log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-ring.log'"
 check "dylib has zero-session-hook startup log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring hooks ring=0 sessionHooks=0 layout='"
