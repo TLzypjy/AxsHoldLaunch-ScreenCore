@@ -94,6 +94,21 @@ static BOOL axs_ring_decorEnabled(void);
 // beautify.42：偏好快照前置声明（定义在 parseHex 之后）
 static void axs_ring_refreshConfigSnapshot(void);
 
+// beautify.42：快照变量（声明前置供各 getter 读取；赋值统一在
+// refreshConfigSnapshot 内完成）
+static BOOL   axs_snap_loaded = NO;
+static BOOL   axs_snap_decor = YES;
+static BOOL   axs_snap_ringOn = YES;
+static BOOL   axs_snap_glowOn = NO;
+static BOOL   axs_snap_ringCustom = YES;
+static BOOL   axs_snap_glowCustom = NO;
+static double axs_snap_thickness = 5.0;
+static double axs_snap_glowRadius = 116.0;
+static double axs_snap_glowBrightness = 100.0;
+static double axs_snap_configRadius = 8.0;
+static UIColor *axs_snap_ringColor = nil;       // 解析后的光圈颜色
+static UIColor *axs_snap_glowColorBase = nil;   // 解析+alpha 补偿后的自定义光晕色
+
 static BOOL axs_ring_enabled(void) {
     // beautify.42：读快照，每帧 tick 零配置读取；saved 通知/挂载时刷新
     if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
@@ -144,20 +159,9 @@ static UIColor *axs_ring_parseHex(NSString *hex, UIColor *fallback) {
     return fallback;
 }
 
-// --- beautify.42：偏好快照（saved 通知/挂载时刷新一次，每帧 tick 零配置读取、
-// 零字符串解析；颜色只在快照刷新时 parseHex 一次） ------------------------------
-static BOOL   axs_snap_loaded = NO;
-static BOOL   axs_snap_decor = YES;
-static BOOL   axs_snap_ringOn = YES;
-static BOOL   axs_snap_glowOn = NO;
-static BOOL   axs_snap_ringCustom = YES;
-static BOOL   axs_snap_glowCustom = NO;
-static double axs_snap_thickness = 5.0;
-static double axs_snap_glowRadius = 116.0;
-static double axs_snap_glowBrightness = 100.0;
-static double axs_snap_configRadius = 8.0;
-static UIColor *axs_snap_ringColor = nil;       // 解析后的光圈颜色
-static UIColor *axs_snap_glowColorBase = nil;   // 解析+alpha 补偿后的自定义光晕色
+// --- beautify.42：偏好快照刷新（saved 通知/挂载时调用一次，每帧 tick 零配置
+// 读取、零字符串解析；颜色只在快照刷新时 parseHex 一次） -----------------------
+// 变量声明见文件前部（各 getter 之前）
 
 static void axs_ring_refreshConfigSnapshot(void) {
     @try {
