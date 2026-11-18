@@ -108,6 +108,9 @@ static double axs_snap_glowBrightness = 100.0;
 static double axs_snap_configRadius = 8.0;
 static UIColor *axs_snap_ringColor = nil;       // 解析后的光圈颜色
 static UIColor *axs_snap_glowColorBase = nil;   // 解析+alpha 补偿后的自定义光晕色
+// beautify.44：侧贴小窗 2D 侧倾（默认关闭；角度默认 4.0，范围 0..10）
+static BOOL   axs_snap_tiltEnabled = NO;
+static double axs_snap_tiltAngle = 4.0;
 
 static BOOL axs_ring_enabled(void) {
     // beautify.42：读快照，每帧 tick 零配置读取；saved 通知/挂载时刷新
@@ -194,6 +197,11 @@ static void axs_ring_refreshConfigSnapshot(void) {
         axs_snap_glowBrightness = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 100.0, 0.0, 100.0);
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitWindowCornerRadius" defaultValue:@8.0];
         axs_snap_configRadius = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 8.0, 0.0, 60.0);
+        // beautify.44：侧倾开关（默认 NO）+ 角度（默认 4.0，clamp 0..10）
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyTiltEnabled" defaultValue:@NO];
+        axs_snap_tiltEnabled = [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
+        v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyTiltAngle" defaultValue:@4.0];
+        axs_snap_tiltAngle = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 4.0, 0.0, 10.0);
 
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameColor" defaultValue:@"#93E3FD"];
         axs_snap_ringColor = axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil,
@@ -317,6 +325,95 @@ static BOOL axs_ring_containerIsDocked(UIView *container) {
         return NO;
     } @catch (NSException *exception) {
         return NO;
+    }
+}
+
+// --- beautify.44：侧倾配置 getter（读 .42 偏好快照，零每帧 defaults 读取） ---
+static BOOL axs_ring_tiltEnabled(void) {
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_tiltEnabled;
+}
+static double axs_ring_tiltAngle(void) {
+    if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
+    return axs_snap_tiltAngle;
+}
+
+// 侧贴方向：+1 右侧 / -1 左侧。沿用 .41/.43 的「内部状态优先、几何兜底」思路。
+// 1) 沿 delegate → 父视图链 → window/rootVC → session/manager 探测带 side 语义的
+//    BOOL（isLeftDocked/isRightDocked/isDockedLeft/isDockedRight/leftDocked/rightDocked）
+//    或枚举（dockSide/side/dockPosition：常见 0=左 1=右，也兼容字符串 left/right）；
+// 2) 读不到时用容器中心与屏幕中心比较，偏左 -1，偏右 +1；
+// 3) 全程 @try/@catch，失败按几何结果走；几何也读不到时默认 +1（右侧）。
+static int axs_ring_containerDockSide(UIView *container) {
+    if (container == nil) return 1;
+    @try {
+        NSMutableArray *cands = [NSMutableArray array];
+        if ([container respondsToSelector:@selector(delegate)]) {
+            id del = [(id)container delegate];
+            if (del != nil) [cands addObject:del];
+        }
+        UIView *sv = container.superview;
+        int hops = 0;
+        while (sv != nil && hops < 6) { [cands addObject:sv]; sv = sv.superview; hops++; }
+        UIWindow *w = container.window;
+        if (w != nil) {
+            [cands addObject:w];
+            id rvc = [w rootViewController];
+            if (rvc != nil) [cands addObject:rvc];
+        }
+        for (id c in cands) {
+            // BOOL 语义探测
+            NSString *leftSels[] = {@"isLeftDocked", @"isDockedLeft", @"leftDocked", @"isOnLeftSide"};
+            NSString *rightSels[] = {@"isRightDocked", @"isDockedRight", @"rightDocked", @"isOnRightSide"};
+            for (int i = 0; i < 4; i++) {
+                SEL sl = NSSelectorFromString(leftSels[i]);
+                if ([c respondsToSelector:sl]) {
+                    BOOL (*imp)(id, SEL) = (BOOL (*)(id, SEL))[c methodForSelector:sl];
+                    if (imp && imp(c, sl)) return -1;
+                }
+                SEL sr = NSSelectorFromString(rightSels[i]);
+                if ([c respondsToSelector:sr]) {
+                    BOOL (*imp)(id, SEL) = (BOOL (*)(id, SEL))[c methodForSelector:sr];
+                    if (imp && imp(c, sr)) return 1;
+                }
+            }
+            // 枚举/对象语义探测
+            NSArray *enumSels = @[@"dockSide", @"side", @"dockPosition", @"dockEdge"];
+            for (NSString *sn in enumSels) {
+                SEL s = NSSelectorFromString(sn);
+                if (![c respondsToSelector:s]) continue;
+                id val = ((id(*)(id, SEL))[c methodForSelector:s])(c, s);
+                if ([val isKindOfClass:[NSString class]]) {
+                    NSString *low = [(NSString *)val lowercaseString];
+                    if ([low containsString:@"left"]) return -1;
+                    if ([low containsString:@"right"]) return 1;
+                }
+                if ([val isKindOfClass:[NSNumber class]]) {
+                    NSInteger iv = [val integerValue];
+                    if (iv == 0) return -1;   // 常见枚举 0=左
+                    if (iv == 1) return 1;    // 1=右
+                }
+            }
+        }
+        // 几何兜底：容器中心 vs 屏幕中心
+        CGRect f = container.bounds;
+        CALayer *pres = container.layer.presentationLayer;
+        if ([pres isKindOfClass:[CALayer class]]) f = [(CALayer *)pres frame];
+        CGFloat cx = f.origin.x + f.size.width / 2.0;
+        CGFloat sx = 0;
+        if (w != nil) sx = w.bounds.size.width / 2.0;
+        else {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    sx = ((UIWindowScene *)scene).screen.bounds.size.width / 2.0;
+                    break;
+                }
+            }
+        }
+        if (sx <= 0) return 1;
+        return (cx < sx) ? -1 : 1;
+    } @catch (NSException *exception) {
+        return 1;
     }
 }
 
@@ -518,6 +615,8 @@ static void axs_ring_collectMasks(UIView *view, int depth, NSMutableArray<CAShap
 @class AXSRingHealthTarget;
 
 static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
+static void axs_ring_applyTilt(AXSRingLinkDriver *driver);
+static void axs_ring_resetTilt(AXSRingLinkDriver *driver);
 
 @interface AXSRingLinkDriver : NSObject
 @property (nonatomic, weak) UIView *container;
@@ -553,6 +652,11 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 @property (nonatomic, strong) UIColor *lastGlowColorObj;   // beautify.42：上帧光晕颜色
 @property (nonatomic, copy) NSString *radiusSource;     // overlayMask|config
 @property (nonatomic, assign) BOOL loggedAttach;
+// beautify.44：侧倾目标 UIView（层级探针选出的安全公共祖先，弱引用）+ 上次施加状态
+@property (nonatomic, weak) UIView *tiltTarget;          // 同时覆盖内容/手势/装饰的祖先 UIView
+@property (nonatomic, assign) BOOL tiltProbed;           // 已做过层级探针（避免每帧重探）
+@property (nonatomic, assign) CGAffineTransform lastTilt; // 上次施加的 transform（未变不重复写）
+@property (nonatomic, assign) BOOL hasTilt;              // 是否曾施加过非 identity（用于 detach 恢复）
 - (void)tick;
 @end
 
@@ -863,7 +967,10 @@ static void axs_ring_treeProbe(UIView *container) {
 static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
     UIView *container = driver.container;
     if (container == nil || driver.ring == nil) return;
-    if (container.window == nil) return; // 离层：等扫描/布局钩子 detach
+    if (container.window == nil) {          // 离层：等扫描/布局钩子 detach
+        axs_ring_resetTilt(driver);         // beautify.44：窗口隐藏/离层立即回正
+        return;
+    }
 
     // beautify.43：每帧先算 docked 与 ringAllowed/glowAllowed 并同步提交可见性，
     // 先于一切几何 changed 判断、独立执行（指令 三.3/三.4、六.2/六.5）。
@@ -915,6 +1022,11 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
     driver.lastIsDocked = docked;
     driver.lastRingAllowed = ringAllowed;
     driver.lastGlowAllowed = glowAllowed;
+
+    // beautify.44：侧倾独立于几何 changed 判断，每帧重算（内部幂等：angle/side/
+    // target 未变即跳过写 transform），保证滑条/开关/侧贴切换同帧生效
+    axs_ring_applyTilt(driver);
+
     @try {
         double lineWidth = axs_ring_thickness();
         if (lineWidth < 0.5) lineWidth = 0.5;
@@ -1082,6 +1194,116 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver) {
     axs_ring_syncDriver2(driver, NO);
 }
 
+// --- beautify.44：侧贴小窗 2D 侧倾（rotation.z only，无 3D 透视/缩放/位移） -----
+// 层级探针（指令 五.2/五.3/七.6）：装饰层挂在 mountLayer，应用内容与手势 overlay
+// 在 container 子树里。从 mountLayer 沿 superlayer 链向上找第一个「安全 UIView 宿主」：
+//   delegate 是 UIView、非 container 自身、非 window、非 rootVC.view、非裁剪层。
+// 这个祖先同时覆盖三者，施加 UIView.transform 后视觉与命中区域一起旋转，锚点
+// 保持中心 (0.5,0.5)。找不到安全公共祖先时记探针日志并放弃——不强行把 transform
+// 挂到裁剪层或宿主 window。
+static UIView *axs_ring_tiltProbeTarget(AXSRingLinkDriver *driver, UIView *container) {
+    if (container == nil) return nil;
+    UIView *found = nil;
+    @try {
+        UIWindow *w = container.window;
+        UIView *rootV = (w != nil && w.rootViewController != nil) ? w.rootViewController.view : nil;
+        CALayer *l = driver.mountLayer ?: axs_ring_findMount(container);
+        int hops = 0;
+        while (l != nil && hops < 8) {
+            id del = l.delegate;
+            if ([del isKindOfClass:[UIView class]]) {
+                UIView *uv = (UIView *)del;
+                BOOL safe = (uv != container) && (uv != w) && (uv != rootV)
+                            && !l.masksToBounds && uv.superview != nil;
+                if (safe) { found = uv; break; }
+            }
+            l = l.superlayer;
+            hops++;
+        }
+        axs_ring_log(@"ring tilt probe: mount=%@ target=%@ hops=%d mountClips=%d",
+                     NSStringFromClass((driver.mountLayer ?: container.layer).class),
+                     found ? NSStringFromClass(found.class) : @"none", hops,
+                     (driver.mountLayer ?: container.layer).masksToBounds ? 1 : 0);
+    } @catch (NSException *exception) {
+        axs_ring_log(@"ring tilt probe exception: %@", exception);
+        found = nil;
+    }
+    return found;
+}
+
+// 施加/恢复某 driver 的侧倾 transform（幂等：target+angle 未变不重复写）。
+// shouldTilt 需同时满足 tiltEnabled && docked && angle>0 && 有安全目标层；
+// 居中大窗/开关关/角度0/窗口隐藏/离层一律恢复 CGAffineTransformIdentity。
+static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
+    @try {
+        UIView *container = driver.container;
+        // 首次或目标失效时做一次层级探针（结果缓存，不每帧重探）
+        if (!driver.tiltProbed || (driver.tiltTarget == nil && container != nil)) {
+            driver.tiltTarget = axs_ring_tiltProbeTarget(driver, container);
+            driver.tiltProbed = YES;
+        }
+        UIView *target = driver.tiltTarget;
+
+        CGAffineTransform want = CGAffineTransformIdentity;
+        BOOL docked = axs_ring_containerIsDocked(container);
+        double angle = axs_ring_tiltAngle();
+        BOOL shouldTilt = axs_ring_tiltEnabled() && docked && angle > 0.0
+                          && target != nil && container != nil && container.window != nil;
+        if (shouldTilt) {
+            int side = axs_ring_containerDockSide(container);   // -1 左 / +1 右
+            CGFloat rad = (CGFloat)(side * angle * M_PI / 180.0);
+            want = CGAffineTransformMakeRotation(rad);
+        }
+
+        // 未变化则不写。既比对缓存，也比对宿主实际值：ScreenCore 的 Dock 布局/
+        // 弹簧动画/layoutSubviews 可能把 target.transform 重置，此时即使缓存未变
+        // 也要按当前倾斜状态写回（指令 五.8）。
+        if (target == nil) {
+            if (CGAffineTransformEqualToTransform(want, driver.lastTilt)) return;
+            driver.lastTilt = want;
+            driver.hasTilt = !CGAffineTransformIsIdentity(want);
+            return;
+        }
+        // want=identity 且本 driver 从未施加过倾斜：绝不碰宿主 transform
+        // （避免干扰 ScreenCore 正常的缩放/弹簧动画）
+        if (CGAffineTransformIsIdentity(want) && !driver.hasTilt) return;
+        // 需要倾斜（或曾在倾斜需回正）：比对缓存与宿主实际值，宿主重置也写回
+        if (CGAffineTransformEqualToTransform(want, driver.lastTilt)
+            && CGAffineTransformEqualToTransform(want, target.transform)) return;
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        target.transform = want;
+        [CATransaction commit];
+        driver.lastTilt = want;
+        driver.hasTilt = !CGAffineTransformIsIdentity(want);
+        axs_ring_log(@"ring tilt apply: container=%p target=%@ docked=%d angle=%.1f side=%d identity=%d",
+                     container, target ? NSStringFromClass(target.class) : @"none",
+                     docked ? 1 : 0, angle,
+                     shouldTilt ? axs_ring_containerDockSide(container) : 0,
+                     CGAffineTransformIsIdentity(want) ? 1 : 0);
+    } @catch (NSException *exception) {
+        axs_ring_log(@"ring tilt apply exception: %@", exception);
+    }
+}
+
+// detach/离层时把曾施加的 transform 恢复 identity，绝不残留倾斜
+static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
+    @try {
+        if (!driver.hasTilt) return;
+        UIView *target = driver.tiltTarget;
+        if (target != nil) {
+            [CATransaction begin];
+            [CATransaction setDisableActions:YES];
+            target.transform = CGAffineTransformIdentity;
+            [CATransaction commit];
+        }
+        driver.lastTilt = CGAffineTransformIdentity;
+        driver.hasTilt = NO;
+    } @catch (NSException *exception) {
+        axs_ring_log(@"ring tilt reset exception: %@", exception);
+    }
+}
+
 // --- attach / detach（成员扫描触发） ------------------------------------------
 
 static void axs_ring_attachContainer(UIView *container) {
@@ -1199,6 +1421,7 @@ static void axs_ring_attachContainer(UIView *container) {
 static void axs_ring_detachDriver(NSString *key) {
     AXSRingLinkDriver *driver = axs_ring_drivers[key];
     if (driver == nil) return;
+    axs_ring_resetTilt(driver);               // beautify.44：恢复侧倾，绝不残留 transform
     [driver.link invalidate];                // displayLink 随容器生命周期停止
     driver.ring.mask = nil;
     [driver.ring removeFromSuperlayer];      // 摘环、清动画、释放图层

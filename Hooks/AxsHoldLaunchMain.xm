@@ -466,6 +466,15 @@ static double axs_ring_page_stepForSpec(PSSpecifier *spec, double min, double ma
     return axs_ring_page_stepFor(min, max);
 }
 
+// beautify.44：数值显示精度——侧倾角度按指令保留一位小数，其余行沿用两位。
+static NSString *axs_ring_page_valueString(PSSpecifier *spec, double value) {
+    NSString *key = [spec propertyForKey:@"key"];
+    if ([key isEqualToString:@"splitBeautifyTiltAngle"]) {
+        return [NSString stringWithFormat:@"%.1f", value];
+    }
+    return [NSString stringWithFormat:@"%.2f", value];
+}
+
 static NSArray *axs_ringPage_specifiers_imp(id self, SEL _cmd) {
     NSArray *specs = ((NSArray *(*)(id, SEL))axs_ringPage_origSpecifiers)(self, _cmd);
     for (PSSpecifier *spec in specs) {
@@ -670,7 +679,7 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
     objc_setAssociatedObject(slider, @selector(axsRingSpec), spec, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject([cell viewWithTag:102], @selector(axsRingSpec), spec, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     objc_setAssociatedObject([cell viewWithTag:104], @selector(axsRingSpec), spec, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    valueLabel.text = [NSString stringWithFormat:@"%.2f", value];
+    valueLabel.text = axs_ring_page_valueString(spec, value);
     return cell;
 }
 
@@ -918,7 +927,7 @@ static void axs_ringPage_applySliderValue(id self, UISlider *slider, double valu
         // attributedText so a "%!f(MISSING)"-style corrupted string can never
         // survive reuse. Dragging, minus and plus all funnel through here.
         valueLabel.attributedText = nil;
-        valueLabel.text = [NSString stringWithFormat:@"%.2f", value];
+        valueLabel.text = axs_ring_page_valueString(spec, value);
     }
 }
 
