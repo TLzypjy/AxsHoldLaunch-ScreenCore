@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.38"
+VERSION="2.0.5+beautify.39"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -89,6 +89,7 @@ check "dylib has glow custom key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dy
 check "dylib has glow color key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowColor'"
 check "dylib has glow radius key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowRadius'"
 check "dylib has glow brightness key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyGlowBrightness'"
+check "dylib has decor master key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDecorEnabled'"
 check "dylib has real picker finish handler" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'colorPickerViewControllerDidFinish:'"
 check "dylib has real picker select-color handler" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'colorPickerViewControllerDidSelectColor:'"
 check "dylib has no overlay engine marker" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'ring engine start') -eq 0"

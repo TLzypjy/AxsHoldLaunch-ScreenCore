@@ -78,10 +78,30 @@ static double axs_ring_clamp(double v, double lo, double hi) {
     return v;
 }
 
+// beautify.39：美化总开关（小窗边框美化）前置声明，定义见下方
+static BOOL axs_ring_decorEnabled(void);
+
 static BOOL axs_ring_enabled(void) {
+    // beautify.39：小窗边框美化总闸 OFF 时，光圈外框一律不渲染
+    if (!axs_ring_decorEnabled()) return NO;
     // 面板默认 YES：域里还没写入时按面板默认走，不能按 NO 静默关闭
     id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameEnabled" defaultValue:@YES];
     return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : YES;
+}
+
+// beautify.39：美化总开关（小窗边框美化）。光圈外框与窗口光晕共用这一道闸：
+// 缺省 YES（旧用户该 key 不存在时保持现有显示效果）；NSNumber 按布尔解析，
+// NSString 兼容 "0"/"no"/"false"/"off" 等写法，其余类型回退默认。
+static BOOL axs_ring_decorEnabled(void) {
+    id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyDecorEnabled" defaultValue:@YES];
+    if ([v isKindOfClass:[NSNumber class]]) return [v boolValue];
+    if ([v isKindOfClass:[NSString class]]) {
+        NSString *s = [(NSString *)v lowercaseString];
+        return !(s.length > 0
+                 && ([s isEqualToString:@"0"] || [s isEqualToString:@"no"]
+                     || [s isEqualToString:@"false"] || [s isEqualToString:@"off"]));
+    }
+    return YES;
 }
 
 static double axs_ring_thickness(void) {
@@ -128,6 +148,8 @@ static UIColor *axs_ring_color(void) {
 // --- 光晕配置 (beautify.30)：独立于光圈外框，沿用同一偏好域与快照 -------------
 
 static BOOL axs_ring_glowEnabled(void) {
+    // beautify.39：总闸 OFF 时，窗口光晕一律不渲染
+    if (!axs_ring_decorEnabled()) return NO;
     id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowEnabled" defaultValue:@NO];
     return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
 }

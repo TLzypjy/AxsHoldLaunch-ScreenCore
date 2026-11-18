@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.38 (rootless)
+name: Build ScreenCore beautify.39 (rootless)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.38
+    name: Build rootless beautify.39
     runs-on: macos-15
 
     steps:
@@ -29,7 +29,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.38"
+          VERSION="2.0.5+beautify.39"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -104,7 +104,7 @@ jobs:
           find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
           ls -la ./repack
 
-      - name: Package 2.0.5+beautify.38 (dpkg-deb)
+      - name: Package 2.0.5+beautify.39 (dpkg-deb)
         env:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
@@ -119,7 +119,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.38"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.39"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
@@ -129,7 +129,7 @@ jobs:
           head -c 8 "$B/SplitSettings.plist" | grep -q "bplist00"
           head -c 8 "$B/zh-Hans.lproj/SplitSettings.strings" | grep -q "bplist00"
           head -c 8 "$B/en.lproj/SplitSettings.strings" | grep -q "bplist00"
-          echo "=== beautify.38 panel cleanup check ==="
+          echo "=== beautify.39 panel cleanup check ==="
           # edge-icon switch must be gone from the panel plist
           strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyEdgeIconEnabled" && { echo "edge icon switch still in plist"; exit 1; }
           strings -a "$B/zh-Hans.lproj/SplitSettings.strings" | grep -Fq "BEAUTIFY_EDGE_ICON" && { echo "BEAUTIFY_EDGE_ICON still in zh strings"; exit 1; }
@@ -140,7 +140,7 @@ jobs:
           DYLIB34=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
           test -n "$DYLIB34"
           strings -a "$DYLIB34" | grep -Fq "%.2f" || { echo "%.2f format missing"; exit 1; }
-          echo "=== beautify.38 slider compact check (source-level) ==="
+          echo "=== beautify.39 slider compact check (source-level) ==="
           # compact geometry: title 78 / value 38 / glyph 18 / hot zone 28
           grep -Fq "constraintEqualToConstant:78" Hooks/AxsHoldLaunchMain.xm || { echo "title width 78 missing"; exit 1; }
           grep -Fq "constraintEqualToConstant:38" Hooks/AxsHoldLaunchMain.xm || { echo "value width 38 missing"; exit 1; }
@@ -153,9 +153,37 @@ jobs:
           # deep sweep + compact thumb/track wired in
           grep -Fq "axs_ring_page_applyUnifiedFontDeep" Hooks/AxsHoldLaunchMain.xm || { echo "deep font sweep missing"; exit 1; }
           grep -Fq "axs_ring_page_sliderThumbImage" Hooks/AxsHoldLaunchMain.xm || { echo "compact thumb missing"; exit 1; }
-          echo "=== beautify.38 dylib selector check ==="
+          echo "=== beautify.39 dylib selector check ==="
           strings -a "$DYLIB34" | grep -Fq "setThumbImage:forState:" || { echo "thumb selector missing"; exit 1; }
           strings -a "$DYLIB34" | grep -Fq "setMinimumTrackImage:forState:" || { echo "track selector missing"; exit 1; }
+          echo "=== beautify.39 decor master switch check ==="
+          strings -a "$DYLIB34" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from dylib"; exit 1; }
+          strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from plist"; exit 1; }
+          python3 - <<PYEOF
+import plistlib, sys
+b = "$B/"
+pl = plistlib.load(open(b + "SplitSettings.plist", "rb"), fmt=plistlib.FMT_BINARY)
+keys = [it.get("key") for it in pl["items"] if it.get("key")]
+order = ["splitBeautifyRingFrameEnabled", "splitBeautifyRingCustomColorEnabled",
+         "splitBeautifyRingFrameColor", "splitBeautifyDecorEnabled",
+         "splitBeautifyGlowEnabled", "splitBeautifyGlowCustomEnabled",
+         "splitBeautifyGlowColor", "splitBeautifyRingThickness",
+         "splitBeautifyGlowRadius", "splitBeautifyGlowBrightness"]
+idx = [keys.index(k) for k in order]
+if idx != sorted(idx):
+    sys.exit("beautify group order wrong: %r" % idx)
+zh = plistlib.load(open(b + "zh-Hans.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
+if zh.get("BEAUTIFY_DECOR_ENABLED") != "小窗边框美化":
+    sys.exit("zh BEAUTIFY_DECOR_ENABLED wrong: %r" % zh.get("BEAUTIFY_DECOR_ENABLED"))
+if zh.get("BEAUTIFY_RING_THICKNESS") != "光圈粗细设置":
+    sys.exit("zh BEAUTIFY_RING_THICKNESS wrong: %r" % zh.get("BEAUTIFY_RING_THICKNESS"))
+if "边框粗细设置" in zh.values():
+    sys.exit("old zh copy 边框粗细设置 still present")
+en = plistlib.load(open(b + "en.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
+if not en.get("BEAUTIFY_DECOR_ENABLED"):
+    sys.exit("en BEAUTIFY_DECOR_ENABLED missing")
+print("beautify.39 decor checks ok: order + zh copy + en label")
+PYEOF
           echo "final verify ok"
           rm -rf "$EXTRACT"
 
