@@ -161,6 +161,98 @@ static BOOL axs_ring_glowEnabled(void) {
     return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
 }
 
+// --- beautify.41：单个容器的侧贴小窗分类 --------------------------------------
+// splitBeautifyDecorEnabled 只控侧贴/窄边小窗的装饰层；居中大浮窗完全忽略
+// 总开关，继续按光圈外框/窗口光晕子开关显示。分类按单个容器独立计算，
+// 绝不在扫描入口用总开关一刀切。
+
+// 对象自身是否报告 docked（内部状态优先）
+static BOOL axs_ring_objectIsDocked(id obj) {
+    if (obj == nil) return NO;
+    if ([obj respondsToSelector:@selector(isDocked)]) {
+        return [(id)obj isDocked] ? YES : NO;
+    }
+    return NO;
+}
+
+// 单容器 docked 判定：
+// 1) 内部状态优先——沿 delegate → 父视图链 → window/rootViewController →
+//    window 本体解析关联对象（含经 session/manager 属性间接一层到
+//    SCFloatingSceneSession/manager），任一对象 respondsToSelector:
+//    @selector(isDocked) 即以内部状态为准；
+// 2) 内部状态读不到时用几何兜底：presentationLayer.frame（或 bounds）
+//    宽 ≤ 屏宽 45%，且原点距左边缘或右边缘 ≤ 12pt，同时满足才判侧贴，
+//    否则一律按居中大浮窗处理；
+// 3) 分类全程 @try/@catch，失败按居中大浮窗处理，绝不影响主队列。
+static BOOL axs_ring_containerIsDocked(UIView *container) {
+    if (container == nil) return NO;
+    @try {
+        NSMutableArray *cands = [NSMutableArray array];
+        if ([container respondsToSelector:@selector(delegate)]) {
+            id del = [(id)container delegate];
+            if (del != nil) [cands addObject:del];
+        }
+        UIView *sv = container.superview;
+        int hops = 0;
+        while (sv != nil && hops < 6) {
+            [cands addObject:sv];
+            sv = sv.superview;
+            hops++;
+        }
+        UIWindow *w = container.window;
+        if (w != nil) {
+            [cands addObject:w];
+            id rvc = [w rootViewController];
+            if (rvc != nil) [cands addObject:rvc];
+        }
+        for (id c in cands) {
+            if (axs_ring_objectIsDocked(c)) return YES;
+            if ([c respondsToSelector:@selector(session)]) {
+                if (axs_ring_objectIsDocked([(id)c session])) return YES;
+            }
+            if ([c respondsToSelector:@selector(manager)]) {
+                if (axs_ring_objectIsDocked([(id)c manager])) return YES;
+            }
+        }
+
+        CGRect frame = container.bounds;
+        CALayer *pres = container.layer.presentationLayer;
+        if ([pres isKindOfClass:[CALayer class]]) frame = [(CALayer *)pres frame];
+        CGFloat sw = 0;
+        if (w != nil) {
+            sw = w.bounds.size.width;
+        } else {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if ([scene isKindOfClass:[UIWindowScene class]]) {
+                    sw = ((UIWindowScene *)scene).screen.bounds.size.width;
+                    break;
+                }
+            }
+        }
+        if (sw <= 0) return NO;
+        if (frame.size.width > sw * 0.45) return NO;
+        if (frame.origin.x <= 12.0) return YES;
+        if (sw - (frame.origin.x + frame.size.width) <= 12.0) return YES;
+        return NO;
+    } @catch (NSException *exception) {
+        return NO;
+    }
+}
+
+// 按窗口类型分别接总开关（指令 三）：
+// docked=YES（侧贴小窗）：ringAllowed = master && ringOn，glowAllowed = master && glowOn；
+// docked=NO（居中大浮窗）：忽略 master，ringAllowed = ringOn，glowAllowed = glowOn。
+// 条件按单个 driver/单个容器判断——绝不因 master=NO 遍历全部 driver detach。
+static BOOL axs_ring_ringAllowedFor(BOOL docked) {
+    if (docked) return axs_ring_decorEnabled() && axs_ring_enabled();
+    return axs_ring_enabled();
+}
+
+static BOOL axs_ring_glowAllowedFor(BOOL docked) {
+    if (docked) return axs_ring_decorEnabled() && axs_ring_glowEnabled();
+    return axs_ring_glowEnabled();
+}
+
 static BOOL axs_ring_glowCustomColor(void) {
     id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowCustomEnabled" defaultValue:@NO];
     return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
@@ -369,6 +461,7 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 @property (nonatomic, assign) double lastGlowRange;     // 上帧光晕范围（0=未显示）
 @property (nonatomic, assign) double lastGlowBrightness;// 上帧光晕亮度（0–100）
 @property (nonatomic, assign) BOOL lastGlowEnabled;
+@property (nonatomic, assign) BOOL lastDocked;          // beautify.41：上帧侧贴/居中分类，变化才写日志
 @property (nonatomic, copy) NSString *radiusSource;     // overlayMask|config
 @property (nonatomic, assign) BOOL loggedAttach;
 - (void)tick;
@@ -459,9 +552,9 @@ static void axs_ring_updateGlowColor(AXSRingLinkDriver *driver) {
 static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
                                CGFloat pathRadius, double range, CGFloat lineWidth) {
     if (driver.glowInner == nil || driver.glowOuter == nil) return;
-    // beautify.40：总闸 OFF 时一律隐藏两层柔光（sync 每帧都会走到这里，
-    // 必须在此拦截，否则光晕子开关 ON + 总闸 OFF 时会被 sync 重新点亮）
-    if (range <= 0.5 || !axs_ring_decorEnabled() || !axs_ring_glowEnabled()
+    // beautify.41：按本容器分类拦截——sync 每帧都会走到这里，必须在此拦，
+    // 否则侧贴小窗（master=OFF）或光晕子开关 OFF 时会被 sync 每帧重新点亮
+    if (range <= 0.5 || !axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container))
         || axs_ring_glowBrightness() <= 0.5) {
         driver.glowInner.hidden = YES;
         driver.glowOuter.hidden = YES;
@@ -621,6 +714,26 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
     UIView *container = driver.container;
     if (container == nil || driver.ring == nil) return;
     if (container.window == nil) return; // 离层：等扫描/布局钩子 detach
+
+    // beautify.41：每帧重判侧贴/居中（指令 二），装饰层可见性无条件应用——
+    // 拖动贴边/脱离侧边/切换 master 立即生效；分类变化才写日志
+    BOOL docked = axs_ring_containerIsDocked(container);
+    if (docked != driver.lastDocked) {
+        driver.lastDocked = docked;
+        UIWindow *w = container.window;
+        CGFloat sw = (w != nil) ? w.bounds.size.width : 0;
+        CGFloat wRatio = (sw > 0) ? container.bounds.size.width / sw : 0;
+        axs_ring_log(@"decor classify: container=%p frame=%@ wRatio=%.2f docked=%d master=%d ringAllowed=%d glowAllowed=%d",
+                     container, NSStringFromCGRect(container.bounds), wRatio,
+                     docked ? 1 : 0, axs_ring_decorEnabled() ? 1 : 0,
+                     axs_ring_ringAllowedFor(docked) ? 1 : 0,
+                     axs_ring_glowAllowedFor(docked) ? 1 : 0);
+    }
+    driver.ring.hidden = !axs_ring_ringAllowedFor(docked);
+    if (!axs_ring_glowAllowedFor(docked)) {
+        if (driver.glowInner != nil) driver.glowInner.hidden = YES;
+        if (driver.glowOuter != nil) driver.glowOuter.hidden = YES;
+    }
     @try {
         double lineWidth = axs_ring_thickness();
         if (lineWidth < 0.5) lineWidth = 0.5;
@@ -703,7 +816,9 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
         }
         driver.radiusSource = source;
 
-        BOOL glowOn = axs_ring_glowEnabled();
+        // beautify.41：光晕按本容器分类闸门（侧贴小窗受 master 控制，
+        // 居中大浮窗忽略 master 只按 glowOn）
+        BOOL glowOn = axs_ring_glowAllowedFor(docked);
         double glowRange = glowOn ? axs_ring_glowRange() : 0.0;
         double glowBright = axs_ring_glowBrightness();
         // 彩虹跟随模式：颜色每帧随 conic 旋转变化，需要逐帧更新光晕色相
@@ -792,15 +907,27 @@ static void axs_ring_attachContainer(UIView *container) {
 
     CAGradientLayer *grad = axs_ring_makeGradient(axs_ring_customColor(), axs_ring_color());
     [ring addSublayer:grad];
-    ring.hidden = !(axs_ring_decorEnabled() && axs_ring_enabled());
-    // beautify.39/40：总闸只管装饰层可见性，容器扫描/挂载不受影响；
-    // 光圈子开关仍独立控制边框（beautify.30 语义保留）
+    // beautify.41：按本容器分类接总闸——侧贴小窗受 master 控制，居中大浮窗
+    // 完全忽略 master（只按光圈子开关）
+    BOOL docked = axs_ring_containerIsDocked(container);
+    BOOL ringAllowed = axs_ring_ringAllowedFor(docked);
+    BOOL glowAllowed = axs_ring_glowAllowedFor(docked);
+    ring.hidden = !ringAllowed;
+    {
+        UIWindow *w = container.window;
+        CGFloat sw = (w != nil) ? w.bounds.size.width : 0;
+        CGFloat wRatio = (sw > 0) ? container.bounds.size.width / sw : 0;
+        axs_ring_log(@"decor classify: container=%p frame=%@ wRatio=%.2f docked=%d master=%d ringAllowed=%d glowAllowed=%d",
+                     container, NSStringFromCGRect(container.bounds), wRatio,
+                     docked ? 1 : 0, axs_ring_decorEnabled() ? 1 : 0,
+                     ringAllowed ? 1 : 0, glowAllowed ? 1 : 0);
+    }
     [mount addSublayer:ring];                // 挂非裁剪祖先层，置最上层（TXT 二.1/二.3）
 
     // beautify.31：两层柔光挂 ring 之下（描边盖在光晕上），同一 mountLayer。
-    // 可见性由 总闸 && glowEnabled 决定（beautify.40）；自定义开关只决定颜色
-    // 来源，不影响显隐。
-    BOOL showGlow = axs_ring_decorEnabled() && axs_ring_glowEnabled();
+    // 可见性由「本容器类型对应的光晕允许条件」决定（beautify.41：侧贴小窗
+    // 受 master 控制，居中大浮窗忽略 master）；自定义开关只决定颜色来源。
+    BOOL showGlow = glowAllowed;
     CAShapeLayer *glowInner = axs_ring_makeGlowLayer(AXS_RING_GLOW_NAME);
     CAShapeLayer *glowOuter = axs_ring_makeGlowLayer([AXS_RING_GLOW_NAME stringByAppendingString:@"Outer"]);
     glowInner.hidden = !showGlow;
@@ -999,13 +1126,13 @@ static void axs_ring_refreshAppearance(void) {
     NSArray *keys = [axs_ring_drivers.allKeys copy];
     if (![keys isKindOfClass:[NSArray class]]) return;
 
-    // beautify.40：总闸只在装饰层可见性处生效——ringOn/glowOn 只驱动
-    // ring/glow 图层的 hidden，绝不摘 driver、不触容器
-    BOOL glowOn = axs_ring_decorEnabled() && axs_ring_glowEnabled();
-    double glowRange = glowOn ? axs_ring_glowRange() : 0.0;
+    // beautify.41：偏好刷新按单个 driver 分类——居中大浮窗（docked=NO）忽略
+    // 总开关，侧贴小窗（docked=YES）受 master 控制；全局配置（范围/亮度/颜色）
+    // 在循环外取一次，允许条件在循环内按容器逐个计算。只驱动装饰层 hidden，
+    // 绝不摘 driver、不触容器，大浮窗装饰层不会被偏好通知误删。
+    double glowRangeCfg = axs_ring_glowRange();
     double glowBright = axs_ring_glowBrightness();
     UIColor *glowColor = axs_ring_glowColor();
-    BOOL ringOn = axs_ring_decorEnabled() && axs_ring_enabled();
 
     for (id key in keys) {
         @autoreleasepool {
@@ -1022,7 +1149,10 @@ static void axs_ring_refreshAppearance(void) {
                 CALayer *ring = d.ring;             // 弱引用先取局部并判空
                 if (![ring isKindOfClass:[CALayer class]]) continue;
 
-                ring.hidden = !ringOn;              // 光圈开关独立生效
+                BOOL docked = axs_ring_containerIsDocked(d.container);
+                BOOL ringAllowed = axs_ring_ringAllowedFor(docked);
+                BOOL glowAllowed = axs_ring_glowAllowedFor(docked);
+                ring.hidden = !ringAllowed;         // 本容器类型对应的边框可见性
 
                 // 先 retain 新层，再移除旧层，避免中间空引用
                 CAGradientLayer *old = d.gradient;
@@ -1040,7 +1170,8 @@ static void axs_ring_refreshAppearance(void) {
                 // 下一帧 syncDriver 按同一 presentation 矩形补齐，不摘层、不停 link。
                 CAShapeLayer *gi = d.glowInner;
                 CAShapeLayer *go = d.glowOuter;
-                BOOL showGlow = glowOn && glowRange > 0.5 && glowBright > 0.5;
+                double glowRange = glowAllowed ? glowRangeCfg : 0.0;
+                BOOL showGlow = glowAllowed && glowRange > 0.5 && glowBright > 0.5;
                 [CATransaction begin];
                 [CATransaction setDisableActions:YES];
                 if ([gi isKindOfClass:[CAShapeLayer class]]) {

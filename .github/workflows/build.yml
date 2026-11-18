@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.40 (rootless)
+name: Build ScreenCore beautify.41 (rootless)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.40
+    name: Build rootless beautify.41
     runs-on: macos-15
 
     steps:
@@ -29,7 +29,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.40"
+          VERSION="2.0.5+beautify.41"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -104,7 +104,7 @@ jobs:
           find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
           ls -la ./repack
 
-      - name: Package 2.0.5+beautify.40 (dpkg-deb)
+      - name: Package 2.0.5+beautify.41 (dpkg-deb)
         env:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
@@ -119,7 +119,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.40"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.41"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
@@ -129,7 +129,7 @@ jobs:
           head -c 8 "$B/SplitSettings.plist" | grep -q "bplist00"
           head -c 8 "$B/zh-Hans.lproj/SplitSettings.strings" | grep -q "bplist00"
           head -c 8 "$B/en.lproj/SplitSettings.strings" | grep -q "bplist00"
-          echo "=== beautify.40 panel cleanup check ==="
+          echo "=== beautify.41 panel cleanup check ==="
           # edge-icon switch must be gone from the panel plist
           strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyEdgeIconEnabled" && { echo "edge icon switch still in plist"; exit 1; }
           strings -a "$B/zh-Hans.lproj/SplitSettings.strings" | grep -Fq "BEAUTIFY_EDGE_ICON" && { echo "BEAUTIFY_EDGE_ICON still in zh strings"; exit 1; }
@@ -140,7 +140,7 @@ jobs:
           DYLIB34=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
           test -n "$DYLIB34"
           strings -a "$DYLIB34" | grep -Fq "%.2f" || { echo "%.2f format missing"; exit 1; }
-          echo "=== beautify.40 slider compact check (source-level) ==="
+          echo "=== beautify.41 slider compact check (source-level) ==="
           # compact geometry: title 78 / value 38 / glyph 18 / hot zone 28
           grep -Fq "constraintEqualToConstant:78" Hooks/AxsHoldLaunchMain.xm || { echo "title width 78 missing"; exit 1; }
           grep -Fq "constraintEqualToConstant:38" Hooks/AxsHoldLaunchMain.xm || { echo "value width 38 missing"; exit 1; }
@@ -153,10 +153,10 @@ jobs:
           # deep sweep + compact thumb/track wired in
           grep -Fq "axs_ring_page_applyUnifiedFontDeep" Hooks/AxsHoldLaunchMain.xm || { echo "deep font sweep missing"; exit 1; }
           grep -Fq "axs_ring_page_sliderThumbImage" Hooks/AxsHoldLaunchMain.xm || { echo "compact thumb missing"; exit 1; }
-          echo "=== beautify.40 dylib selector check ==="
+          echo "=== beautify.41 dylib selector check ==="
           strings -a "$DYLIB34" | grep -Fq "setThumbImage:forState:" || { echo "thumb selector missing"; exit 1; }
           strings -a "$DYLIB34" | grep -Fq "setMinimumTrackImage:forState:" || { echo "track selector missing"; exit 1; }
-          echo "=== beautify.40 decor master switch check ==="
+          echo "=== beautify.41 decor master switch check ==="
           strings -a "$DYLIB34" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from dylib"; exit 1; }
           strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from plist"; exit 1; }
           python3 - <<PYEOF
@@ -182,18 +182,28 @@ jobs:
           en = plistlib.load(open(b + "en.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
           if not en.get("BEAUTIFY_DECOR_ENABLED"):
               sys.exit("en BEAUTIFY_DECOR_ENABLED missing")
-          print("beautify.40 decor checks ok: order + zh copy + en label")
+          print("beautify.41 decor checks ok: order + zh copy + en label")
           PYEOF
-          echo "=== beautify.40 master switch scope check (source-level) ==="
+          echo "=== beautify.41 master switch scope check (source-level) ==="
           # .39 bug pattern must be gone: master gate inside the pure sub-switch readers
           ! grep -Fq "if (!axs_ring_decorEnabled()) return NO;" Hooks/AxsBeautifyRing.xm || { echo ".39 gate pattern still in sub-switch readers"; exit 1; }
-          # master must appear ONLY in decor-layer visibility decisions (7 = decl+def+5 call sites)
-          test "$(grep -c "axs_ring_decorEnabled" Hooks/AxsBeautifyRing.xm)" -eq 7 || { echo "decorEnabled call sites changed (expected 7)"; exit 1; }
-          grep -Fq "ring.hidden = !(axs_ring_decorEnabled() && axs_ring_enabled());" Hooks/AxsBeautifyRing.xm || { echo "attach ring visibility gate missing"; exit 1; }
-          grep -Fq "BOOL showGlow = axs_ring_decorEnabled() && axs_ring_glowEnabled();" Hooks/AxsBeautifyRing.xm || { echo "attach glow visibility gate missing"; exit 1; }
-          grep -Fq "!axs_ring_decorEnabled() || !axs_ring_glowEnabled()" Hooks/AxsBeautifyRing.xm || { echo "applyGlow hide gate missing"; exit 1; }
-          grep -Fq "BOOL ringOn = axs_ring_decorEnabled() && axs_ring_enabled();" Hooks/AxsBeautifyRing.xm || { echo "refresh ring gate missing"; exit 1; }
-          grep -Fq "BOOL glowOn = axs_ring_decorEnabled() && axs_ring_glowEnabled();" Hooks/AxsBeautifyRing.xm || { echo "refresh glow gate missing"; exit 1; }
+          # master appears in: decl + def + 2 per-type helpers + 2 classify logs = 6;
+          # scanTick / attach guard / detach path have none (count would drift if leaked)
+          test "$(grep -c "axs_ring_decorEnabled" Hooks/AxsBeautifyRing.xm)" -eq 6 || { echo "decorEnabled occurrences changed (expected 6)"; exit 1; }
+          # per-container docked classification wired
+          grep -Fq "static BOOL axs_ring_containerIsDocked(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "docked classifier missing"; exit 1; }
+          grep -Fq "respondsToSelector:@selector(isDocked)" Hooks/AxsBeautifyRing.xm || { echo "internal isDocked probe missing"; exit 1; }
+          grep -Fq "frame.size.width > sw * 0.45" Hooks/AxsBeautifyRing.xm || { echo "geometry 45% rule missing"; exit 1; }
+          grep -Fq "frame.origin.x <= 12.0" Hooks/AxsBeautifyRing.xm || { echo "geometry 12pt edge rule missing"; exit 1; }
+          grep -Fq "static BOOL axs_ring_ringAllowedFor(BOOL docked)" Hooks/AxsBeautifyRing.xm || { echo "ringAllowedFor missing"; exit 1; }
+          grep -Fq "static BOOL axs_ring_glowAllowedFor(BOOL docked)" Hooks/AxsBeautifyRing.xm || { echo "glowAllowedFor missing"; exit 1; }
+          # attach: classification + per-container gates
+          grep -Fq "BOOL docked = axs_ring_containerIsDocked(container);" Hooks/AxsBeautifyRing.xm || { echo "attach docked classify missing"; exit 1; }
+          grep -Fq "driver.ring.hidden = !axs_ring_ringAllowedFor(docked);" Hooks/AxsBeautifyRing.xm || { echo "sync per-frame visibility missing"; exit 1; }
+          grep -Fq "BOOL glowOn = axs_ring_glowAllowedFor(docked);" Hooks/AxsBeautifyRing.xm || { echo "sync glow per-type gate missing"; exit 1; }
+          grep -Fq "BOOL docked = axs_ring_containerIsDocked(d.container);" Hooks/AxsBeautifyRing.xm || { echo "refresh per-driver classify missing"; exit 1; }
+          grep -Fq "!axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container))" Hooks/AxsBeautifyRing.xm || { echo "applyGlow per-container gate missing"; exit 1; }
+          test "$(grep -c "decor classify" Hooks/AxsBeautifyRing.xm)" -eq 2 || { echo "classify log missing (expect attach + sync)"; exit 1; }
           echo "final verify ok"
           rm -rf "$EXTRACT"
 
