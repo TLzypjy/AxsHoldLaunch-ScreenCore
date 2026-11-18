@@ -160,30 +160,30 @@ jobs:
           strings -a "$DYLIB34" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from dylib"; exit 1; }
           strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from plist"; exit 1; }
           python3 - <<PYEOF
-import plistlib, sys
-b = "$B/"
-pl = plistlib.load(open(b + "SplitSettings.plist", "rb"), fmt=plistlib.FMT_BINARY)
-keys = [it.get("key") for it in pl["items"] if it.get("key")]
-order = ["splitBeautifyRingFrameEnabled", "splitBeautifyRingCustomColorEnabled",
-         "splitBeautifyRingFrameColor", "splitBeautifyDecorEnabled",
-         "splitBeautifyGlowEnabled", "splitBeautifyGlowCustomEnabled",
-         "splitBeautifyGlowColor", "splitBeautifyRingThickness",
-         "splitBeautifyGlowRadius", "splitBeautifyGlowBrightness"]
-idx = [keys.index(k) for k in order]
-if idx != sorted(idx):
-    sys.exit("beautify group order wrong: %r" % idx)
-zh = plistlib.load(open(b + "zh-Hans.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
-if zh.get("BEAUTIFY_DECOR_ENABLED") != "小窗边框美化":
-    sys.exit("zh BEAUTIFY_DECOR_ENABLED wrong: %r" % zh.get("BEAUTIFY_DECOR_ENABLED"))
-if zh.get("BEAUTIFY_RING_THICKNESS") != "光圈粗细设置":
-    sys.exit("zh BEAUTIFY_RING_THICKNESS wrong: %r" % zh.get("BEAUTIFY_RING_THICKNESS"))
-if "边框粗细设置" in zh.values():
-    sys.exit("old zh copy 边框粗细设置 still present")
-en = plistlib.load(open(b + "en.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
-if not en.get("BEAUTIFY_DECOR_ENABLED"):
-    sys.exit("en BEAUTIFY_DECOR_ENABLED missing")
-print("beautify.39 decor checks ok: order + zh copy + en label")
-PYEOF
+          import plistlib, sys
+          b = "$B/"
+          pl = plistlib.load(open(b + "SplitSettings.plist", "rb"), fmt=plistlib.FMT_BINARY)
+          keys = [it.get("key") for it in pl["items"] if it.get("key")]
+          order = ["splitBeautifyRingFrameEnabled", "splitBeautifyRingCustomColorEnabled",
+                   "splitBeautifyRingFrameColor", "splitBeautifyDecorEnabled",
+                   "splitBeautifyGlowEnabled", "splitBeautifyGlowCustomEnabled",
+                   "splitBeautifyGlowColor", "splitBeautifyRingThickness",
+                   "splitBeautifyGlowRadius", "splitBeautifyGlowBrightness"]
+          idx = [keys.index(k) for k in order]
+          if idx != sorted(idx):
+              sys.exit("beautify group order wrong: %r" % idx)
+          zh = plistlib.load(open(b + "zh-Hans.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
+          if zh.get("BEAUTIFY_DECOR_ENABLED") != "小窗边框美化":
+              sys.exit("zh BEAUTIFY_DECOR_ENABLED wrong: %r" % zh.get("BEAUTIFY_DECOR_ENABLED"))
+          if zh.get("BEAUTIFY_RING_THICKNESS") != "光圈粗细设置":
+              sys.exit("zh BEAUTIFY_RING_THICKNESS wrong: %r" % zh.get("BEAUTIFY_RING_THICKNESS"))
+          if "边框粗细设置" in zh.values():
+              sys.exit("old zh copy 边框粗细设置 still present")
+          en = plistlib.load(open(b + "en.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
+          if not en.get("BEAUTIFY_DECOR_ENABLED"):
+              sys.exit("en BEAUTIFY_DECOR_ENABLED missing")
+          print("beautify.39 decor checks ok: order + zh copy + en label")
+          PYEOF
           echo "final verify ok"
           rm -rf "$EXTRACT"
 
