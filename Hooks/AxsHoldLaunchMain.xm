@@ -491,6 +491,46 @@ static NSString *axs_ringPage_subtitle_imp(id self, SEL _cmd, PSSpecifier *spec)
     return [NSString stringWithFormat:format, (unsigned long)axs_ring_page_excludeCount()];
 }
 
+// beautify.38: compact slider visuals. The thumb is an 18x18 white circle
+// with a hairline border and no shadow / outer glow; the track is a slim
+// 4pt rounded rect (radius 2). The filled half keeps the slider's own tint
+// color; the empty half is light gray. Rendered at device scale so it stays
+// crisp on retina.
+static UIImage *axs_ring_page_sliderThumbImage(void) {
+    UIGraphicsImageRenderer *renderer =
+        [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(18, 18)];
+    return [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGContextRef c = ctx.CGContext;
+        CGRect circle = CGRectMake(0.5, 0.5, 17.0, 17.0);
+        CGContextSetFillColorWithColor(c, [UIColor whiteColor].CGColor);
+        CGContextFillEllipseInRect(c, circle);
+        CGContextSetStrokeColorWithColor(c, [UIColor colorWithWhite:0.78 alpha:1.0].CGColor);
+        CGContextSetLineWidth(c, 1.0);
+        CGContextStrokeEllipseInRect(c, circle);
+    }];
+}
+
+// 4pt tall stretchable track segment; rounded on the outer end only (the
+// thumb covers the inner end, so it may stay flat-cut).
+static UIImage *axs_ring_page_sliderTrackImage(UIColor *color, BOOL filled) {
+    UIGraphicsImageRenderer *renderer =
+        [[UIGraphicsImageRenderer alloc] initWithSize:CGSizeMake(8, 4)];
+    UIImage *img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGContextRef c = ctx.CGContext;
+        CGContextSetFillColorWithColor(c, color.CGColor);
+        UIRectCorner corners = filled
+            ? (UIRectCornerTopLeft | UIRectCornerBottomLeft)
+            : (UIRectCornerTopRight | UIRectCornerBottomRight);
+        UIBezierPath *path = [UIBezierPath
+            bezierPathWithRoundedRect:CGRectMake(0, 0, 8, 4)
+                    byRoundingCorners:corners
+                          cornerRadii:CGSizeMake(2, 2)];
+        [path addClip];
+        CGContextFillRect(c, CGRectMake(0, 0, 8, 4));
+    }];
+    return [img resizableImageWithCapInsets:UIEdgeInsetsMake(0, 2, 0, 2)];
+}
+
 static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView, PSSpecifier *spec) {
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"AXSRingSlider"];
     if (cell == nil) {
@@ -528,6 +568,22 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
         [slider addTarget:self action:@selector(axs_ringSliderChanged:) forControlEvents:UIControlEventValueChanged];
         [cell.contentView addSubview:slider];
 
+        // beautify.38: every slider row gets the same compact 18x18 thumb and
+        // slim 4pt rounded track. The control itself stays 28pt tall, so the
+        // touch/drag area is not shrunk with the visual knob.
+        {
+            UIImage *thumb = axs_ring_page_sliderThumbImage();
+            [slider setThumbImage:thumb forState:UIControlStateNormal];
+            [slider setThumbImage:thumb forState:UIControlStateHighlighted];
+            [slider setThumbImage:thumb forState:UIControlStateSelected];
+            [slider setThumbImage:thumb forState:UIControlStateDisabled];
+            UIColor *filledColor = slider.tintColor ?: [UIColor systemBlueColor];
+            [slider setMinimumTrackImage:axs_ring_page_sliderTrackImage(filledColor, YES)
+                                forState:UIControlStateNormal];
+            [slider setMaximumTrackImage:axs_ring_page_sliderTrackImage([UIColor colorWithWhite:0.85 alpha:1.0], NO)
+                                forState:UIControlStateNormal];
+        }
+
         UIButton *plus = [UIButton buttonWithType:UIButtonTypeCustom];
         plus.tag = 104;
         plus.translatesAutoresizingMaskIntoConstraints = NO;
@@ -552,37 +608,38 @@ static UITableViewCell *axs_ringPage_sliderCell(id self, UITableView *tableView,
         [cell.contentView addSubview:value];
 
         UILayoutGuide *margin = cell.contentView.layoutMarginsGuide;
-        // beautify.36: one fixed geometry for EVERY slider row so all track
-        // lengths match (row 44, title 92, buttons 30x30 hot zone with 22x22
-        // glyph, slider h28, value 44)
+        // beautify.38: one fixed geometry for EVERY slider row so all track
+        // lengths match (row 44, title 78, buttons 28x28 hot zone with 18x18
+        // glyph, all gaps 2pt, slider h28, value 38). The slim gaps push the
+        // track as long as possible, close to the text on both sides.
         [NSLayoutConstraint activateConstraints:@[
             [title.leadingAnchor constraintEqualToAnchor:margin.leadingAnchor],
-            [title.widthAnchor constraintEqualToConstant:92],
+            [title.widthAnchor constraintEqualToConstant:78],
             [title.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [minus.leadingAnchor constraintEqualToAnchor:title.trailingAnchor constant:4],
+            [minus.leadingAnchor constraintEqualToAnchor:title.trailingAnchor constant:2],
             [minus.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [minus.widthAnchor constraintEqualToConstant:30],
-            [minus.heightAnchor constraintEqualToConstant:30],
+            [minus.widthAnchor constraintEqualToConstant:28],
+            [minus.heightAnchor constraintEqualToConstant:28],
             [minusGlyph.centerXAnchor constraintEqualToAnchor:minus.centerXAnchor],
             [minusGlyph.centerYAnchor constraintEqualToAnchor:minus.centerYAnchor],
-            [minusGlyph.widthAnchor constraintEqualToConstant:22],
-            [minusGlyph.heightAnchor constraintEqualToConstant:22],
+            [minusGlyph.widthAnchor constraintEqualToConstant:18],
+            [minusGlyph.heightAnchor constraintEqualToConstant:18],
             [slider.leadingAnchor constraintEqualToAnchor:minus.trailingAnchor constant:2],
             [slider.trailingAnchor constraintEqualToAnchor:plus.leadingAnchor constant:-2],
             [slider.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
             [slider.heightAnchor constraintEqualToConstant:28],
             [plus.leadingAnchor constraintEqualToAnchor:slider.trailingAnchor constant:2],
             [plus.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [plus.widthAnchor constraintEqualToConstant:30],
-            [plus.heightAnchor constraintEqualToConstant:30],
+            [plus.widthAnchor constraintEqualToConstant:28],
+            [plus.heightAnchor constraintEqualToConstant:28],
             [plusGlyph.centerXAnchor constraintEqualToAnchor:plus.centerXAnchor],
             [plusGlyph.centerYAnchor constraintEqualToAnchor:plus.centerYAnchor],
-            [plusGlyph.widthAnchor constraintEqualToConstant:22],
-            [plusGlyph.heightAnchor constraintEqualToConstant:22],
-            [value.leadingAnchor constraintEqualToAnchor:plus.trailingAnchor constant:4],
+            [plusGlyph.widthAnchor constraintEqualToConstant:18],
+            [plusGlyph.heightAnchor constraintEqualToConstant:18],
+            [value.leadingAnchor constraintEqualToAnchor:plus.trailingAnchor constant:2],
             [value.trailingAnchor constraintEqualToAnchor:margin.trailingAnchor],
             [value.centerYAnchor constraintEqualToAnchor:cell.contentView.centerYAnchor],
-            [value.widthAnchor constraintEqualToConstant:44],
+            [value.widthAnchor constraintEqualToConstant:38],
         ]];
     }
 
@@ -625,6 +682,22 @@ static void axs_ring_page_applyUnifiedFont(UITableViewCell *cell) {
     }
     if (cell.detailTextLabel != nil) {
         cell.detailTextLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    }
+}
+
+// beautify.38: recursive 12pt sweep over a system cell's label tree
+// (cell.subviews covers contentView.subviews). List/link/menu cells keep
+// their title and selected-value labels in private UILabel subviews, which
+// textLabel/detailTextLabel alone cannot reach. Only UILabel fonts are
+// touched: text color, alignment, numberOfLines and adjustsFontSizeToFitWidth
+// are preserved, and UISwitch / chevron / info-icon views are never modified.
+static void axs_ring_page_applyUnifiedFontDeep(UIView *view) {
+    if (view == nil) return;
+    if ([view isKindOfClass:[UILabel class]]) {
+        ((UILabel *)view).font = [UIFont systemFontOfSize:12 weight:UIFontWeightRegular];
+    }
+    for (UIView *sub in view.subviews) {
+        axs_ring_page_applyUnifiedFontDeep(sub);
     }
 }
 
@@ -788,6 +861,15 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
         UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, id, id))axs_ringPage_origCellForRow)(self, _cmd, tableView, indexPath);
         // beautify.35: unify pass-through system rows to 12pt (nil-safe)
         axs_ring_page_applyUnifiedFont(cell);
+        // beautify.38: list/link/menu selection cells draw their title and
+        // the blue selected value in private UILabel subviews — sweep the
+        // whole label tree to 12pt as well. Group header/footer rows
+        // (PSGroupCell) stay on the system renderer untouched; switches,
+        // chevrons and info icons are not resized because only UILabel
+        // objects are re-fonted.
+        if (cell != nil && ![cellType isEqualToString:@"PSGroupCell"]) {
+            axs_ring_page_applyUnifiedFontDeep(cell);
+        }
 
         if ([key isEqualToString:AxsHoldLaunchKeyExclude]) {
             NSString *subtitle = axs_ringPage_subtitle_imp(self, _cmd, spec);

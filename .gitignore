@@ -3,3 +3,4 @@ packages/
 *.deb
 !packaging/base/*.deb
 .DS_Store
+*.bak*
