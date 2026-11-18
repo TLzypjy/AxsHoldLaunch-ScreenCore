@@ -1236,9 +1236,10 @@ static UIView *axs_ring_findTiltOverlay(UIView *container) {
             if (sib != container && [sib isKindOfClass:overlayCls]) return sib;
         }
     }
-    // 兜底：从 window 递归找
+    // 兜底：从 window 递归找（两段式声明，避免 block 初始化时捕获自身）
     __block UIView *found = nil;
-    void (^walk)(UIView *) = ^(UIView *v) {
+    __block void (^walk)(UIView *);
+    walk = ^(UIView *v) {
         if (found != nil) return;
         if (v != container && [v isKindOfClass:overlayCls]) { found = v; return; }
         for (UIView *sub in v.subviews) walk(sub);
