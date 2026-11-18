@@ -101,7 +101,7 @@ static NSString *axs_ring_nsTransform(CGAffineTransform t) {
 }
 
 // beautify.47：CATransform3D 的可读描述（3D 透视探针日志用）。
-CATransform3D 零值不是 identity，显式用 CATransform3DIsIdentity 判定。
+// CATransform3D 零值不是 identity，显式用 CATransform3DIsIdentity 判定。
 static NSString *axs_ring_nsTransform3D(CATransform3D t) {
     return [NSString stringWithFormat:@"3D(a=%.4f b=%.4f c=%.4f d=%.4f "
             @"m13=%.5f m23=%.5f m31=%.4f m32=%.4f m34=%.5f tx=%.2f ty=%.2f tz=%.2f)%@",
