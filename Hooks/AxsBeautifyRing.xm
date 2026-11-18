@@ -93,13 +93,6 @@ static id axs_ring_nsValue(id obj, NSString *key) {
     return v;
 }
 
-// CGAffineTransform 的可读描述（探针日志用，保留供 2D 层级字段展示）
-static NSString *axs_ring_nsTransform(CGAffineTransform t) {
-    return [NSString stringWithFormat:@"(a=%.4f b=%.4f c=%.4f d=%.4f tx=%.2f ty=%.2f)%@",
-            t.a, t.b, t.c, t.d, t.tx, t.ty,
-            CGAffineTransformIsIdentity(t) ? @"[identity]" : @""];
-}
-
 // beautify.47：CATransform3D 的可读描述（3D 透视探针日志用）。
 // CATransform3D 零值不是 identity，显式用 CATransform3DIsIdentity 判定。
 static NSString *axs_ring_nsTransform3D(CATransform3D t) {
