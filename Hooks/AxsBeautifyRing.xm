@@ -81,15 +81,23 @@ static double axs_ring_clamp(double v, double lo, double hi) {
 // beautify.39：美化总开关（小窗边框美化）前置声明，定义见下方
 static BOOL axs_ring_decorEnabled(void);
 
+// beautify.40：总开关 splitBeautifyDecorEnabled 只允许出现在「插件自绘装饰层
+// 是否可见」的判断里（attach 初始显隐 / applyGlow 显隐 / refreshAppearance
+// 显隐），与子开关做与运算；绝不能进入容器扫描、attach/detach 生命周期、
+// scanTick 摘除分支或任何原始容器/宿主 window 的 hidden/alpha/frame 路径——
+// 总闸 OFF 时浮窗本体必须原样保留，只隐藏插件自建的 ring/gradient/glow。
+
+// beautify.40：子开关读取保持纯净——总开关 splitBeautifyDecorEnabled
+// 绝不能进入本函数，否则会经 scanTick 的 detach-all 分支与 attach 守卫
+// 泄漏进容器扫描/挂载/摘除路径，误伤浮窗本体（.39 真机回归根因）。
+// 总闸只在装饰层可见性判断处与子开关做与运算（见 attach/applyGlow/refresh）。
 static BOOL axs_ring_enabled(void) {
-    // beautify.39：小窗边框美化总闸 OFF 时，光圈外框一律不渲染
-    if (!axs_ring_decorEnabled()) return NO;
     // 面板默认 YES：域里还没写入时按面板默认走，不能按 NO 静默关闭
     id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameEnabled" defaultValue:@YES];
     return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : YES;
 }
 
-// beautify.39：美化总开关（小窗边框美化）。光圈外框与窗口光晕共用这一道闸：
+// beautify.39：美化总开关（小窗边框美化）。beautify.40 起只用于装饰层可见性：
 // 缺省 YES（旧用户该 key 不存在时保持现有显示效果）；NSNumber 按布尔解析，
 // NSString 兼容 "0"/"no"/"false"/"off" 等写法，其余类型回退默认。
 static BOOL axs_ring_decorEnabled(void) {
@@ -148,8 +156,7 @@ static UIColor *axs_ring_color(void) {
 // --- 光晕配置 (beautify.30)：独立于光圈外框，沿用同一偏好域与快照 -------------
 
 static BOOL axs_ring_glowEnabled(void) {
-    // beautify.39：总闸 OFF 时，窗口光晕一律不渲染
-    if (!axs_ring_decorEnabled()) return NO;
+    // beautify.40：同 axs_ring_enabled——总闸不进本函数（纯子开关读取）
     id v = [[AxsHoldLaunchConfig axs_holdlaunch_shared] axs_holdlaunch_theirValueForKey:@"splitBeautifyGlowEnabled" defaultValue:@NO];
     return [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
 }
@@ -452,7 +459,10 @@ static void axs_ring_updateGlowColor(AXSRingLinkDriver *driver) {
 static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
                                CGFloat pathRadius, double range, CGFloat lineWidth) {
     if (driver.glowInner == nil || driver.glowOuter == nil) return;
-    if (range <= 0.5 || !axs_ring_glowEnabled() || axs_ring_glowBrightness() <= 0.5) {
+    // beautify.40：总闸 OFF 时一律隐藏两层柔光（sync 每帧都会走到这里，
+    // 必须在此拦截，否则光晕子开关 ON + 总闸 OFF 时会被 sync 重新点亮）
+    if (range <= 0.5 || !axs_ring_decorEnabled() || !axs_ring_glowEnabled()
+        || axs_ring_glowBrightness() <= 0.5) {
         driver.glowInner.hidden = YES;
         driver.glowOuter.hidden = YES;
         return;
@@ -782,12 +792,15 @@ static void axs_ring_attachContainer(UIView *container) {
 
     CAGradientLayer *grad = axs_ring_makeGradient(axs_ring_customColor(), axs_ring_color());
     [ring addSublayer:grad];
-    ring.hidden = !axs_ring_enabled();       // beautify.30：光圈可独立于光晕关闭
+    ring.hidden = !(axs_ring_decorEnabled() && axs_ring_enabled());
+    // beautify.39/40：总闸只管装饰层可见性，容器扫描/挂载不受影响；
+    // 光圈子开关仍独立控制边框（beautify.30 语义保留）
     [mount addSublayer:ring];                // 挂非裁剪祖先层，置最上层（TXT 二.1/二.3）
 
     // beautify.31：两层柔光挂 ring 之下（描边盖在光晕上），同一 mountLayer。
-    // 可见性只由 glowEnabled 决定；自定义开关只决定颜色来源，不影响显隐。
-    BOOL showGlow = axs_ring_glowEnabled();
+    // 可见性由 总闸 && glowEnabled 决定（beautify.40）；自定义开关只决定颜色
+    // 来源，不影响显隐。
+    BOOL showGlow = axs_ring_decorEnabled() && axs_ring_glowEnabled();
     CAShapeLayer *glowInner = axs_ring_makeGlowLayer(AXS_RING_GLOW_NAME);
     CAShapeLayer *glowOuter = axs_ring_makeGlowLayer([AXS_RING_GLOW_NAME stringByAppendingString:@"Outer"]);
     glowInner.hidden = !showGlow;
@@ -986,11 +999,13 @@ static void axs_ring_refreshAppearance(void) {
     NSArray *keys = [axs_ring_drivers.allKeys copy];
     if (![keys isKindOfClass:[NSArray class]]) return;
 
-    BOOL glowOn = axs_ring_glowEnabled();
+    // beautify.40：总闸只在装饰层可见性处生效——ringOn/glowOn 只驱动
+    // ring/glow 图层的 hidden，绝不摘 driver、不触容器
+    BOOL glowOn = axs_ring_decorEnabled() && axs_ring_glowEnabled();
     double glowRange = glowOn ? axs_ring_glowRange() : 0.0;
     double glowBright = axs_ring_glowBrightness();
     UIColor *glowColor = axs_ring_glowColor();
-    BOOL ringOn = axs_ring_enabled();
+    BOOL ringOn = axs_ring_decorEnabled() && axs_ring_enabled();
 
     for (id key in keys) {
         @autoreleasepool {
