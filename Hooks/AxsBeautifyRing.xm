@@ -166,11 +166,21 @@ static BOOL axs_ring_glowEnabled(void) {
 // 总开关，继续按光圈外框/窗口光晕子开关显示。分类按单个容器独立计算，
 // 绝不在扫描入口用总开关一刀切。
 
+// 动态探测协议：让编译器看到 ScreenCore 内部对象可能带的可选选择子，
+// 全部调用点都有 respondsToSelector 守卫，对象不实现即返回 NO/nil。
+@protocol AXSRingDockedProbe <NSObject>
+@optional
+- (BOOL)isDocked;
+- (id)session;
+- (id)manager;
+@end
+
 // 对象自身是否报告 docked（内部状态优先）
 static BOOL axs_ring_objectIsDocked(id obj) {
     if (obj == nil) return NO;
-    if ([obj respondsToSelector:@selector(isDocked)]) {
-        return [(id)obj isDocked] ? YES : NO;
+    id<AXSRingDockedProbe> probe = obj;
+    if ([probe respondsToSelector:@selector(isDocked)]) {
+        return ([probe isDocked]) ? YES : NO;
     }
     return NO;
 }
@@ -207,11 +217,12 @@ static BOOL axs_ring_containerIsDocked(UIView *container) {
         }
         for (id c in cands) {
             if (axs_ring_objectIsDocked(c)) return YES;
-            if ([c respondsToSelector:@selector(session)]) {
-                if (axs_ring_objectIsDocked([(id)c session])) return YES;
+            id<AXSRingDockedProbe> probe = c;
+            if ([probe respondsToSelector:@selector(session)]) {
+                if (axs_ring_objectIsDocked([probe session])) return YES;
             }
-            if ([c respondsToSelector:@selector(manager)]) {
-                if (axs_ring_objectIsDocked([(id)c manager])) return YES;
+            if ([probe respondsToSelector:@selector(manager)]) {
+                if (axs_ring_objectIsDocked([probe manager])) return YES;
             }
         }
 
