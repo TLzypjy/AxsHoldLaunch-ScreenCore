@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.46 (rootless)
+name: Build ScreenCore beautify.47 (rootless)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.46
+    name: Build rootless beautify.47
     runs-on: macos-15
 
     steps:
@@ -29,7 +29,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.46"
+          VERSION="2.0.5+beautify.47"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -104,7 +104,7 @@ jobs:
           find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
           ls -la ./repack
 
-      - name: Package 2.0.5+beautify.46 (dpkg-deb)
+      - name: Package 2.0.5+beautify.47 (dpkg-deb)
         env:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
@@ -119,7 +119,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.46"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.47"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
@@ -129,7 +129,7 @@ jobs:
           head -c 8 "$B/SplitSettings.plist" | grep -q "bplist00"
           head -c 8 "$B/zh-Hans.lproj/SplitSettings.strings" | grep -q "bplist00"
           head -c 8 "$B/en.lproj/SplitSettings.strings" | grep -q "bplist00"
-          echo "=== beautify.46 panel cleanup check ==="
+          echo "=== beautify.47 panel cleanup check ==="
           # edge-icon switch must be gone from the panel plist
           strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyEdgeIconEnabled" && { echo "edge icon switch still in plist"; exit 1; }
           strings -a "$B/zh-Hans.lproj/SplitSettings.strings" | grep -Fq "BEAUTIFY_EDGE_ICON" && { echo "BEAUTIFY_EDGE_ICON still in zh strings"; exit 1; }
@@ -140,7 +140,7 @@ jobs:
           DYLIB34=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
           test -n "$DYLIB34"
           strings -a "$DYLIB34" | grep -Fq "%.2f" || { echo "%.2f format missing"; exit 1; }
-          echo "=== beautify.46 slider compact check (source-level) ==="
+          echo "=== beautify.47 slider compact check (source-level) ==="
           # compact geometry: title 78 / value 38 / glyph 18 / hot zone 28
           grep -Fq "constraintEqualToConstant:78" Hooks/AxsHoldLaunchMain.xm || { echo "title width 78 missing"; exit 1; }
           grep -Fq "constraintEqualToConstant:38" Hooks/AxsHoldLaunchMain.xm || { echo "value width 38 missing"; exit 1; }
@@ -153,10 +153,10 @@ jobs:
           # deep sweep + compact thumb/track wired in
           grep -Fq "axs_ring_page_applyUnifiedFontDeep" Hooks/AxsHoldLaunchMain.xm || { echo "deep font sweep missing"; exit 1; }
           grep -Fq "axs_ring_page_sliderThumbImage" Hooks/AxsHoldLaunchMain.xm || { echo "compact thumb missing"; exit 1; }
-          echo "=== beautify.46 dylib selector check ==="
+          echo "=== beautify.47 dylib selector check ==="
           strings -a "$DYLIB34" | grep -Fq "setThumbImage:forState:" || { echo "thumb selector missing"; exit 1; }
           strings -a "$DYLIB34" | grep -Fq "setMinimumTrackImage:forState:" || { echo "track selector missing"; exit 1; }
-          echo "=== beautify.46 decor master switch check ==="
+          echo "=== beautify.47 decor master switch check ==="
           strings -a "$DYLIB34" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from dylib"; exit 1; }
           strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from plist"; exit 1; }
           strings -a "$DYLIB34" | grep -Fq "splitBeautifyTiltEnabled" || { echo "tilt enabled key missing from dylib"; exit 1; }
@@ -164,6 +164,9 @@ jobs:
           # one-decimal format wired for tilt angle slider, two decimals kept elsewhere
           grep -Fq 'isEqualToString:@"splitBeautifyTiltAngle"' Hooks/AxsHoldLaunchMain.xm || { echo "tilt angle precision key check missing"; exit 1; }
           grep -Fq 'stringWithFormat:@"%.1f"' Hooks/AxsHoldLaunchMain.xm || { echo "one-decimal format missing"; exit 1; }
+          # beautify.47：业务层把旧保存值夹紧到 0..6，默认 3.0（不能沿用 .44 的 10°）
+          grep -Fq 'axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 3.0, 0.0, 6.0)' Hooks/AxsBeautifyRing.xm || { echo "tilt angle clamp 0..6 missing"; exit 1; }
+          grep -Fq 'axs_ring_clamp(axs_ring_tiltAngle(), 0.0, 6.0)' Hooks/AxsBeautifyRing.xm || { echo "applyTilt angle clamp 0..6 missing"; exit 1; }
           python3 - <<PYEOF
           import plistlib, sys
           b = "$B/"
@@ -184,8 +187,8 @@ jobs:
               sys.exit("tilt rows not right after decor switch")
           tilt = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltAngle"][0]
           if tilt.get("cell") != "PSSliderCell" or tilt.get("min") != 0.0 \
-             or tilt.get("max") != 10.0 or tilt.get("step") != 0.5 or tilt.get("default") != 4.0:
-              sys.exit("tilt angle slider spec wrong: %r" % tilt)
+             or tilt.get("max") != 6.0 or tilt.get("step") != 0.5 or tilt.get("default") != 3.0:
+              sys.exit("tilt angle slider spec wrong (expect 0..6 default 3): %r" % tilt)
           tiltsw = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltEnabled"][0]
           if tiltsw.get("cell") != "PSSwitchCell" or tiltsw.get("default") is not False:
               sys.exit("tilt enabled switch spec wrong: %r" % tiltsw)
@@ -207,9 +210,9 @@ jobs:
               sys.exit("en BEAUTIFY_DECOR_ENABLED missing")
           if not en.get("BEAUTIFY_TILT_ENABLED") or not en.get("BEAUTIFY_TILT_ANGLE"):
               sys.exit("en tilt labels missing")
-          print("beautify.46 decor+tilt panel checks ok: order + zh 6-char copy + en labels")
+          print("beautify.47 decor+tilt panel checks ok: order + zh 6-char copy + en labels")
           PYEOF
-          echo "=== beautify.46 master switch scope check (source-level) ==="
+          echo "=== beautify.47 master switch scope check (source-level) ==="
           # .39 bug pattern must be gone: master gate inside the pure sub-switch readers
           ! grep -Fq "if (!axs_ring_decorEnabled()) return NO;" Hooks/AxsBeautifyRing.xm || { echo ".39 gate pattern still in sub-switch readers"; exit 1; }
           # master appears in: decl + def + 2 per-type helpers + 2 classify logs = 6;
@@ -229,7 +232,7 @@ jobs:
           grep -Fq "BOOL docked = axs_ring_containerIsDocked(d.container);" Hooks/AxsBeautifyRing.xm || { echo "refresh per-driver classify missing"; exit 1; }
           grep -Fq "!axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container))" Hooks/AxsBeautifyRing.xm || { echo "applyGlow per-container gate missing"; exit 1; }
           test "$(grep -c "decor classify" Hooks/AxsBeautifyRing.xm)" -eq 2 || { echo "classify log missing (expect attach + sync)"; exit 1; }
-          echo "=== beautify.46 regression fix check (source-level) ==="
+          echo "=== beautify.47 regression fix check (source-level) ==="
           # .42 idle-pause machinery must be fully rolled back (指令 三.1/三.2)
           ! grep -Fq "self.link.paused = YES;" Hooks/AxsBeautifyRing.xm || { echo ".42 idle pause still present"; exit 1; }
           ! grep -Fq "BOOL needsSync" Hooks/AxsBeautifyRing.xm || { echo "needsSync flag still present"; exit 1; }
@@ -254,7 +257,7 @@ jobs:
           grep -Fq "axs_ring_syncAllDriversNow();" Hooks/AxsBeautifyRing.xm || { echo "event sync call missing"; exit 1; }
           # 无 shouldRasterize / fade 残留（指令 三.7/三.6）
           ! grep -Fq "shouldRasterize" Hooks/AxsBeautifyRing.xm || { echo "shouldRasterize still present"; exit 1; }
-          echo "=== beautify.46 safe optimizations kept (source-level) ==="
+          echo "=== beautify.47 safe optimizations kept (source-level) ==="
           grep -Fq "static void axs_ring_queueScan(void)" Hooks/AxsBeautifyRing.xm || { echo "scan dedupe missing"; exit 1; }
           grep -Fq "axs_ring_queueScan();" Hooks/AxsBeautifyRing.xm || { echo "queueScan call missing"; exit 1; }
           # layer/mask cache-first (no per-frame findMount/findRealClip/selectMask)
@@ -270,7 +273,7 @@ jobs:
           grep -Fq "static void axs_ring_refreshConfigSnapshot(void)" Hooks/AxsBeautifyRing.xm || { echo "config snapshot missing"; exit 1; }
           test "$(grep -c "axs_holdlaunch_theirValueForKey" Hooks/AxsBeautifyRing.xm)" -eq 14 || { echo "config reads drifted (expected 14 = 13 snapshot reads incl. 2 tilt + 1 selector)"; exit 1; }
           grep -Fq "axs_ring_refreshConfigSnapshot();" Hooks/AxsBeautifyRing.xm || { echo "snapshot refresh call missing"; exit 1; }
-          echo "=== beautify.46 side-tilt feature check (source-level) ==="
+          echo "=== beautify.47 side-tilt feature check (source-level) ==="
           # config getters (snapshot reads)
           grep -Fq "static BOOL axs_ring_tiltEnabled(void)" Hooks/AxsBeautifyRing.xm || { echo "tiltEnabled getter missing"; exit 1; }
           grep -Fq "static double axs_ring_tiltAngle(void)" Hooks/AxsBeautifyRing.xm || { echo "tiltAngle getter missing"; exit 1; }
@@ -280,54 +283,59 @@ jobs:
           grep -Fq "isRightDocked" Hooks/AxsBeautifyRing.xm || { echo "right side internal probe missing"; exit 1; }
           # hierarchy probe for safe common ancestor (指令 五.2/五.3/七.6)
           grep -Fq "static UIView *axs_ring_tiltProbeTarget" Hooks/AxsBeautifyRing.xm || { echo "tilt hierarchy probe missing"; exit 1; }
-          grep -Fq "ring tilt probe:" Hooks/AxsBeautifyRing.xm || { echo "tilt probe log missing"; exit 1; }
-          # 2D rotation.z only: side * angle * M_PI/180, no 3D/perspective
-          grep -Fq "CGAffineTransformMakeRotation(rad)" Hooks/AxsBeautifyRing.xm || { echo "tilt rotation transform missing"; exit 1; }
+          grep -Fq "ring tilt 3D host:" Hooks/AxsBeautifyRing.xm || { echo "3D host probe log missing"; exit 1; }
+          # 3D rotationY around vertical Y axis + m34 perspective, no 2D rotation.z tilt
+          grep -Fq "CATransform3DRotate(CATransform3DIdentity, (CGFloat)rad, 0.0, 1.0, 0.0)" Hooks/AxsBeautifyRing.xm || { echo "rotationY transform missing"; exit 1; }
+          grep -Fq "AXS_TILT_M34" Hooks/AxsBeautifyRing.xm || { echo "m34 perspective missing"; exit 1; }
           grep -Fq "side * angle * M_PI / 180.0" Hooks/AxsBeautifyRing.xm || { echo "tilt angle conversion missing"; exit 1; }
-          ! grep -Eq "CATransform3DMakeRotation|rotationY|rotationX|m34|transform3D" Hooks/AxsBeautifyRing.xm || { echo "3D transform leaked into tilt"; exit 1; }
-          # identity restore on center/off/zero/hidden/detach + per-frame reapply
+          ! grep -Fq "CGAffineTransformMakeRotation(rad)" Hooks/AxsBeautifyRing.xm || { echo "old 2D rotation.z tilt still present"; exit 1; }
+          # restore to native base3D on center/off/zero/hidden/detach + per-frame reapply
           grep -Fq "static void axs_ring_resetTilt(AXSRingLinkDriver *driver)" Hooks/AxsBeautifyRing.xm || { echo "tilt reset missing"; exit 1; }
           grep -Fq "axs_ring_resetTilt(driver);" Hooks/AxsBeautifyRing.xm || { echo "tilt reset call missing"; exit 1; }
-          grep -Fq "CGAffineTransformIdentity" Hooks/AxsBeautifyRing.xm || { echo "identity restore missing"; exit 1; }
+          grep -Fq "CATransform3DIdentity" Hooks/AxsBeautifyRing.xm || { echo "identity baseline missing"; exit 1; }
           grep -Fq "axs_ring_applyTilt(driver);" Hooks/AxsBeautifyRing.xm || { echo "per-frame tilt apply missing"; exit 1; }
           grep -Fq "side = axs_ring_containerDockSide(container);" Hooks/AxsBeautifyRing.xm || { echo "tilt side gate missing"; exit 1; }
           # exception safety: tilt probe/apply/reset each wrapped in @try/@catch
           test "$(grep -c "axs_ring_tiltProbeTarget\|axs_ring_applyTilt\|axs_ring_resetTilt\|axs_ring_containerDockSide" Hooks/AxsBeautifyRing.xm)" -ge 10 || { echo "tilt helpers missing"; exit 1; }
           test "$(grep -c "ring tilt .* exception" Hooks/AxsBeautifyRing.xm)" -ge 3 || { echo "tilt @try protection insufficient"; exit 1; }
-          echo "=== beautify.46 runtime-not-effective fix check (source-level) ==="
+          echo "=== beautify.47 runtime-not-effective fix check (source-level) ==="
           # 1) real ScreenCore classes only; overlay instance probed, not hardcoded fake classes
           grep -Fq 'objc_getClass("SCFloatingInteractionOverlayView")' Hooks/AxsBeautifyRing.xm || { echo "overlay class probe missing"; exit 1; }
           grep -Fq "static UIView *axs_ring_findTiltOverlay(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "overlay finder missing"; exit 1; }
-          grep -Fq "isDescendantOfView:tg" Hooks/AxsBeautifyRing.xm || { echo "common-ancestor containment check missing"; exit 1; }
+          grep -Fq "isDescendantOfView:found" Hooks/AxsBeautifyRing.xm || { echo "overlay-in-host containment check missing"; exit 1; }
           grep -Fq "ring tilt probe chain:" Hooks/AxsBeautifyRing.xm || { echo "host-chain probe log missing"; exit 1; }
-          grep -Fq "anchor=%.2f,%.2f tx=%@ clips=%d" Hooks/AxsBeautifyRing.xm || { echo "host-chain frame/bounds/transform/anchor log missing"; exit 1; }
+          grep -Fq "static NSString *axs_ring_nsView3D" Hooks/AxsBeautifyRing.xm || { echo "3D host-chain view describe missing"; exit 1; }
           # 2) side geometry fallback uses real frame converted to window (not bounds origin=0)
           grep -Fq "convertRect:f toView:w" Hooks/AxsBeautifyRing.xm || { echo "side geometry window-convert missing"; exit 1; }
           ! grep -Fq "CGRect f = container.bounds;" Hooks/AxsBeautifyRing.xm || { echo "old bounds-based side fallback still present"; exit 1; }
           # 3) probe throttled to 1s (no per-frame reprobe/log flood)
           grep -Fq "tiltLastProbeTime" Hooks/AxsBeautifyRing.xm || { echo "probe throttle missing"; exit 1; }
           grep -Fq "now - driver.tiltLastProbeTime >= 1.0" Hooks/AxsBeautifyRing.xm || { echo "probe throttle 1s gate missing"; exit 1; }
-          # 4) overlay matched transform when it can't share ancestor (指令 三.3)
-          grep -Fq "tiltOverlayView" Hooks/AxsBeautifyRing.xm || { echo "overlay match state missing"; exit 1; }
-          grep -Fq "ov.transform = owant;" Hooks/AxsBeautifyRing.xm || { echo "overlay matched composite transform missing"; exit 1; }
-          grep -Fq "ov.transform = CGAffineTransformIdentity;" Hooks/AxsBeautifyRing.xm || { echo "overlay identity restore missing"; exit 1; }
+          # 4) overlay stays in identity plane; hit region follows projection by frame only (指令 四.4/六.9)
+          grep -Fq "tiltOverlayView" Hooks/AxsBeautifyRing.xm || { echo "overlay state missing"; exit 1; }
+          grep -Fq "ov.layer.transform = owant;" Hooks/AxsBeautifyRing.xm || { echo "overlay planar inverse transform missing"; exit 1; }
+          grep -Fq "ov.frame = inSuper;" Hooks/AxsBeautifyRing.xm || { echo "overlay projected hit-frame sync missing"; exit 1; }
+          ! grep -Fq "ov.userInteractionEnabled = NO" Hooks/AxsBeautifyRing.xm || { echo "overlay interaction disabled"; exit 1; }
+          grep -Fq "axs_ring_tiltCollectHitRegions" Hooks/AxsBeautifyRing.xm || { echo "hit-region probe missing"; exit 1; }
           # 5) tilt independent of decor/ring/glow switches
           grep -Fq "!axs_ring_tiltEnabled()) return;" Hooks/AxsBeautifyRing.xm || { echo "tilt-independent driver creation missing"; exit 1; }
-          # 6) native layout/animation transform reset -> idempotent baseline rebase (beautify.46)
-          grep -Fq "CGAffineTransformEqualToTransform(cur, driver.lastTilt)" Hooks/AxsBeautifyRing.xm || { echo "idempotent baseline compare missing"; exit 1; }
-          # 7) 2D only still holds
-          ! grep -Eq "CATransform3DMakeRotation|rotationY|rotationX|m34|transform3D" Hooks/AxsBeautifyRing.xm || { echo "3D transform leaked"; exit 1; }
-          echo "=== beautify.46 composite-transform fix check (source-level) ==="
-          # core: base + rotation composite, not pure-rotation overwrite
-          grep -Fq "CGAffineTransformConcat(base, rotation)" Hooks/AxsBeautifyRing.xm || { echo "composite Concat(base,rotation) missing"; exit 1; }
-          grep -Fq "CGAffineTransformConcat(obase, rotation)" Hooks/AxsBeautifyRing.xm || { echo "overlay composite missing"; exit 1; }
-          # pure-rotation direct overwrite must be gone: want must come from Concat, not bare MakeRotation
-          ! grep -Fq "CGAffineTransform want = CGAffineTransformMakeRotation" Hooks/AxsBeautifyRing.xm || { echo "old pure-rotation want still present"; exit 1; }
-          ! grep -Fq "target.transform = CGAffineTransformMakeRotation" Hooks/AxsBeautifyRing.xm || { echo "old direct MakeRotation write still present"; exit 1; }
-          # restore to native base (not identity) on detach/center/off
-          grep -Fq "target.transform = driver.tiltBaseTransform;" Hooks/AxsBeautifyRing.xm || { echo "restore-to-base missing"; exit 1; }
-          # base fields + rebase state
-          grep -Fq "CGAffineTransform tiltBaseTransform" Hooks/AxsBeautifyRing.xm || { echo "tiltBaseTransform field missing"; exit 1; }
+          # 6) native layout/animation transform reset -> idempotent baseline rebase (beautify.47)
+          grep -Fq "axs_ring_t3dEqual(cur, driver.lastTilt)" Hooks/AxsBeautifyRing.xm || { echo "idempotent 3D baseline compare missing"; exit 1; }
+          # 7) 3D perspective hierarchy: full-card common ancestor host (指令 四.1)
+          grep -Fq 'objc_getClass("SCDockedFloatingItemView")' Hooks/AxsBeautifyRing.xm || { echo "full-card container probe missing"; exit 1; }
+          grep -Fq "backgroundEffectView" Hooks/AxsBeautifyRing.xm || { echo "background effect view probe missing"; exit 1; }
+          grep -Fq "CATransform3DConcat(base3D, rotationY)" Hooks/AxsBeautifyRing.xm || { echo "3D composite Concat(base3D,rotationY) missing"; exit 1; }
+          echo "=== beautify.47 3D perspective check (source-level) ==="
+          grep -Fq "target.layer.transform = want;" Hooks/AxsBeautifyRing.xm || { echo "3D transform apply to layer missing"; exit 1; }
+          grep -Fq "target.layer.anchorPoint = CGPointMake(0.5, 0.5);" Hooks/AxsBeautifyRing.xm || { echo "center anchor missing"; exit 1; }
+          grep -Fq "CATransform3DInvert(want)" Hooks/AxsBeautifyRing.xm || { echo "overlay planar inverse missing"; exit 1; }
+          ! grep -Fq "want = CGAffineTransformMakeRotation" Hooks/AxsBeautifyRing.xm || { echo "old 2D want still present"; exit 1; }
+          ! grep -Fq "target.transform = CGAffineTransformMakeRotation" Hooks/AxsBeautifyRing.xm || { echo "old 2D direct write still present"; exit 1; }
+          # restore to native base3D (not identity) on detach/center/off
+          grep -Fq "target.layer.transform = driver.tiltBaseTransform;" Hooks/AxsBeautifyRing.xm || { echo "restore-to-base3D missing"; exit 1; }
+          # base fields (3D) + rebase state + projection
+          grep -Fq "CATransform3D tiltBaseTransform" Hooks/AxsBeautifyRing.xm || { echo "tiltBaseTransform 3D field missing"; exit 1; }
+          grep -Fq "axs_ring_tiltProjectCorners" Hooks/AxsBeautifyRing.xm || { echo "corner projection missing"; exit 1; }
           grep -Fq "BOOL tiltNeedRebase" Hooks/AxsBeautifyRing.xm || { echo "tiltNeedRebase field missing"; exit 1; }
           grep -Fq "static BOOL axs_ring_tiltGlobalRebase" Hooks/AxsBeautifyRing.xm || { echo "global rebase flag missing"; exit 1; }
           grep -Fq "axs_ring_noteNativeTrigger" Hooks/AxsBeautifyRing.xm || { echo "native trigger marker missing"; exit 1; }
@@ -337,13 +345,17 @@ jobs:
           grep -Fq 'objc_getClass(cn.UTF8String)' Hooks/AxsBeautifyRing.xm || { echo "native class probe missing"; exit 1; }
           grep -Fq 'class_getInstanceMethod(c, s)' Hooks/AxsBeautifyRing.xm || { echo "native method probe missing"; exit 1; }
           grep -Fq 'class_getInstanceVariable(c, iv.UTF8String)' Hooks/AxsBeautifyRing.xm || { echo "native ivar probe missing"; exit 1; }
-          grep -Fq "ring native chain probe (beautify.46)" Hooks/AxsBeautifyRing.xm || { echo "native chain probe log missing"; exit 1; }
+          grep -Fq "ring native chain probe (beautify.47)" Hooks/AxsBeautifyRing.xm || { echo "native chain probe log missing"; exit 1; }
           # runtime host discovery via KVC (no hardcoded fake classes)
           grep -Fq "contentHostView" Hooks/AxsBeautifyRing.xm || { echo "contentHostView probe missing"; exit 1; }
           grep -Fq "static id axs_ring_nsValue" Hooks/AxsBeautifyRing.xm || { echo "safe KVC helper missing"; exit 1; }
-          # log fields: base / tilted / rotation / trigger (指令 五)
-          grep -Fq "base=%@ tilted=%@ rotation=%@ rebase=%d trigger=%@" Hooks/AxsBeautifyRing.xm || { echo "rich apply log missing"; exit 1; }
-          grep -Fq "static NSString *axs_ring_nsTransform" Hooks/AxsBeautifyRing.xm || { echo "transform describe helper missing"; exit 1; }
+          # log fields: 3D apply + projection corners + hit regions (指令 五)
+          grep -Fq "ring tilt 3D apply:" Hooks/AxsBeautifyRing.xm || { echo "3D apply log missing"; exit 1; }
+          grep -Fq "base3D=%@ rotationY=%@ tilted3D=%@" Hooks/AxsBeautifyRing.xm || { echo "3D base/rotation/tilted log missing"; exit 1; }
+          grep -Fq "corners=%@" Hooks/AxsBeautifyRing.xm || { echo "projection corners log missing"; exit 1; }
+          grep -Fq "superview=%@ superT3d=%@ selfT3d=%@" Hooks/AxsBeautifyRing.xm || { echo "hit region transform log missing"; exit 1; }
+          grep -Fq "userInt=%d ges=%@" Hooks/AxsBeautifyRing.xm || { echo "hit region interaction log missing"; exit 1; }
+          grep -Fq "static NSString *axs_ring_nsTransform3D" Hooks/AxsBeautifyRing.xm || { echo "3D transform describe helper missing"; exit 1; }
           # no block self-capture (Clang/ARC -Werror)
           ! grep -Eq "void \(\\^(walk|recurse|traverse)\)" Hooks/AxsBeautifyRing.xm || { echo "recursive block self-capture pattern present"; exit 1; }
           echo "final verify ok"
