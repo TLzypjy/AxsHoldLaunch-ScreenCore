@@ -45,9 +45,16 @@
 //        SCDockedFloatingItemView(子树仅 6.5×6.5 角标)抢占了宿主；真正画面在 container 下
 //        含 _UIScenePresentationView 的 UIView 包装层。撤销抢占、恢复 wrapper 宿主，
 //        使「正确的矩阵」首次写在「正确的层」上。角度/方向/透视常量不变。
+//   .67：用户验收通过(.66 倾斜生效)。两处打磨：
+//        a) 消除倾斜后小窗后面露出的浅灰白"阴影"——sc-ring(38) 视图树证明 container 下
+//           第三个全尺寸 UIView(浅色背景壳)没跟着倾斜，从梯形边缘露出；补全为宿主一起侧翻。
+//        b) 可调角度上限 6°→12°(AXS_TILT_ANGLE_MAX)，默认 3.0/step 0.5 不变。
+//        角度方向/透视公式/全部安全机制不变。
 #define AXS_TILT_M34          (-1.0 / 600.0)
 #define AXS_TILT_SIDE_SIGN    (-1.0)
 #define AXS_TILT_PERSPECTIVE_GAIN  (2.6)
+// beautify.67：可调角度上限 6°→12°（用户要求增大）；默认 3.0 与 step 0.5 不变。
+#define AXS_TILT_ANGLE_MAX    (12.0)
 
 static void axs_ring_scanTick(void);
 static void axs_ring_installLayoutHook(void);           // 定义在扫描节之后
@@ -262,12 +269,12 @@ static void axs_ring_refreshConfigSnapshot(void) {
         axs_snap_glowBrightness = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 100.0, 0.0, 100.0);
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitWindowCornerRadius" defaultValue:@8.0];
         axs_snap_configRadius = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 8.0, 0.0, 60.0);
-        // beautify.47：侧倾开关（默认 NO）+ 3D 透视角度（默认 3.0，clamp 0..6）
-        // 旧保存值 >6.0（.44–.46 的 10° -planar tilt）必须夹紧到 6.0，不能沿用过大角度。
+        // beautify.47：侧倾开关（默认 NO）+ 3D 透视角度（默认 3.0）
+        // beautify.67：上限 6.0→12.0（AXS_TILT_ANGLE_MAX），用户要求增大可调角度。
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyTiltEnabled" defaultValue:@NO];
         axs_snap_tiltEnabled = [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyTiltAngle" defaultValue:@3.0];
-        axs_snap_tiltAngle = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 3.0, 0.0, 6.0);
+        axs_snap_tiltAngle = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 3.0, 0.0, AXS_TILT_ANGLE_MAX);
 
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyRingFrameColor" defaultValue:@"#93E3FD"];
         axs_snap_ringColor = axs_ring_parseHex([v isKindOfClass:[NSString class]] ? v : nil,
@@ -310,7 +317,7 @@ static void axs_ring_tiltLogPreferenceSources(void) {
 
         // 快照（若尚未加载则强制刷新一次）
         if (!axs_snap_loaded) axs_ring_refreshConfigSnapshot();
-        double clamped = axs_ring_clamp(axs_snap_tiltAngle, 0.0, 6.0);
+        double clamped = axs_ring_clamp(axs_snap_tiltAngle, 0.0, AXS_TILT_ANGLE_MAX);
 
         // 错误来源诊断：plist 有值但快照读默认；或 plist 缺失；或类型不对。
         // wrongDomain：文件里有旧 key（无 splitBeautify 前缀）的值，说明面板写到了旧 key；
@@ -1451,7 +1458,7 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver) {
 //      被裁剪则继续向上找更外层安全祖先，直到 window/rootVC.view 前为止；
 //   4) 找不到安全公共祖先就记日志放弃，绝不挂到裁剪层或宿主 window。
 // 完整宿主链路（每层类名/frame/bounds/transform/anchorPoint/clips）写入探针日志。
-// --- beautify.66：透视矩阵 concat 顺序修正（真正的"没有倾斜"根因）------------
+// --- beautify.67：透视矩阵 concat 顺序修正（真正的"没有倾斜"根因）------------
 // sc-ring(36).log + 参照视频铁证：.64 每帧 want==curNow（m13=0.26892 m31=-0.2689
 // m34=-0.00167），但 corners 四角恒为正矩形，截图/视频里小窗也没有近大远小。
 // 根因：.62~.64 把 m34 直接写进 rotationY 矩阵得到 R·P，对 z=0 的被变换平面
@@ -2070,7 +2077,7 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             if (logOut != NULL) [logOut appendFormat:@"\n    SCENE_HOST_PROBE %@ role=probe-only (not a tilt host)", axs_ring_nsDesc(sr)];
         }
 
-        // 2c) beautify.66：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
+        // 2c) beautify.67：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
         //     真机 sc-ring(34) 铁证：.62 把矩阵写进 container 自身（m13=0.088 m31=-0.269
         //     m34=-0.00167，want==curNow），但 corners 顶边 y 恒 40.0/40.0、截图仍是正矩形；
         //     因为 container 的 transform 被原生 dock scale(0.3287) 动画管线每帧吞掉。
@@ -2296,7 +2303,41 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                          || (now - driver.tiltVisualProbeTime >= 1.0);
         if (needProbe) {
             NSMutableString *probeLog = [NSMutableString string];
-            NSArray *hosts = axs_ring_collectVisualHosts(container, probeLog);
+            NSMutableArray *hosts = [NSMutableArray arrayWithArray:axs_ring_collectVisualHosts(container, probeLog)];
+            // beautify.67：消除倾斜后露出的浅灰白"阴影"。sc-ring(38) 视图树铁证：
+            //   container 下有 3 个同尺寸(267×580) d3 UIView，.66 只倾斜了含画面的两个，
+            //   第三个全尺寸浅色背景壳没跟着倾斜，从梯形边缘露出 (236,236,233) 轮廓。
+            //   补全：把所有与宿主同 bounds 尺寸、有效可见、非 overlay/手势/scene 根、
+            //   尚未入选的 container 直接子 UIView 一并纳入 hosts，走同一套 nativeBase
+            //   写入/复位/淘汰状态机，浅色壳随之一起侧翻，边缘不再露白。
+            if (hosts.count > 0 && container != nil) {
+                // 取最大宿主 bounds 作为"全尺寸"参照（避免把小角标层纳入）
+                CGRect refBounds = CGRectZero; CGFloat refArea = 0.0;
+                for (UIView *rh in hosts) {
+                    if (rh == nil) continue;
+                    CGFloat a = rh.bounds.size.width * rh.bounds.size.height;
+                    if (a > refArea) { refArea = a; refBounds = rh.bounds; }
+                }
+                for (UIView *sib in container.subviews) {
+                    if (sib == nil || [hosts containsObject:sib]) continue;
+                    if (axs_ring_isOverlayNode(sib) || axs_ring_subtreeHasOverlay(sib)) continue;
+                    if (sib.gestureRecognizers.count > 0) continue;
+                    NSString *scn = NSStringFromClass(sib.class);
+                    if ([scn rangeOfString:@"_UIScenePresentationView"].location != NSNotFound
+                        || [scn rangeOfString:@"_UISceneLayerHostContainerView"].location != NSNotFound) continue;
+                    if (sib.layer.name != nil && [sib.layer.name rangeOfString:@"axsRing"].location != NSNotFound) continue;
+                    // 只补全与宿主同尺寸的层：浅色背景壳全尺寸，6.5×6.5 角标被面积差排除
+                    if (CGRectIsEmpty(sib.bounds) || fabs(sib.bounds.size.width - refBounds.size.width) > 1.0
+                        || fabs(sib.bounds.size.height - refBounds.size.height) > 1.0) continue;
+                    CGFloat sea = 0.0; NSString *sr = nil;
+                    if (!axs_ring_tiltEffectiveVisible(sib, &sea, &sr)) {
+                        if (logOut != NULL) [logOut appendFormat:@"\n    SHADOW_SIB_SKIP %@ %@", axs_ring_nsDesc(sib), sr ?: @"-"];
+                        continue;
+                    }
+                    [hosts addObject:sib];
+                    if (logOut != NULL) [logOut appendFormat:@"\n    SHADOW_SIB_ADDED %@ (full-size sibling follows tilt, .67)", axs_ring_nsDesc(sib)];
+                }
+            }
             // beautify.59/52：宿主集合变化时，被淘汰的旧宿主恢复 transform/clips/mask 并移除
             // 登记（指令 三.6 HOST_EVICTED），杜绝旧容器/旧 host 残留透视矩阵。
             for (UIView *oldH in driver.tiltVisualHosts) {
@@ -2350,7 +2391,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.66): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.67): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2358,7 +2399,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
 
         BOOL tiltOn = axs_ring_tiltEnabled();
         BOOL docked = axs_ring_containerIsDocked(container);
-        double angle = axs_ring_clamp(axs_ring_tiltAngle(), 0.0, 6.0);
+        double angle = axs_ring_clamp(axs_ring_tiltAngle(), 0.0, AXS_TILT_ANGLE_MAX);
         int side = 0;
         double rad = 0.0;
         // 居中大窗 / 关闭 / 角度 0 → shouldTilt=NO，所有宿主回 nativeBase（清零透视）。
@@ -2377,7 +2418,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         }
         CATransform3D tiltRotation = CATransform3DIdentity;
         if (shouldTilt) {
-            // beautify.66（核心根因修复）：透视必须先于旋转复合，即 M = P · R。
+            // beautify.67（核心根因修复）：透视必须先于旋转复合，即 M = P · R。
             // .62~.64 用 CATransform3DRotate(identity,rad,0,1,0) 再直接写 .m34=-1/600，
             //   得到的是 R·P（旋转矩阵的第4行被塞 m34）。对被变换的 z=0 平面点，
             //   透视除法 w = 1 + z_input*m34 = 1（z_input 恒 0），m34 完全失效——
@@ -2695,7 +2736,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.66): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.67): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f gain=%.1f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2780,7 +2821,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.66): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.67): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -3111,7 +3152,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.66):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.67):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
