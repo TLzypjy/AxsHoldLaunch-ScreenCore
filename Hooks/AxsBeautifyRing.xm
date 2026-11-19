@@ -36,6 +36,9 @@
 //   用户认可的 .51 强侧翻是"矩阵累积"态顶边高差 ~27px；.52 修掉累积后强度丢失。
 //   .62 用干净可控的 GAIN 把 6° 放大到有效 ~15°，一次性达到同等强度且不逐帧累积。
 //   .63：宿主改回 container 下可见包装层（.51/.52 实证），container 自身变换被 dock scale 吞。
+//   .64：sc-ring(35) 铁证——贴边可见小窗是 SCDockedFloatingItemView，隐藏容器壳抢宿主导致视觉零效果；
+//        退出倾斜只清 m13/m31/m34 却留下 rotationY 的 cos(15.6)=0.9632，逐轮累积成 0.7984 缩小。
+//        修复：贴边项优先宿主 + 复位回 nativeBase 全矩阵。角度/方向/透视常量不变。
 #define AXS_TILT_M34          (-1.0 / 600.0)
 #define AXS_TILT_SIDE_SIGN    (-1.0)
 #define AXS_TILT_PERSPECTIVE_GAIN  (2.6)
@@ -1926,7 +1929,12 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
                 [dstack addObjectsFromArray:v.subviews];
             }
         }
-        // DOCKED_BRANCH_PROBE / DOCKED_ITEM_PROBE（指令 九.1/9.4）
+        // .64：贴边可见小窗本体（SCDockedFloatingItemView）优先于隐藏容器壳作宿主。
+        //   sc-ring(35) 视图树铁证：docked=1 时真正显示的是 SCFloatingHostRootView 下的
+        //   SCDockedFloatingItemView（frame=88x190.7, alpha=1, hasContent=1）；container 下
+        //   两个 UIView 只是浮窗壳，写矩阵视觉零效果。tap 手势属于"内容本体"，不是边条/角区，
+        //   允许该根直接做视觉宿主；SCFloatingInteractionOverlayView 仍绝不倾斜。
+        BOOL hasDockedVisualHost = NO;
         for (UIView *di in dockedItems) {
             CGFloat ea = 0.0; NSString *reason = nil;
             BOOL visible = axs_ring_tiltEffectiveVisible(di, &ea, &reason);
@@ -1961,32 +1969,45 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
                 if (logOut != NULL) [logOut appendFormat:@"\n    INVISIBLE_SKIP %@", reason ?: @"-"];
                 continue;
             }
-            if (di.gestureRecognizers.count == 0) {
-                // LAYER_TREE_PROBE（指令 三.1）：宿主的 layer 子树必须承载可见内容层
-                // （CALayerHost/图片层/contentHost/非空 sublayers），否则拒绝。
-                NSMutableArray *lt = [NSMutableArray arrayWithObject:di.layer];
-                int ltg = 0;
-                BOOL hasContentLayer = NO;
-                long lcount = 0;
-                while (lt.count > 0 && ltg < 200) {
-                    CALayer *cl = [lt lastObject]; [lt removeLastObject];
-                    ltg++;
-                    if (cl == nil) continue;
-                    lcount++;
-                    NSString *lcn = NSStringFromClass(cl.class);
-                    if ([lcn rangeOfString:@"CALayerHost"].location != NSNotFound
-                        || [lcn rangeOfString:@"Image"].location != NSNotFound
-                        || [lcn rangeOfString:@"ContentHost"].location != NSNotFound
-                        || cl.contents != nil) hasContentLayer = YES;
-                    [lt addObjectsFromArray:cl.sublayers];
-                }
-                if (logOut != NULL) [logOut appendFormat:@"\n  LAYER_TREE_PROBE %@ layerNodes=%ld hasContentLayer=%d",
-                                     axs_ring_nsDesc(di), lcount, hasContentLayer ? 1 : 0];
-                if (!hasContentLayer && lcount > 0) {
-                    if (logOut != NULL) [logOut appendFormat:@"\n    LAYER_TREE_MISSING_CONTENT (rejected as host)"];
-                } else if (![hosts containsObject:di]) {
-                    [hosts addObject:di];
-                    if (logOut != NULL) [logOut appendFormat:@"\n    HOST_CLASSIFY DOCKED_ITEM role=host gesture-free\n    DOCKED_ITEM_HOST (gesture-free, content in sublayers)"];
+            // LAYER_TREE_PROBE（指令 三.1）：宿主 layer 子树必须承载可见内容层。
+            // .64：内容校验对所有贴边候选生效（原来只在无手势分支做，tap 根被直接漏掉）。
+            NSMutableArray *lt = [NSMutableArray arrayWithObject:di.layer];
+            int ltg = 0;
+            BOOL hasContentLayer = NO;
+            long lcount = 0;
+            while (lt.count > 0 && ltg < 200) {
+                CALayer *cl = [lt lastObject]; [lt removeLastObject];
+                ltg++;
+                if (cl == nil) continue;
+                lcount++;
+                NSString *lcn = NSStringFromClass(cl.class);
+                if ([lcn rangeOfString:@"CALayerHost"].location != NSNotFound
+                    || [lcn rangeOfString:@"Image"].location != NSNotFound
+                    || [lcn rangeOfString:@"ContentHost"].location != NSNotFound
+                    || cl.contents != nil) hasContentLayer = YES;
+                [lt addObjectsFromArray:cl.sublayers];
+            }
+            if (logOut != NULL) [logOut appendFormat:@"\n  LAYER_TREE_PROBE %@ layerNodes=%ld hasContentLayer=%d",
+                                 axs_ring_nsDesc(di), lcount, hasContentLayer ? 1 : 0];
+            if (!hasContentLayer && lcount > 0) {
+                if (logOut != NULL) [logOut appendFormat:@"\n    LAYER_TREE_MISSING_CONTENT (rejected as host)"];
+                continue;
+            }
+            NSString *diCN = NSStringFromClass(di.class);
+            BOOL isDockedVisual = ([diCN rangeOfString:@"DockedFloatingItem"].location != NSNotFound)
+                                  && !axs_ring_subtreeHasOverlay(di);
+            if (di.gestureRecognizers.count == 0 || isDockedVisual) {
+                if (![hosts containsObject:di]) [hosts addObject:di];
+                if (isDockedVisual) hasDockedVisualHost = YES;
+                if (logOut != NULL) {
+                    [logOut appendFormat:@"\n    HOST_CLASSIFY DOCKED_ITEM role=host%@",
+                     isDockedVisual ? @" (visible docked preview)" : @""];
+                    [logOut appendFormat:@"\n    DOCKED_ITEM_HOST (gesture-free, content in sublayers)%@",
+                     isDockedVisual ? @" [.64 visual root]" : @""];
+                    if (di.gestureRecognizers.count > 0 && isDockedVisual) {
+                        [logOut appendFormat:@"\n    DOCKED_ITEM_TAP_ROOT_VISUAL_HOST gestures=%lu (tap root is the visible window; overlay stays planar)",
+                         (unsigned long)di.gestureRecognizers.count];
+                    }
                 }
             } else {
                 // 带手势（指令 四.3）：禁止倾斜交互根，选其子级有效可见、非手势的最大本地分支
@@ -2036,7 +2057,7 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             if (logOut != NULL) [logOut appendFormat:@"\n    SCENE_HOST_PROBE %@ role=probe-only (not a tilt host)", axs_ring_nsDesc(sr)];
         }
 
-        // 2c) beautify.63：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
+        // 2c) beautify.64：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
         //     真机 sc-ring(34) 铁证：.62 把矩阵写进 container 自身（m13=0.088 m31=-0.269
         //     m34=-0.00167，want==curNow），但 corners 顶边 y 恒 40.0/40.0、截图仍是正矩形；
         //     因为 container 的 transform 被原生 dock scale(0.3287) 动画管线每帧吞掉。
@@ -2045,7 +2066,10 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
         //     .60 引入的 [hosts removeAllObjects]+只留 container Treatment 是 .60/.61/.62
         //     连续三版「没角度」的根因，这次删除。仅收集可见、承载内容、无 overlay、
         //     无手势的本地包装层（.52 安全约束），container 自身不再叠加。
-        {
+        //     .64：贴边可见小窗已选到 SCDockedFloatingItemView 时，隐藏容器壳不再抢宿主。
+        if (hasDockedVisualHost) {
+            if (logOut != NULL) [logOut appendFormat:@"\n    LOCAL_WRAPPER_SKIPPED (docked visual host already chosen)"];
+        } else {
             NSMutableArray *localWrappers = [NSMutableArray array];
             for (UIView *sub in container.subviews) {
                 if (axs_ring_isOverlayNode(sub)) continue;
@@ -2073,6 +2097,7 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             } else if (logOut != NULL) {
                 [logOut appendFormat:@"\n    NO_LOCAL_WRAPPER container=%@ (fallback keep existing hosts)", axs_ring_nsDesc(container)];
             }
+        }
         }
 
         // 3) 兜底参考（不再作为透视宿主——.28 证明 wrapper 变换被原生管线吞掉）：
@@ -2257,9 +2282,14 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             for (UIView *oldH in driver.tiltVisualHosts) {
                 if (oldH == nil || [hosts containsObject:oldH]) continue;
                 NSString *okey = [NSString stringWithFormat:@"%p", oldH];
+                // .64：必须恢复写倾斜前的完整 nativeBase。旧逻辑只清 m13/m31/m34，
+                // 会把 rotationY 的 cos(15.6)=0.9632 留在 m11 当作原生缩放，逐轮累积缩小。
+                NSValue *obaseVal = [driver.tiltVisualBase objectForKey:okey];
+                CATransform3D oldRestore = (obaseVal != nil) ? [obaseVal CATransform3DValue]
+                                                           : axs_ring_tiltStripPerspective(oldH.layer.transform);
                 [CATransaction begin];
                 [CATransaction setDisableActions:YES];
-                oldH.layer.transform = axs_ring_tiltStripPerspective(oldH.layer.transform);
+                oldH.layer.transform = oldRestore;
                 oldH.layer.sublayerTransform = axs_ring_tiltStripPerspective(oldH.layer.sublayerTransform);
                 NSNumber *ocv = [driver.tiltVisualClips objectForKey:okey];
                 if (ocv != nil) oldH.clipsToBounds = [ocv boolValue];
@@ -2300,7 +2330,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.63): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.64): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2350,9 +2380,12 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                          && axs_ring_tiltEffectiveVisible(h, &evAlpha, &evReason);
             if (!alive) {
                 NSString *skey = [NSString stringWithFormat:@"%p", h];
+                NSValue *sbaseVal = [driver.tiltVisualBase objectForKey:skey];
+                CATransform3D staleRestore = (sbaseVal != nil) ? [sbaseVal CATransform3DValue]
+                                                             : axs_ring_tiltStripPerspective(h.layer.transform);
                 [CATransaction begin];
                 [CATransaction setDisableActions:YES];
-                h.layer.transform = axs_ring_tiltStripPerspective(h.layer.transform);
+                h.layer.transform = staleRestore;
                 h.layer.sublayerTransform = axs_ring_tiltStripPerspective(h.layer.sublayerTransform);
                 NSNumber *ocv = [driver.tiltVisualClips objectForKey:skey];
                 if (ocv != nil) h.clipsToBounds = [ocv boolValue];
@@ -2399,8 +2432,11 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                 // 复位：回 nativeBase（没有缓存则 identity），清零 m13/m31/m34；
                 // beautify.59：恢复临时关闭的 clipsToBounds/masksToBounds。
                 if (wroteVal != nil || forceRebase) {
-                    // beautify.59：只清 3D 分量保留当前 2D，不恢复过期 cleanBase
-                    CATransform3D restore = axs_ring_tiltStripPerspective(cur);
+                    // .64 关键修复：回到写倾斜前保存的完整 nativeBase。
+                    // 只清 m13/m31/m34 会留下 rotationY 的 m11=cos(rad)=0.9632，
+                    // 下一轮被当 cleanBase 再叠一次 -> 0.9277/0.8935/... 逐轮缩小浮窗。
+                    CATransform3D restore = (baseVal != nil) ? nativeBase
+                                                            : axs_ring_tiltStripPerspective(cur);
                     if (!axs_ring_t3dEqual(cur, restore)) {
                         [CATransaction begin];
                         [CATransaction setDisableActions:YES];
@@ -2489,10 +2525,13 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             if (!axs_ring_tiltMatrixFinite(want) || want.m11 < 0.02 || want.m22 < 0.02) {
                 axs_ring_log(@"ring tilt SAFE_ABORT: host=%@ want=%@",
                              axs_ring_nsDesc(h), axs_ring_nsTransform3D(want));
+                // .64：异常帧也回干净基线，不能把 cos(rad) 残留进 native 链路。
+                CATransform3D safeRestore = (baseVal != nil) ? nativeBase
+                                                            : axs_ring_tiltStripPerspective(cur);
                 [CATransaction begin];
                 [CATransaction setDisableActions:YES];
-                if (hIsScene) h.layer.sublayerTransform = axs_ring_tiltStripPerspective(cur);
-                else h.layer.transform = axs_ring_tiltStripPerspective(cur);
+                if (hIsScene) h.layer.sublayerTransform = safeRestore;
+                else h.layer.transform = safeRestore;
                 [CATransaction commit];
                 [driver.tiltVisualWrote removeObjectForKey:key];
                 continue;
@@ -2621,7 +2660,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.63): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.64): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f gain=%.1f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2654,7 +2693,10 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         for (UIView *h in driver.tiltVisualHosts) {
             if (h == nil) continue;
             NSString *key = [NSString stringWithFormat:@"%p", h];
-            CATransform3D restore = axs_ring_tiltStripPerspective(h.layer.transform);
+            NSValue *baseVal = [driver.tiltVisualBase objectForKey:key];
+            // .64：detach 也恢复完整 nativeBase；.59 的 strip 只清 3D 分量会留下 cos(rad) 缩放。
+            CATransform3D restore = (baseVal != nil) ? [baseVal CATransform3DValue]
+                                                    : axs_ring_tiltStripPerspective(h.layer.transform);
             h.layer.transform = restore;
             h.layer.sublayerTransform = axs_ring_tiltStripPerspective(h.layer.sublayerTransform);
             CATransform3D after = h.layer.transform;
@@ -2703,7 +2745,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.63): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.64): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -3034,7 +3076,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.63):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.64):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
