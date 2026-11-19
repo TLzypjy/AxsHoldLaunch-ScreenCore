@@ -81,13 +81,16 @@ jobs:
           lipo -archs "$DYLIB" | grep -q "arm64"
           lipo -archs "$DYLIB" | grep -q "arm64e"
           echo "=== required symbols ==="
+          # materialize strings once: grep -q on a pipe closes early -> SIGPIPE makes
+          # strings "failed to flush output" and pipefail fails the step spuriously.
+          strings -a "$DYLIB" > "$EXTRACT/dylib.strings"
           for sym in splitBeautifyRingFrameColor UIColorPickerViewController com.susudear.screencoreprefs \
                      colorPickerViewControllerDidFinish: colorPickerViewControllerDidSelectColor: \
                      colorPickerControllerDidFinish: \
                      splitBeautifyGlowEnabled splitBeautifyGlowCustomEnabled \
                      splitBeautifyGlowColor splitBeautifyGlowRadius \
                      splitBeautifyGlowBrightness ; do
-            strings -a "$DYLIB" | grep -Fq "$sym" || { echo "MISSING symbol: $sym"; exit 1; }
+            grep -Fq "$sym" "$EXTRACT/dylib.strings" || { echo "MISSING symbol: $sym"; exit 1; }
           done
           echo "symbol check ok"
           rm -rf "$EXTRACT"
@@ -129,17 +132,23 @@ jobs:
           head -c 8 "$B/SplitSettings.plist" | grep -q "bplist00"
           head -c 8 "$B/zh-Hans.lproj/SplitSettings.strings" | grep -q "bplist00"
           head -c 8 "$B/en.lproj/SplitSettings.strings" | grep -q "bplist00"
+          # dump strings once per artifact: grep -q on a pipe closes early ->
+          # strings SIGPIPE / "failed to flush output" spuriously fails under pipefail.
+          strings -a "$B/SplitSettings.plist" > "$EXTRACT/plist.strings"
+          strings -a "$B/zh-Hans.lproj/SplitSettings.strings" > "$EXTRACT/zh.strings"
+          strings -a "$B/en.lproj/SplitSettings.strings" > "$EXTRACT/en.strings"
           echo "=== beautify.48 panel cleanup check ==="
           # edge-icon switch must be gone from the panel plist
-          strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyEdgeIconEnabled" && { echo "edge icon switch still in plist"; exit 1; }
-          strings -a "$B/zh-Hans.lproj/SplitSettings.strings" | grep -Fq "BEAUTIFY_EDGE_ICON" && { echo "BEAUTIFY_EDGE_ICON still in zh strings"; exit 1; }
-          strings -a "$B/en.lproj/SplitSettings.strings" | grep -Fq "BEAUTIFY_EDGE_ICON" && { echo "BEAUTIFY_EDGE_ICON still in en strings"; exit 1; }
+          grep -Fq "splitBeautifyEdgeIconEnabled" "$EXTRACT/plist.strings" && { echo "edge icon switch still in plist"; exit 1; }
+          grep -Fq "BEAUTIFY_EDGE_ICON" "$EXTRACT/zh.strings" && { echo "BEAUTIFY_EDGE_ICON still in zh strings"; exit 1; }
+          grep -Fq "BEAUTIFY_EDGE_ICON" "$EXTRACT/en.strings" && { echo "BEAUTIFY_EDGE_ICON still in en strings"; exit 1; }
           # original dock icon switch must remain
-          strings -a "$B/SplitSettings.plist" | grep -Fq "splitDockIconEnabled" || { echo "splitDockIconEnabled missing"; exit 1; }
+          grep -Fq "splitDockIconEnabled" "$EXTRACT/plist.strings" || { echo "splitDockIconEnabled missing"; exit 1; }
           # slider value format must be exact two decimals
           DYLIB34=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
           test -n "$DYLIB34"
-          strings -a "$DYLIB34" | grep -Fq "%.2f" || { echo "%.2f format missing"; exit 1; }
+          strings -a "$DYLIB34" > "$EXTRACT/dylib34.strings"
+          grep -Fq "%.2f" "$EXTRACT/dylib34.strings" || { echo "%.2f format missing"; exit 1; }
           echo "=== beautify.48 slider compact check (source-level) ==="
           # compact geometry: title 78 / value 38 / glyph 18 / hot zone 28
           grep -Fq "constraintEqualToConstant:78" Hooks/AxsHoldLaunchMain.xm || { echo "title width 78 missing"; exit 1; }
@@ -154,13 +163,13 @@ jobs:
           grep -Fq "axs_ring_page_applyUnifiedFontDeep" Hooks/AxsHoldLaunchMain.xm || { echo "deep font sweep missing"; exit 1; }
           grep -Fq "axs_ring_page_sliderThumbImage" Hooks/AxsHoldLaunchMain.xm || { echo "compact thumb missing"; exit 1; }
           echo "=== beautify.48 dylib selector check ==="
-          strings -a "$DYLIB34" | grep -Fq "setThumbImage:forState:" || { echo "thumb selector missing"; exit 1; }
-          strings -a "$DYLIB34" | grep -Fq "setMinimumTrackImage:forState:" || { echo "track selector missing"; exit 1; }
+          grep -Fq "setThumbImage:forState:" "$EXTRACT/dylib34.strings" || { echo "thumb selector missing"; exit 1; }
+          grep -Fq "setMinimumTrackImage:forState:" "$EXTRACT/dylib34.strings" || { echo "track selector missing"; exit 1; }
           echo "=== beautify.48 decor master switch check ==="
-          strings -a "$DYLIB34" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from dylib"; exit 1; }
-          strings -a "$B/SplitSettings.plist" | grep -Fq "splitBeautifyDecorEnabled" || { echo "decor master key missing from plist"; exit 1; }
-          strings -a "$DYLIB34" | grep -Fq "splitBeautifyTiltEnabled" || { echo "tilt enabled key missing from dylib"; exit 1; }
-          strings -a "$DYLIB34" | grep -Fq "splitBeautifyTiltAngle" || { echo "tilt angle key missing from dylib"; exit 1; }
+          grep -Fq "splitBeautifyDecorEnabled" "$EXTRACT/dylib34.strings" || { echo "decor master key missing from dylib"; exit 1; }
+          grep -Fq "splitBeautifyDecorEnabled" "$EXTRACT/plist.strings" || { echo "decor master key missing from plist"; exit 1; }
+          grep -Fq "splitBeautifyTiltEnabled" "$EXTRACT/dylib34.strings" || { echo "tilt enabled key missing from dylib"; exit 1; }
+          grep -Fq "splitBeautifyTiltAngle" "$EXTRACT/dylib34.strings" || { echo "tilt angle key missing from dylib"; exit 1; }
           # one-decimal format wired for tilt angle slider, two decimals kept elsewhere
           grep -Fq 'isEqualToString:@"splitBeautifyTiltAngle"' Hooks/AxsHoldLaunchMain.xm || { echo "tilt angle precision key check missing"; exit 1; }
           grep -Fq 'stringWithFormat:@"%.1f"' Hooks/AxsHoldLaunchMain.xm || { echo "one-decimal format missing"; exit 1; }
