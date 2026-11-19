@@ -2098,7 +2098,6 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
                 [logOut appendFormat:@"\n    NO_LOCAL_WRAPPER container=%@ (fallback keep existing hosts)", axs_ring_nsDesc(container)];
             }
         }
-        }
 
         // 3) 兜底参考（不再作为透视宿主——.28 证明 wrapper 变换被原生管线吞掉）：
         //    仅打印 CONTENT_WRAPPER / BACKGROUND_WRAPPER 探针供层级证据。
