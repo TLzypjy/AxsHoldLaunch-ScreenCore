@@ -2141,7 +2141,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             // 可见贴边小窗由原生 Dock 通道渲染，而 docked item 只在贴边瞬间存在于树上
             // （.24 证实），首探 gate 从未抓到过。翻转瞬间强制重探 + 全窗口抓拍。
             driver.tiltVisualProbeTime = 0;   // 打破 1s 节流，本帧立即重探
-            axs_ring_log(@"ring tilt DOCK_TRANSITION_SNAP: container=%@ docked=%d — forced re-probe + full-window snap",
+            axs_ring_log(@"ring tilt DOCK_TRANSITION_SNAP: container=%@ docked=%d - forced re-probe + full-window snap",
                          axs_ring_nsDesc(container), dockNow ? 1 : 0);
             if (container.window != nil) {
                 // 全窗口贴边瞬态抓拍：每个可见窗口的树摘要（找 Dock 渲染通道）
