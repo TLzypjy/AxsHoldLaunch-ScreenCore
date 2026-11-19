@@ -39,6 +39,8 @@ static void axs_ring_scanTick(void);
 static void axs_ring_installLayoutHook(void);           // 定义在扫描节之后
 static void axs_ring_probeNativeChainOnce(void);        // beautify.46：定义在 layout hook 之后
 static NSString *axs_ring_tiltNativeBaseDesc(id obj);   // beautify.52：定义在 native probe 之前被 applyTilt 调用
+static BOOL axs_ring_isOverlayNode(UIView *v);          // beautify.52：定义在分类区，圆角探针先行调用
+static CGFloat axs_ring_tiltProbeCornerRadius(UIView *container); // beautify.52：CORNER_CLIP 探针
 static BOOL axs_ring_layoutHookInstalled = NO;          // scanTick / %ctor 共用
 
 // --- logging: single append-only file --------------------------------------
