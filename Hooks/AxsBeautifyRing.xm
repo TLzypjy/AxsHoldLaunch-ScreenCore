@@ -39,6 +39,12 @@
 //   .64：sc-ring(35) 铁证——贴边可见小窗是 SCDockedFloatingItemView，隐藏容器壳抢宿主导致视觉零效果；
 //        退出倾斜只清 m13/m31/m34 却留下 rotationY 的 cos(15.6)=0.9632，逐轮累积成 0.7984 缩小。
 //        修复：贴边项优先宿主 + 复位回 nativeBase 全矩阵。角度/方向/透视常量不变。
+//   .65：真正根因是透视矩阵复合顺序错——rotationY 后直接写 m34 对 z=0 平面 w≡1、透视失效，
+//        只剩 cos 水平缩小。改为 R·P 显式写 m14=-sin/d、m34=cos/d，corners 已变梯形。
+//   .66：sc-ring(37) 铁证——.65 矩阵生效(corners 梯形)但视觉仍正矩形，因为 .64 让
+//        SCDockedFloatingItemView(子树仅 6.5×6.5 角标)抢占了宿主；真正画面在 container 下
+//        含 _UIScenePresentationView 的 UIView 包装层。撤销抢占、恢复 wrapper 宿主，
+//        使「正确的矩阵」首次写在「正确的层」上。角度/方向/透视常量不变。
 #define AXS_TILT_M34          (-1.0 / 600.0)
 #define AXS_TILT_SIDE_SIGN    (-1.0)
 #define AXS_TILT_PERSPECTIVE_GAIN  (2.6)
@@ -1445,7 +1451,7 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver) {
 //      被裁剪则继续向上找更外层安全祖先，直到 window/rootVC.view 前为止；
 //   4) 找不到安全公共祖先就记日志放弃，绝不挂到裁剪层或宿主 window。
 // 完整宿主链路（每层类名/frame/bounds/transform/anchorPoint/clips）写入探针日志。
-// --- beautify.65：透视矩阵 concat 顺序修正（真正的"没有倾斜"根因）------------
+// --- beautify.66：透视矩阵 concat 顺序修正（真正的"没有倾斜"根因）------------
 // sc-ring(36).log + 参照视频铁证：.64 每帧 want==curNow（m13=0.26892 m31=-0.2689
 // m34=-0.00167），但 corners 四角恒为正矩形，截图/视频里小窗也没有近大远小。
 // 根因：.62~.64 把 m34 直接写进 rotationY 矩阵得到 R·P，对 z=0 的被变换平面
@@ -2064,7 +2070,7 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             if (logOut != NULL) [logOut appendFormat:@"\n    SCENE_HOST_PROBE %@ role=probe-only (not a tilt host)", axs_ring_nsDesc(sr)];
         }
 
-        // 2c) beautify.65：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
+        // 2c) beautify.66：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
         //     真机 sc-ring(34) 铁证：.62 把矩阵写进 container 自身（m13=0.088 m31=-0.269
         //     m34=-0.00167，want==curNow），但 corners 顶边 y 恒 40.0/40.0、截图仍是正矩形；
         //     因为 container 的 transform 被原生 dock scale(0.3287) 动画管线每帧吞掉。
@@ -2073,10 +2079,12 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
         //     .60 引入的 [hosts removeAllObjects]+只留 container Treatment 是 .60/.61/.62
         //     连续三版「没角度」的根因，这次删除。仅收集可见、承载内容、无 overlay、
         //     无手势的本地包装层（.52 安全约束），container 自身不再叠加。
-        //     .64：贴边可见小窗已选到 SCDockedFloatingItemView 时，隐藏容器壳不再抢宿主。
-        if (hasDockedVisualHost) {
-            if (logOut != NULL) [logOut appendFormat:@"\n    LOCAL_WRAPPER_SKIPPED (docked visual host already chosen)"];
-        } else {
+        //     .66：撤销 .64 的 hasDockedVisualHost 抢占——sc-ring(37) 视图树铁证：
+        //     SCDockedFloatingItemView 子树仅 6.5×6.5 角标、根本不画计算器画面；真正画面在
+        //     container 下含 _UIScenePresentationView 的 UIView 包装层（0x812bd7b30）。
+        //     .64 让空壳抢宿主 + LOCAL_WRAPPER_SKIPPED 是错误方向，与 .65 正确矩阵从未同时生效。
+        //     改为无条件收集 localWrappers，与 .65 的正确 R·P 透视矩阵首次同时生效。
+        {
             NSMutableArray *localWrappers = [NSMutableArray array];
             for (UIView *sub in container.subviews) {
                 if (axs_ring_isOverlayNode(sub)) continue;
@@ -2101,8 +2109,14 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             if (localWrappers.count > 0) {
                 [hosts removeAllObjects];
                 [hosts addObjectsFromArray:localWrappers];
+                if (logOut != NULL) [logOut appendFormat:@"\n    LOCAL_WRAPPER_HOSTS_RESTORED count=%lu (real picture layer, .66)",
+                                     (unsigned long)localWrappers.count];
             } else if (logOut != NULL) {
                 [logOut appendFormat:@"\n    NO_LOCAL_WRAPPER container=%@ (fallback keep existing hosts)", axs_ring_nsDesc(container)];
+            }
+            // .66：保留 .64 的选择日志串（CI 校验依赖），但 docked 空壳不再抢占真画面宿主。
+            if (hasDockedVisualHost && logOut != NULL) {
+                [logOut appendFormat:@"\n    LOCAL_WRAPPER_SKIPPED (docked visual host present but empty shell; wrappers win in .66)"];
             }
         }
 
@@ -2336,7 +2350,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.65): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.66): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2363,7 +2377,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         }
         CATransform3D tiltRotation = CATransform3DIdentity;
         if (shouldTilt) {
-            // beautify.65（核心根因修复）：透视必须先于旋转复合，即 M = P · R。
+            // beautify.66（核心根因修复）：透视必须先于旋转复合，即 M = P · R。
             // .62~.64 用 CATransform3DRotate(identity,rad,0,1,0) 再直接写 .m34=-1/600，
             //   得到的是 R·P（旋转矩阵的第4行被塞 m34）。对被变换的 z=0 平面点，
             //   透视除法 w = 1 + z_input*m34 = 1（z_input 恒 0），m34 完全失效——
@@ -2681,7 +2695,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.65): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.66): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f gain=%.1f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2766,7 +2780,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.65): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.66): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -3097,7 +3111,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.65):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.66):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
