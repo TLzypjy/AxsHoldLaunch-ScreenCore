@@ -29,9 +29,10 @@
 #define AXS_RING_GLOW_NAME @"axsRingGlow"
 #define AXS_RING_MAX_ENTRIES 4
 
-// beautify.47：3D 侧透视常量。m34 为透视距离，真机可在 -1/500..-1/800 微调；
-// beautify.59（指令 四.2）：真机 .51 右贴 side=1 方向错——右侧贴边应左沿近/右沿收窄，
-// sideSign 翻转：右贴 -1.0 / 左贴 +1.0（左右对称取反）。
+// beautify.61：回退到 .44 的平面歪斜（rotation.z，绕 Z 轴），替代 .47 起的 3D 侧翻。
+//   用户目标：右挂顶部左歪、左挂顶部右歪（朝中间大窗歪的"便利贴"），见参考图四周小窗。
+//   sideSign 方向语义保持：右贴 -1.0 / 左贴 +1.0 → 右挂 rad<0（顶部左歪）、左挂 rad>0。
+//   AXS_TILT_M34 保留作历史兼容（本版不再使用，写入矩阵的 m34 恒 0）。
 #define AXS_TILT_M34        (-1.0 / 600.0)
 #define AXS_TILT_SIDE_SIGN  (-1.0)
 
@@ -1437,9 +1438,13 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver) {
 //      被裁剪则继续向上找更外层安全祖先，直到 window/rootVC.view 前为止；
 //   4) 找不到安全公共祖先就记日志放弃，绝不挂到裁剪层或宿主 window。
 // 完整宿主链路（每层类名/frame/bounds/transform/anchorPoint/clips）写入探针日志。
-// --- beautify.47：3D 侧透视（绕 Y 轴 rotationY + m34），替代 .46 的 2D rotation.z ----
+// --- beautify.61：回归 .44 的 2D 平面歪斜（rotation.z 绕 Z 轴），替代 .47 起的 3D 侧翻 ----
+// 用户参考图四周小窗 = 朝中心歪的便利贴（顶边明显倾斜），不是近大远小的梯形侧翻。
+// .60 绕 Y 轴 + m34 在 6° 下顶边/底边仍水平（日志 corners 四角 y 相同），肉眼几乎看不出。
+// .61 改回绕 Z 轴 rotation.z：顶边 LT.y≠RT.y，6° 即刻可见；方向 sideSign=-1 不动。
+// 以下 .47/.46 历史说明保留作追溯：
 // .46 真机现象：黑色应用内容层单独做了 2D 旋转，外层白色 Dock 卡片背景/遮罩未跟随，
-//   导致白边/三角露底；10° 平面歪头过大，且 2D 旋转后四周边缘/角区手势失效。
+//   导致白边/三角露底；该问题由"单一本地 container 宿主"修复（背景内容同层跟随）。
 // .47 修复（指令 四）：
 //   - 视觉宿主改为能同时包住白色背景+黑色内容+装饰层的公共祖先（优先整卡容器
 //     SCDockedFloatingItemView / 其安全非裁剪父级），三者一起进入 3D 变换；
@@ -1471,7 +1476,10 @@ static BOOL axs_ring_t3dEqual(CATransform3D a, CATransform3D b) {
 // beautify.59（指令 三.2）：矩阵是否「干净」——无插件透视分量（m13/m23/m31/m32/m34≈0），
 // 仅允许原生 2D scale/translation。已带透视分量的矩阵禁止缓存为 nativeBase。
 static BOOL axs_ring_tiltMatrixClean(CATransform3D t) {
-    return fabs(t.m13) < 1e-4 && fabs(t.m23) < 1e-4
+    // beautify.61：2D 旋转分量 m12/m21 也视为"插件已写"，禁止缓存为 nativeBase，
+    // 否则下一帧 Concat(nativeBase, tiltRotation) 会把旋转反复累积（.49 同类坑）。
+    return fabs(t.m12) < 1e-4 && fabs(t.m21) < 1e-4
+        && fabs(t.m13) < 1e-4 && fabs(t.m23) < 1e-4
         && fabs(t.m31) < 1e-4 && fabs(t.m32) < 1e-4
         && fabs(t.m34) < 1e-6;
 }
@@ -1488,6 +1496,8 @@ static BOOL axs_ring_tiltMatrixFinite(CATransform3D t) {
 // 2D scale/translation——绝不把过期 cleanBase（如贴边缩放 0.3287）写回已变化
 // 的原生布局（.57「小窗转浮窗时浮窗特别小」的根因：展开复位恢复了贴边缩放）。
 static CATransform3D axs_ring_tiltStripPerspective(CATransform3D t) {
+    // beautify.61：同时清 2D 旋转分量 m12/m21（rotation.z），保留原生 scale/translation。
+    t.m12 = 0; t.m21 = 0;
     t.m13 = 0; t.m23 = 0; t.m31 = 0; t.m32 = 0; t.m34 = 0;
     return t;
 }
@@ -2171,9 +2181,9 @@ static void axs_ring_tiltCollectHitRegions(UIView *root, NSMutableArray *out, in
     for (UIView *sub in root.subviews) axs_ring_tiltCollectHitRegions(sub, out, depth + 1);
 }
 
-// 施加/恢复某 driver 的 3D 侧透视。核心：
-//   rotationY = CATransform3DRotate(identity, sideSign*angleRad, 0,1,0); rotationY.m34 = -1/600
-//   tilted3D  = CATransform3DConcat(base3D, rotationY)   // 保留原生缩放/平移
+// 施加/恢复某 driver 的 2D 平面歪斜（beautify.61：绕 Z 轴 rotation.z）。核心：
+//   tiltRotation = CATransform3DMakeRotation(rad, 0,0,1)  // 纯 2D，m34 恒 0
+//   want         = CATransform3DConcat(nativeBase, tiltRotation)  // 保留原生缩放/平移
 // 手势 overlay 留在 identity 平面，命中区按投影后四角更新 frame（不改 transform/alpha/mask）。
 static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
     @try {
@@ -2262,7 +2272,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.60): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.61): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2279,22 +2289,25 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             side = axs_ring_containerDockSide(container);
             rad = AXS_TILT_SIDE_SIGN * side * angle * M_PI / 180.0;
         }
-        CATransform3D rotationY = CATransform3DIdentity;
+        // beautify.61：回到 .44 的平面歪斜——绕 Z 轴 rotation.z（不是绕 Y 轴 3D 侧翻）。
+        // 绕 Y 轴 + m34 时 6° 下顶边/底边仍水平（日志 corners 四角 y 相同），肉眼几乎看不到倾斜；
+        // 绕 Z 轴 6° 顶边明显倾斜（LT.y≠RT.y），正是参考图"朝中心歪的便利贴"效果。
+        // 方向沿用 sideSign=-1：右挂 side=1 → rad<0 → 顶部左歪；左挂 rad>0 → 顶部右歪。
+        CATransform3D tiltRotation = CATransform3DIdentity;
         if (shouldTilt) {
-            rotationY = CATransform3DRotate(CATransform3DIdentity, (CGFloat)rad, 0.0, 1.0, 0.0);
-            rotationY.m34 = AXS_TILT_M34;
+            tiltRotation = CATransform3DMakeRotation((CGFloat)rad, 0.0, 0.0, 1.0);
         }
-        BOOL rotationChanged = !axs_ring_t3dEqual(rotationY, driver.lastRotation);
+        BOOL rotationChanged = !axs_ring_t3dEqual(tiltRotation, driver.lastRotation);
         BOOL forceRebase = axs_ring_tiltGlobalRebase || driver.tiltNeedRebase;
 
         // 对每个视觉宿主独立处理：nativeBase 只在首次写入透视前采样一次（key 带地址）。
-        // 后续帧绝不把已叠加 rotationY 的矩阵当 nativeBase（.49 居中残留的根因）。
+        // 后续帧绝不把已叠加 tiltRotation 的矩阵当 nativeBase（.49 居中残留的根因）。
         BOOL anyWrote = NO;
         NSMutableString *hostLog = [NSMutableString string];
         UIView *firstHost = nil;
         // beautify.59（指令 二.A.3/4）：每帧写入前逐 host 重做存活+可见校验，
         // 过渡帧/隐藏帧/出树帧立即 STALE_HOST_EVICT（恢复 cleanBase、清缓存、移除登记），
-        // 禁止沿用旧缓存对不可见分支继续写 rotationY（.26 hosts=2 写隐藏 wrapper 的根因）。
+        // 禁止沿用旧缓存对不可见分支继续写 tiltRotation（.26 hosts=2 写隐藏 wrapper 的根因）。
         NSMutableArray *staleEvict = [NSMutableArray array];
         for (UIView *h in hosts) {
             if (h == nil) { [staleEvict addObject:h ?: [NSNull null]]; continue; }
@@ -2391,7 +2404,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                 continue;
             }
 
-            // beautify.59（指令 三）：cleanBase 状态机——目标矩阵恒为 Concat(cleanBase, rotationY)，
+            // beautify.59（指令 三）：cleanBase 状态机——目标矩阵恒为 Concat(cleanBase, tiltRotation)，
             // 绝不在已倾斜矩阵上复合（.51 矩阵逐帧累积的根因：layoutSubviews 触发 forceRebase
             // 后把已带 m13/m31/m34 的 cur 当 nativeBase 再叠一次）。
             BOOL curIsOurs = (wroteVal != nil && axs_ring_t3dEqual(cur, [wroteVal CATransform3DValue]));
@@ -2434,7 +2447,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                 axs_ring_log(@"ring tilt BASE_CLEAN (recapture): host=%@ cleanBase=%@",
                              axs_ring_nsDesc(h), axs_ring_nsTransform3D(nativeBase));
             }
-            CATransform3D want = CATransform3DConcat(nativeBase, rotationY);
+            CATransform3D want = CATransform3DConcat(nativeBase, tiltRotation);
             // SAFE_ABORT（指令 三.8）：NaN/Inf 或缩放退化 → 恢复 cleanBase 跳帧，绝不写异常矩阵。
             // beautify.60：阈值 0.15→0.02——.31 日志真机 container 原生 dock scale 仅
             // a=0.1238 d=0.0571，换回 container 宿主后 want.m11≈0.123/m22≈0.057 会被
@@ -2512,7 +2525,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
              axs_ring_nsTransform3D(want), axs_ring_nsTransform3D(h.layer.transform)];
         }
         driver.hasTilt = shouldTilt && anyWrote;
-        driver.lastRotation = rotationY;
+        driver.lastRotation = tiltRotation;
         if (forceRebase) {
             driver.tiltNeedRebase = NO;
         }
@@ -2575,7 +2588,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.60): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 2D apply (beautify.61): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2656,7 +2669,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.60): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 2D reset (beautify.61): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -2987,7 +3000,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.60):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.61):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
