@@ -2012,35 +2012,27 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             }
         }
 
-        // 2b') beautify.59 核心方案：sceneRoot（远程场景根）作为宿主，但写
-        // layer.sublayerTransform 而非 layer.transform——变换作用于其内部子层
-        // （远程内容跟随透视），sceneRoot 自身 bounds/scale/position 纹丝不动，
-        // 同时带动内容（.50/.51 实证只有写远程根才能让内容透视）且不破坏
-        // 远程层宿主几何（消除 .50/.51 的半屏空白）。
+        // beautify.60 修复：远程 sceneRoot 不再作为宿主。
+        // .31 真机铁证：写 _UIScenePresentationView.sublayerTransform 后 want 明明带旋转
+        // （m13=0.1045 m31=-0.1045），但四角投影 LT(0,0) RT(430,0) LB(0,932) RB(430,932)
+        // 纹丝不动、截图小窗仍是正矩形——远程场景根的变换被系统每帧吞掉，视觉零效果。
+        // 回归 .52 用户认可的本地容器 layer.transform 路径。
         for (UIView *sr in sceneRootsCollected) {
-            CGFloat sa = 0.0; NSString *srn = nil;
-            if (!axs_ring_tiltEffectiveVisible(sr, &sa, &srn)) {
-                if (logOut != NULL) [logOut appendFormat:@"\n    INVISIBLE_SKIP SCENE_HOST %@ %@", axs_ring_nsDesc(sr), srn ?: @"-"];
-                continue;
-            }
-            if (![hosts containsObject:sr]) {
-                [hosts addObject:sr];
-                if (logOut != NULL) [logOut appendFormat:@"\n    HOST_CLASSIFY REMOTE_SCENE role=sublayer-host\n    SCENE_HOST %@", axs_ring_nsDesc(sr)];
-            }
+            if (logOut != NULL) [logOut appendFormat:@"\n    SCENE_HOST_PROBE %@ role=probe-only (not a tilt host)", axs_ring_nsDesc(sr)];
         }
 
-        // 2c) beautify.59 兜底：container 自身（sceneRoot 不可见时才启用）。
-        //     .28 抓拍决定性证据：贴边态写入 wrapper（内容分支 @0xb38ace120，含
-        //     _UIScenePresentationView、屏内可见、curNow=want）但视觉竖直——wrapper 的
-        //     变换被原生 dock 动画管线（container presentation scale 0.3287 合成）吞掉；
-        //     而 .51 把矩阵写到 container 自身时透视真实可见（当时仅圆角/方向/累积三个
-        //     可修 bug）。故回归 container 宿主，保留 .52 起的全部安全机制。
-        if (hosts.count == 0) {
+        // 2c) beautify.60：container 是唯一主宿主（.52 真机认可：写本地容器 layer.transform
+        //     视觉真实倾斜，四角随变换变化；.52 日志 host=SCFloatingContainerView 单数）。
+        //     .59 曾把它降级为「sceneRoot 不可见才启用」，而 sceneRoot 变换被系统吞掉 →
+        //     全程零倾斜。现无条件启用，并清空其它候选避免 docked item/子树与 container
+        //     同时各叠一次 rotationY（双重倾斜）。wrapper 仍不作宿主（.28 被原生动画吞）。
+        {
             CGFloat ca = 0.0; NSString *cr = nil;
             if (container != nil && !axs_ring_isOverlayNode(container)
                 && axs_ring_tiltEffectiveVisible(container, &ca, &cr)) {
+                [hosts removeAllObjects];
                 [hosts addObject:container];
-                if (logOut != NULL) [logOut appendFormat:@"\n    HOST_CLASSIFY LIVE_CONTAINER role=host (scene follows)\n    CONTAINER_HOST %@", axs_ring_nsDesc(container)];
+                if (logOut != NULL) [logOut appendFormat:@"\n    HOST_CLASSIFY LIVE_CONTAINER role=sole-primary-host (local transform)\n    CONTAINER_HOST %@", axs_ring_nsDesc(container)];
             } else if (logOut != NULL) {
                 [logOut appendFormat:@"\n    INVISIBLE_SKIP LIVE_CONTAINER %@ %@", axs_ring_nsDesc(container), cr ?: @"-"];
             }
@@ -2270,7 +2262,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.59): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.60): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2347,12 +2339,12 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         for (UIView *h in hosts) {
             if (h == nil) continue;
             if (firstHost == nil) firstHost = h;
-            // beautify.59：远程场景根宿主写 sublayerTransform（带动内部内容、
-            // 不破坏宿主自身 bounds/scale），本地宿主仍写 layer.transform。
-            BOOL hIsScene = [NSStringFromClass(h.class) rangeOfString:@"_UIScenePresentationView"].location != NSNotFound;
+            // beautify.60：宿主恒为本地 container（单一），统一写 layer.transform。
+            // .59 的 sublayerTransform/远程场景根路径视觉零效果，已彻底移除——
+            // 无论类名如何，一律走本地 transform，杜绝写回远程根。
+            BOOL hIsScene = NO;  // 保留变量避免大改 reset/分支；恒 NO = 只写 layer.transform
             NSString *key = [NSString stringWithFormat:@"%p", h];
-            if (hIsScene) key = [key stringByAppendingString:@".subT"];
-            CATransform3D cur = hIsScene ? h.layer.sublayerTransform : h.layer.transform;
+            CATransform3D cur = h.layer.transform;
             NSValue *baseVal = [driver.tiltVisualBase objectForKey:key];
             NSValue *wroteVal = [driver.tiltVisualWrote objectForKey:key];
             CATransform3D nativeBase = (baseVal != nil) ? [baseVal CATransform3DValue] : cur;
@@ -2444,7 +2436,11 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             }
             CATransform3D want = CATransform3DConcat(nativeBase, rotationY);
             // SAFE_ABORT（指令 三.8）：NaN/Inf 或缩放退化 → 恢复 cleanBase 跳帧，绝不写异常矩阵。
-            if (!axs_ring_tiltMatrixFinite(want) || want.m11 < 0.15 || want.m22 < 0.15) {
+            // beautify.60：阈值 0.15→0.02——.31 日志真机 container 原生 dock scale 仅
+            // a=0.1238 d=0.0571，换回 container 宿主后 want.m11≈0.123/m22≈0.057 会被
+            // 0.15 误判为退化而永久拦截（.58 曾把 0.35→0.15 修同类问题）。0.02 仍可拦截
+            // 真正的几何退化（m11/m22≈0）与 NaN/Inf，但放行一切合法贴边缩放。
+            if (!axs_ring_tiltMatrixFinite(want) || want.m11 < 0.02 || want.m22 < 0.02) {
                 axs_ring_log(@"ring tilt SAFE_ABORT: host=%@ want=%@",
                              axs_ring_nsDesc(h), axs_ring_nsTransform3D(want));
                 [CATransaction begin];
@@ -2579,7 +2575,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.59): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.60): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2660,7 +2656,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.59): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.60): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -2991,7 +2987,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.59):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.60):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
