@@ -1445,6 +1445,13 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver) {
 //      被裁剪则继续向上找更外层安全祖先，直到 window/rootVC.view 前为止；
 //   4) 找不到安全公共祖先就记日志放弃，绝不挂到裁剪层或宿主 window。
 // 完整宿主链路（每层类名/frame/bounds/transform/anchorPoint/clips）写入探针日志。
+// --- beautify.65：透视矩阵 concat 顺序修正（真正的"没有倾斜"根因）------------
+// sc-ring(36).log + 参照视频铁证：.64 每帧 want==curNow（m13=0.26892 m31=-0.2689
+// m34=-0.00167），但 corners 四角恒为正矩形，截图/视频里小窗也没有近大远小。
+// 根因：.62~.64 把 m34 直接写进 rotationY 矩阵得到 R·P，对 z=0 的被变换平面
+//   透视除法 w≡1，m34 完全失效，只剩 cos(rad) 水平缩放。用户参照图的 3D 梯形
+//   需要 M=P·R（CATransform3DConcat(perspective, rotationY)）。.65 只改这一处；
+//   角度/GAIN/m34 常量/sideSign/宿主选择/全部安全机制不变。
 // --- beautify.62：恢复 3D 卡片侧翻（绕 Y 轴 rotationY + m34），用户确认要近大远小效果 ----
 // .61 的 2D 平面歪斜（rotation.z）被用户否："角度不对，只是往左旋转了一点"。
 // 用户要的是参考图/.51 那种卡片侧翻：近沿大、远沿小、朝中间倾倒。
@@ -2057,7 +2064,7 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             if (logOut != NULL) [logOut appendFormat:@"\n    SCENE_HOST_PROBE %@ role=probe-only (not a tilt host)", axs_ring_nsDesc(sr)];
         }
 
-        // 2c) beautify.64：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
+        // 2c) beautify.65：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
         //     真机 sc-ring(34) 铁证：.62 把矩阵写进 container 自身（m13=0.088 m31=-0.269
         //     m34=-0.00167，want==curNow），但 corners 顶边 y 恒 40.0/40.0、截图仍是正矩形；
         //     因为 container 的 transform 被原生 dock scale(0.3287) 动画管线每帧吞掉。
@@ -2329,7 +2336,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.64): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.65): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2356,8 +2363,23 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         }
         CATransform3D tiltRotation = CATransform3DIdentity;
         if (shouldTilt) {
+            // beautify.65（核心根因修复）：透视必须先于旋转复合，即 M = P · R。
+            // .62~.64 用 CATransform3DRotate(identity,rad,0,1,0) 再直接写 .m34=-1/600，
+            //   得到的是 R·P（旋转矩阵的第4行被塞 m34）。对被变换的 z=0 平面点，
+            //   透视除法 w = 1 + z_input*m34 = 1（z_input 恒 0），m34 完全失效——
+            //   四角只剩 m11=cos(rad)=0.963 的水平缩放，视觉上就是"正矩形、没有倾斜"。
+            //   该错误从 .31 起被 corners 诊断掩盖：旧投影函数也只算 m11，读不到 m14。
+            // 正确做法：把旋转矩阵右乘透视矩阵 R·P，展开后只需追加两个分量：
+            //   M.m14 = sin(rad)/d = -sin(rad)*m34Const
+            //   M.m34 = -cos(rad)/d = cos(rad)*m34Const
+            // 这样对 z=0 的平面点 w' = 1 + x*M.m14，四角产生近大远小梯形
+            //   （贴屏幕边更长、朝中间边更短），实测幅度 ~4%，与用户参照视频一致。
+            // 显式写 m14/m34，不依赖 CATransform3DConcat 的复合顺序语义。
             tiltRotation = CATransform3DRotate(CATransform3DIdentity, (CGFloat)rad, 0.0, 1.0, 0.0);
-            tiltRotation.m34 = AXS_TILT_M34;
+            CGFloat sinRad = (CGFloat)sin(rad);
+            CGFloat cosRad = (CGFloat)cos(rad);
+            tiltRotation.m14 = -sinRad * AXS_TILT_M34;   // = sin(rad)/d
+            tiltRotation.m34 =  cosRad * AXS_TILT_M34;   // = -cos(rad)/d
         }
         BOOL rotationChanged = !axs_ring_t3dEqual(tiltRotation, driver.lastRotation);
         BOOL forceRebase = axs_ring_tiltGlobalRebase || driver.tiltNeedRebase;
@@ -2659,7 +2681,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.64): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.65): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f gain=%.1f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2744,7 +2766,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.64): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.65): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -3075,7 +3097,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.64):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.65):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
