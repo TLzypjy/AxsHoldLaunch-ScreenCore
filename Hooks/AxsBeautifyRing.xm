@@ -37,7 +37,7 @@
 static void axs_ring_scanTick(void);
 static void axs_ring_installLayoutHook(void);           // 定义在扫描节之后
 static void axs_ring_probeNativeChainOnce(void);        // beautify.46：定义在 layout hook 之后
-static NSString *axs_ring_tiltNativeBaseDesc(id obj);   // beautify.50：定义在 native probe 之前被 applyTilt 调用
+static NSString *axs_ring_tiltNativeBaseDesc(id obj);   // beautify.51：定义在 native probe 之前被 applyTilt 调用
 static BOOL axs_ring_layoutHookInstalled = NO;          // scanTick / %ctor 共用
 
 // --- logging: single append-only file --------------------------------------
@@ -105,7 +105,7 @@ static NSString *axs_ring_nsTransform3D(CATransform3D t) {
             CATransform3DIsIdentity(t) ? @"[identity]" : @""];
 }
 
-// beautify.50：CGAffineTransform 的可读描述（完整层级探针里 view.transform 用）。
+// beautify.51：CGAffineTransform 的可读描述（完整层级探针里 view.transform 用）。
 static NSString *axs_ring_nsTransform2D(CGAffineTransform t) {
     return [NSString stringWithFormat:@"2D(a=%.4f b=%.4f c=%.4f d=%.4f tx=%.2f ty=%.2f)%@",
             t.a, t.b, t.c, t.d, t.tx, t.ty,
@@ -273,7 +273,7 @@ static void axs_ring_refreshConfigSnapshot(void) {
     }
 }
 
-// --- beautify.50：偏好双来源核查（指令 二） -----------------------------------
+// --- beautify.51：偏好双来源核查（指令 二） -----------------------------------
 // 侧倾计算前记录两条来源：
 //   1) /var/mobile/Library/Preferences/com.susudear.screencoreprefs.plist 原始值（直接读文件）
 //   2) Tweak 快照/内存配置（axs_snap_tiltEnabled / axs_snap_tiltAngle）
@@ -414,7 +414,7 @@ static BOOL axs_ring_containerIsDocked(UIView *container) {
             }
         }
 
-        // beautify.50（指令 七）：几何兜底用「model layer / view.frame」换算到主屏坐标，
+        // beautify.51（指令 七）：几何兜底用「model layer / view.frame」换算到主屏坐标，
         // 绝不用 presentationLayer.frame——.49 把自己写入的 3D 经 presentation 反馈，
         // 导致脱离侧贴后 docked 判定抖动、base 被污染成倾斜矩阵、居中残留 m13/m31/m34。
         CGRect frame = container.frame;
@@ -518,7 +518,7 @@ static int axs_ring_containerDockSide(UIView *container) {
         if (container.superview != nil && w != nil) {
             f = [container.superview convertRect:f toView:w];
         }
-        // beautify.50：不用 presentationLayer（避免自身 3D 反馈），用 model frame。
+        // beautify.51：不用 presentationLayer（避免自身 3D 反馈），用 model frame。
         CGFloat cx = f.origin.x + f.size.width / 2.0;
         CGFloat sw = 0;
         if (w != nil) sw = w.bounds.size.width;
@@ -537,7 +537,7 @@ static int axs_ring_containerDockSide(UIView *container) {
     }
 }
 
-// --- beautify.50：侧贴判断核查（指令 三） -------------------------------------
+// --- beautify.51：侧贴判断核查（指令 三） -------------------------------------
 // 对当前浮窗同时核查 isDocked/_docked、dockSide/dockPosition/dockEdge、左右候选
 // 选择子，以及几何边距兜底。日志输出 session/record/manager/container/hostWindow
 // 的类名地址、docked/dockSide/几何 frame/宽高比/左右边距和最终判定。
@@ -861,7 +861,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver);
 @property (nonatomic, assign) BOOL tiltNeedRebase;               // 原生方法命中后强制重采样 base
 @property (nonatomic, assign) CATransform3D overlayBaseTransform;// overlay 原生 base3D 快照
 @property (nonatomic, assign) BOOL loggedTiltChain;              // 3D 链路日志只写一次
-// beautify.50：presentationLayer 复核——记录上一帧写入的 want，下一帧读回实际 presentation transform，
+// beautify.51：presentationLayer 复核——记录上一帧写入的 want，下一帧读回实际 presentation transform，
 // 若被原生布局重置为 identity 则定位触发方法（指令 六.4/八.9）。
 @property (nonatomic, assign) CATransform3D tiltLastWrote;       // 上一帧写入 layer.transform 的 want
 @property (nonatomic, assign) BOOL tiltHasWrote;                 // 是否已写入过（首帧不复核）
@@ -869,12 +869,13 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver);
 @property (nonatomic, assign) NSInteger tiltResetReportCount;    // 重置日志节流（最多报若干次）
 // beautify.47：手势命中区（overlay/边条/角区）原始 frame/transform，供恢复（平面命中）
 @property (nonatomic, strong) NSMutableDictionary *tiltHitOriginals; // key(ptr)->NSValue(frame) / key+"T"->NSValue(transform3D)
-// beautify.50：多视觉宿主（CONTENT 分支根 + BACKGROUND 分支根），彼此为兄弟、都不含 overlay。
+// beautify.51：多视觉宿主（CONTENT 分支根 + BACKGROUND 分支根），彼此为兄弟、都不含 overlay。
 // key 带宿主地址；nativeBase 只在首次写入透视前读取一次，绝不把倾斜后矩阵当 nativeBase。
 @property (nonatomic, strong) NSArray *tiltVisualHosts;              // UIView* 数组
 @property (nonatomic, strong) NSMutableDictionary *tiltVisualBase;   // key(ptr)->NSValue(CATransform3D) 原生 base
 @property (nonatomic, strong) NSMutableDictionary *tiltVisualWrote;  // key(ptr)->NSValue(CATransform3D) 上次写入
 @property (nonatomic, strong) NSMutableDictionary *tiltVisualNames;  // key(ptr)->类名（日志）
+@property (nonatomic, strong) NSMutableDictionary *tiltVisualClips;  // key(ptr)->NSValue(BOOL) 原生 clipsToBounds（侧贴临时关闭后复位恢复）
 @property (nonatomic, assign) BOOL tiltVisualProbed;                 // 本 driver 是否已探测过视觉宿主
 @property (nonatomic, assign) NSTimeInterval tiltVisualProbeTime;    // 视觉宿主重探节流
 - (void)tick;
@@ -1470,7 +1471,7 @@ static NSString *axs_ring_nsView3D(UIView *v) {
             axs_ring_nsTransform3D(l.transform)];
 }
 
-// beautify.50：完整层级探针（指令 四）。每层输出 11 项：
+// beautify.51：完整层级探针（指令 四）。每层输出 11 项：
 // 类名/地址、superview、frame/bounds/anchor、view.transform、layer.transform、
 // layer.sublayerTransform、presentationLayer.transform、hidden/alpha/clips/mask、
 // 子树是否含白色 backgroundEffectView、是否含内容 contentHostView/itemView、
@@ -1502,7 +1503,7 @@ static BOOL axs_ring_subtreeHasClass(UIView *v, NSArray *names, NSString **hitNa
     return NO;
 }
 
-// ===== beautify.50：视觉分支分类（content/overlay/background/decor）=============
+// ===== beautify.51：视觉分支分类（content/overlay/background/decor）=============
 // 真机 sc-ring(21).log 铁证：黑色应用内容在 _UIScenePresentationView（container 子树内、
 // 但为 overlay 的兄弟分支）；SCFloatingInteractionOverlayView + 边条 + 角区是另一条分支。
 // 通用 UIView 不能作为内容证据（.49 的 hostHasContent=1(-) 假阳性根因）。
@@ -1703,7 +1704,7 @@ static UIView *axs_ring_findTiltOverlay(UIView *container) {
 }
 
 // .46 原生链路探测：打印候选对象，返回宿主 UIView（原生 transform 写入层优先）。
-// beautify.50：收集视觉宿主集合（指令 四）。返回 UIView* 数组（ autoreleased ）。
+// beautify.51：收集视觉宿主集合（指令 四）。返回 UIView* 数组（ autoreleased ）。
 // 规则：从 container 子树找「含 CONTENT 或 BACKGROUND 可见本体、且子树与 overlaySet 不相交」
 // 的最深层节点。content 分支与 background 分支为兄弟时各自作为一个宿主写同一透视矩阵；
 // 绝不向上退到同时包住 overlay 的 container / hostWindow。
@@ -1726,14 +1727,13 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             for (UIView *o in overlayNodes) [logOut appendFormat:@" %@", axs_ring_nsDesc(o)];
         }
 
-        // 2) CONTENT 宿主（指令 四.2）：真机上 _UIScenePresentationView 就是整个黑色应用内容的
-        //    呈现根——frame 即内容尺寸、自带原生 scale(0.6839)、且 overlay 是它的兄弟分支。
-        //    转它即可让全部场景内容一起透视，而其深层子节点(_UISceneLayerHostContainerView 等)
-        //    frame 是全屏 430x932，转它们会导致几何错位，禁止选。
-        //    规则：收集 container 子树里所有 _UIScenePresentationView 节点（不含 overlay 的），
-        //    直接作为 CONTENT 宿主；若真机无此类节点，则退到「子树含 scene content 且不含
-        //    overlay 的最深祖先」（兼容不同 iOS 版本）。
-        NSMutableArray *contentRoots = [NSMutableArray array];
+        // 2) CONTENT_WRAPPER 宿主（beautify.51 核心，指令 二.2/三.3）：
+        //    .50 把矩阵写进 _UIScenePresentationView（远程场景根）破坏了远程层宿主的
+        //    bounds/scale/裁剪对应 → 右半屏空白（视频 f_002 铁证）。远程场景根一律
+        //    禁选（REMOTE_SCENE_ROOT 标记），改为选它上方的本地包装视图：从 sceneRoot
+        //    沿 superview 向上爬到 container 的直接子级（不含 overlay），由它带动内部
+        //    远程场景一起透视。
+        NSMutableArray *sceneRoots = [NSMutableArray array];
         NSMutableArray *contentCands = [NSMutableArray array];   // @{@"v":view, @"d":depth}
         stack = [NSMutableArray arrayWithObject:@{@"v": container, @"d": @0}];
         while (stack.count > 0) {
@@ -1746,8 +1746,8 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             BOOL isSceneRoot = ([cn rangeOfString:@"_UIScenePresentationView"].location != NSNotFound);
             BOOL hasOverlay = axs_ring_subtreeHasOverlay(v);
             BOOL hasContent = axs_ring_subtreeHasSceneContent(v);
-            if (isSceneRoot && !hasOverlay) {
-                if (![contentRoots containsObject:v]) [contentRoots addObject:v];
+            if (isSceneRoot) {
+                if (![sceneRoots containsObject:v]) [sceneRoots addObject:v];
             } else if (hasContent && !hasOverlay) {
                 [contentCands addObject:@{@"v": v, @"d": @(depth)}];
             }
@@ -1756,10 +1756,24 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
                 [stack addObject:@{@"v": sub, @"d": @(depth + 1)}];
             }
         }
-        if (contentRoots.count > 0) {
-            [hosts addObjectsFromArray:contentRoots];
+        // 远程场景根 → 上方最近本地包装：爬 superview 直到 parent==container（或已到 container）
+        NSMutableArray *wrappers = [NSMutableArray array];
+        for (UIView *sr in sceneRoots) {
+            UIView *w = sr.superview;
+            int g = 0;
+            while (w != nil && w != container && w.superview != container && g < 8) {
+                if (axs_ring_isOverlayNode(w)) { w = nil; break; }
+                w = w.superview; g++;
+            }
+            if (w != nil && w != container && w.superview == container
+                && !axs_ring_subtreeHasOverlay(w) && ![wrappers containsObject:w]) {
+                [wrappers addObject:w];
+            }
+        }
+        if (wrappers.count > 0) {
+            [hosts addObjectsFromArray:wrappers];
         } else {
-            // 兼容兜底：无 _UIScenePresentationView 时，取含 scene content 的最深祖先
+            // 兼容兜底：无 sceneRoot/包装链异常时，取含 scene content 的最深本地祖先
             int maxDepth = -1;
             for (NSDictionary *it in contentCands) maxDepth = MAX(maxDepth, [it[@"d"] intValue]);
             for (NSDictionary *it in contentCands) {
@@ -1770,39 +1784,27 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             }
         }
         if (logOut != NULL) {
-            [logOut appendFormat:@"\n  sceneRoots=%lu cands=%lu chosen:",
-             (unsigned long)contentRoots.count, (unsigned long)contentCands.count];
-            for (UIView *h in hosts) [logOut appendFormat:@" %@", axs_ring_nsDesc(h)];
+            [logOut appendFormat:@"\n  REMOTE_SCENE roots=%lu contentWrappers=%lu cands=%lu chosen:",
+             (unsigned long)sceneRoots.count, (unsigned long)wrappers.count, (unsigned long)contentCands.count];
+            for (UIView *sr in sceneRoots) [logOut appendFormat:@"\n    REMOTE_SCENE_ROOT %@", axs_ring_nsDesc(sr)];
+            for (UIView *h in hosts) [logOut appendFormat:@"\n    CONTENT_WRAPPER %@", axs_ring_nsDesc(h)];
         }
 
-        // 3) BACKGROUND 宿主：container 直属、不含 scene content、不含 overlay、
-        //    且自身含 UIVisualEffectView / CAShapeLayer mask / 非空 backgroundColor 的子树根。
-        //    真机上白底是 container 下的另一个 d3 UIView（纯 UIView + 圆角 mask）。
-        //    只在没有 content 宿主命中时才纳入背景分支，避免把整卡装饰层也误转。
-        BOOL hasUIVisualEffect = NO;
-        stack = [NSMutableArray arrayWithObject:container];
-        while (stack.count > 0) {
-            UIView *v = [stack lastObject]; [stack removeLastObject];
-            if ([v isKindOfClass:[UIVisualEffectView class]]) { hasUIVisualEffect = YES; break; }
-            [stack addObjectsFromArray:v.subviews];
-        }
-        if (logOut != NULL) [logOut appendFormat:@"\n  hasUIVisualEffect=%d", hasUIVisualEffect ? 1 : 0];
-        // 背景分支在当前真机结构里与 content 分支同属 container.d3；若 content 宿主已选到
-        // _UIScenePresentationView（其祖先 d3 已覆盖白底所在层），不再额外选背景，避免重复变换。
-        // 若完全没找到 content 宿主，才退化选「container 直属、不含 overlay 的最深可见层」。
-        if (hosts.count == 0) {
-            NSMutableArray *bgCands = [NSMutableArray array];
-            for (UIView *sub in container.subviews) {
-                if (axs_ring_isOverlayNode(sub)) continue;
-                if (axs_ring_subtreeHasOverlay(sub)) continue;
-                if (axs_ring_subtreeHasSceneContent(sub)) continue;
-                [bgCands addObject:sub];
-            }
-            if (logOut != NULL) {
-                [logOut appendFormat:@"\n  bgFallback cands=%lu:", (unsigned long)bgCands.count];
-                for (UIView *b in bgCands) [logOut appendFormat:@" %@", axs_ring_nsDesc(b)];
-            }
-            // 无 content、无可靠背景 → 不强行选（指令 四.6：宁可出日志不强挂）
+        // 3) BACKGROUND_WRAPPER 宿主（beautify.51，指令 二.3/三.4）：与内容包装并列的
+        //    兄弟分支——卡片背景/白底承载视图。container 直接子级中：不含 overlay、
+        //    不含 scene content、不是内容包装自身/其后代、非 ring/glow 装饰层、可见。
+        //    内容包装与背景包装分别缓存 base，写同一份透视矩阵（禁止退回 container）。
+        for (UIView *sub in container.subviews) {
+            if (axs_ring_isOverlayNode(sub)) continue;
+            if (axs_ring_subtreeHasOverlay(sub)) continue;
+            if (axs_ring_subtreeHasSceneContent(sub)) continue;
+            BOOL isContentWrapper = NO;
+            for (UIView *w in wrappers) { if (sub == w || [w isDescendantOfView:sub]) isContentWrapper = YES; }
+            if (isContentWrapper) continue;
+            if (CGRectIsEmpty(sub.frame) && sub.layer.sublayers.count == 0) continue;
+            if (sub.layer.name != nil && [sub.layer.name rangeOfString:@"axsRing"].location != NSNotFound) continue;
+            if (![hosts containsObject:sub]) [hosts addObject:sub];
+            if (logOut != NULL) [logOut appendFormat:@"\n    BACKGROUND_WRAPPER %@", axs_ring_nsDesc(sub)];
         }
     } @catch (NSException *e) {
         if (logOut != NULL) [logOut appendFormat:@"\n  collect exception=%@", e];
@@ -1861,6 +1863,26 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         if (needProbe) {
             NSMutableString *probeLog = [NSMutableString string];
             NSArray *hosts = axs_ring_collectVisualHosts(container, probeLog);
+            // beautify.51：宿主集合变化时，被替换的旧宿主立即恢复 transform/clips，杜绝残留。
+            for (UIView *oldH in driver.tiltVisualHosts) {
+                if (oldH == nil || [hosts containsObject:oldH]) continue;
+                NSString *okey = [NSString stringWithFormat:@"%p", oldH];
+                NSValue *obase = [driver.tiltVisualBase objectForKey:okey];
+                [CATransaction begin];
+                [CATransaction setDisableActions:YES];
+                oldH.layer.transform = (obase != nil) ? [obase CATransform3DValue] : CATransform3DIdentity;
+                NSNumber *ocv = [driver.tiltVisualClips objectForKey:okey];
+                if (ocv != nil) oldH.clipsToBounds = [ocv boolValue];
+                NSNumber *olv = [driver.tiltVisualClips objectForKey:[okey stringByAppendingString:@".layer"]];
+                if (olv != nil) oldH.layer.masksToBounds = [olv boolValue];
+                [CATransaction commit];
+                [driver.tiltVisualWrote removeObjectForKey:okey];
+                [driver.tiltVisualBase removeObjectForKey:okey];
+                [driver.tiltVisualNames removeObjectForKey:okey];
+                [driver.tiltVisualClips removeObjectForKey:okey];
+                [driver.tiltVisualClips removeObjectForKey:[okey stringByAppendingString:@".layer"]];
+                axs_ring_log(@"ring tilt HOST REPLACED: %@ restored to native base", axs_ring_nsDesc(oldH));
+            }
             driver.tiltVisualHosts = hosts;
             driver.tiltVisualProbeTime = now;
             driver.tiltVisualProbed = YES;
@@ -1881,7 +1903,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.50): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.51): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -1921,7 +1943,8 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             CATransform3D nativeBase = (baseVal != nil) ? [baseVal CATransform3DValue] : cur;
 
             if (!shouldTilt) {
-                // 复位：回 nativeBase（没有缓存则 identity），清零 m13/m31/m34。
+                // 复位：回 nativeBase（没有缓存则 identity），清零 m13/m31/m34；
+                // beautify.51：恢复临时关闭的 clipsToBounds/masksToBounds。
                 if (wroteVal != nil || forceRebase) {
                     CATransform3D restore = (baseVal != nil) ? nativeBase : CATransform3DIdentity;
                     if (!axs_ring_t3dEqual(cur, restore)) {
@@ -1929,6 +1952,17 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                         [CATransaction setDisableActions:YES];
                         h.layer.transform = restore;
                         [CATransaction commit];
+                    }
+                    NSNumber *clipsVal = [driver.tiltVisualClips objectForKey:key];
+                    if (clipsVal != nil) {
+                        [CATransaction begin];
+                        [CATransaction setDisableActions:YES];
+                        h.clipsToBounds = [clipsVal boolValue];
+                        NSNumber *layerVal = [driver.tiltVisualClips objectForKey:[key stringByAppendingString:@".layer"]];
+                        if (layerVal != nil) h.layer.masksToBounds = [layerVal boolValue];
+                        [CATransaction commit];
+                        [driver.tiltVisualClips removeObjectForKey:key];
+                        [driver.tiltVisualClips removeObjectForKey:[key stringByAppendingString:@".layer"]];
                     }
                     [driver.tiltVisualWrote removeObjectForKey:key];
                     anyWrote = YES;
@@ -1953,6 +1987,18 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                 [CATransaction setDisableActions:YES];
                 h.layer.anchorPoint = CGPointMake(0.5, 0.5);
                 h.layer.transform = want;
+                // beautify.51 裁切修复（指令 四.3）：本地包装 clipsToBounds=1 会把 3D 溢出
+                // 的左右边裁掉。侧贴期间临时关闭 clips/masksToBounds（圆角 CAShapeLayer mask
+                // 独立生效不受影响），原值缓存，复位逐项恢复。
+                if (h.clipsToBounds || h.layer.masksToBounds) {
+                    if ([driver.tiltVisualClips objectForKey:key] == nil) {
+                        [driver.tiltVisualClips setObject:@(h.clipsToBounds ? 1 : 0) forKey:key];
+                        [driver.tiltVisualClips setObject:@(h.layer.masksToBounds ? 1 : 0)
+                                                   forKey:[key stringByAppendingString:@".layer"]];
+                    }
+                    if (h.clipsToBounds) h.clipsToBounds = NO;
+                    h.layer.masksToBounds = NO;
+                }
                 [CATransaction commit];
                 [driver.tiltVisualWrote setObject:[NSValue valueWithCATransform3D:want] forKey:key];
                 anyWrote = YES;
@@ -2006,7 +2052,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.50): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.51): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2034,7 +2080,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         NSMutableString *resid = [NSMutableString string];
         [CATransaction begin];
         [CATransaction setDisableActions:YES];
-        // beautify.50：遍历所有视觉宿主恢复各自 nativeBase（key 带地址），清零 m13/m31/m34。
+        // beautify.51：遍历所有视觉宿主恢复各自 nativeBase（key 带地址），清零 m13/m31/m34。
         for (UIView *h in driver.tiltVisualHosts) {
             if (h == nil) continue;
             NSString *key = [NSString stringWithFormat:@"%p", h];
@@ -2042,6 +2088,15 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
             CATransform3D restore = (baseVal != nil) ? [baseVal CATransform3DValue] : CATransform3DIdentity;
             h.layer.transform = restore;
             CATransform3D after = h.layer.transform;
+            // beautify.51：恢复临时关闭的 clipsToBounds/masksToBounds（指令 六.6）
+            NSNumber *clipsVal = [driver.tiltVisualClips objectForKey:key];
+            if (clipsVal != nil) {
+                h.clipsToBounds = [clipsVal boolValue];
+                NSNumber *layerVal = [driver.tiltVisualClips objectForKey:[key stringByAppendingString:@".layer"]];
+                if (layerVal != nil) h.layer.masksToBounds = [layerVal boolValue];
+                [driver.tiltVisualClips removeObjectForKey:key];
+                [driver.tiltVisualClips removeObjectForKey:[key stringByAppendingString:@".layer"]];
+            }
             [resid appendFormat:@"\n    host=%@(%@) restore=%@ residual(m13=%.5f m31=%.5f m34=%.5f)",
              axs_ring_nsDesc(h), key, axs_ring_nsTransform3D(restore), after.m13, after.m31, after.m34];
         }
@@ -2071,7 +2126,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.50): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.51): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -2100,11 +2155,12 @@ static void axs_ring_attachContainer(UIView *container) {
     driver.lastOverlayTilt = CATransform3DIdentity;
     driver.overlayBaseTransform = CATransform3DIdentity;
     driver.tiltHitOriginals = [NSMutableDictionary dictionary];
-    // beautify.50：多视觉宿主缓存（key 带地址）
+    // beautify.51：多视觉宿主缓存（key 带地址）
     driver.tiltVisualHosts = [NSArray array];
     driver.tiltVisualBase = [NSMutableDictionary dictionary];
     driver.tiltVisualWrote = [NSMutableDictionary dictionary];
     driver.tiltVisualNames = [NSMutableDictionary dictionary];
+    driver.tiltVisualClips = [NSMutableDictionary dictionary];
 
     // 先定位真实裁剪层（几何源+圆角来源）与非裁剪挂载层，再选整框 overlay
     // mask 作兜底/对照（此刻环尚未入树，无需跳过 ownRing）；未命中不落 -1
@@ -2331,7 +2387,7 @@ static void axs_ring_installLayoutHook(void) {
     axs_ring_log(@"ring layout hook installed on SCFloatingContainerView");
 }
 
-// beautify.50：读取原生 base transform 值（appliedTransform/originalHostTransform/
+// beautify.51：读取原生 base transform 值（appliedTransform/originalHostTransform/
 // originalTransform，指令 六.2/八.5）。这些 ivar 可能是 NSValue(CATransform3D)、
 // NSValue(CGAffineTransform) 或直接结构体——只用 KVC 只读探测，转成可读串。
 static NSString *axs_ring_tiltNativeBaseDesc(id obj) {
@@ -2399,7 +2455,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.50):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.51):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
@@ -2524,7 +2580,7 @@ static void axs_ring_prefsChanged(CFNotificationCenterRef center, void *observer
             // 当前回调内同步提交各 driver 可见性（总开关/子开关即时生效），
             // 刷新颜色 + 去重扫描（指令 四.4/六.2）
             axs_ring_refreshConfigSnapshot();
-            axs_ring_tiltLogPreferenceSources();   // beautify.50：每次设置保存复查偏好双来源
+            axs_ring_tiltLogPreferenceSources();   // beautify.51：每次设置保存复查偏好双来源
             axs_ring_syncAllDriversNow();
             axs_ring_refreshAppearance();
             axs_ring_queueScan();

@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.50"
+VERSION="2.0.5+beautify.51"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -97,10 +97,10 @@ check "dylib has no overlay window marker" sh -c "test \$(strings -a '$DYLIB_DIR
 check "dylib has no overlay window class" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'AXSRingOverlayWindow') -eq 0"
 check "dylib has no sc_sessionDidBeginHosting selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_sessionDidBeginHosting:') -eq 0"
 check "dylib has no sc_closeSession selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_closeSession:') -eq 0"
-# beautify.50: sc_* selectors are now probed for EXISTENCE only (NSSelectorFromString
+# beautify.51: sc_* selectors are now probed for EXISTENCE only (NSSelectorFromString
 # + class_getInstanceMethod in axs_ring_probeNativeChainOnce), never hooked. Assert the
 # native-chain probe log is compiled in instead of forbidding the selector string.
-check "dylib has native chain probe log (beautify.50)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring native chain probe'"
+check "dylib has native chain probe log (beautify.51)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring native chain probe'"
 check "dylib has no sc_sessionForContainerView selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_sessionForContainerView:') -eq 0"
 check "dylib has ring log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-ring.log'"
 check "dylib has zero-session-hook startup log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring hooks ring=0 sessionHooks=0 layout='"
@@ -118,15 +118,19 @@ check "dylib has rotation marquee (z keypath)" sh -c "strings -a '$DYLIB_DIR/Axs
 check "dylib has no fullscreen selectors" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -Ec 'sc_handleFullscreenTap|sc_floatingContainerViewDidRequestFullscreen|promoteSceneToFullscreen') -eq 0"
 check "dylib has holdpress log in Documents" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/AxsHoldLaunch.log'"
 check "dylib has no Caches log path left" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'Caches/AxsHoldLaunch.log') -eq 0"
-# beautify.50: diagnostic probe logs compiled into the dylib (指令 二/三/四/五/八)
+# beautify.51: diagnostic probe logs compiled into the dylib (指令 二/三/四/五/八)
 check "dylib has tilt PREFS dual-source log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tilt PREFS plistPath='"
 check "dylib has tilt DOCK multi-state log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tilt DOCK container='"
 check "dylib has tilt HIERARCHY dump log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tilt HIERARCHY root='"
 check "dylib has native base transform reader" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'originalHostTransform'"
-# beautify.50: visual-host isolation fix compiled into dylib (content root, overlay planar, residual log)
-check "dylib has tilt VISUAL HOSTS (beautify.50) log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tilt VISUAL HOSTS (beautify.50)'"
+# beautify.51: visual-host isolation fix compiled into dylib (content root, overlay planar, residual log)
+check "dylib has tilt VISUAL HOSTS (beautify.51) log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tilt VISUAL HOSTS (beautify.51)'"
 check "dylib has scene content root class" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q '_UIScenePresentationView'"
 check "dylib has reset residual log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'residual(m13='"
+# beautify.51: wrapper hosts + remote-root ban + clip release compiled into dylib
+check "dylib has REMOTE_SCENE_ROOT marker" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'REMOTE_SCENE_ROOT'"
+check "dylib has CONTENT_WRAPPER marker" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'CONTENT_WRAPPER'"
+check "dylib has host replaced restore log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tilt HOST REPLACED'"
 
 # 7) package + verify
 DEB="$OUT/com.susudear.screencore_${VERSION}_iphoneos-arm64.deb"
