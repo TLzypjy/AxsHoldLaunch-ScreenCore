@@ -35,6 +35,7 @@
 //   透视增益：真机滑块最高 6°，单层 rotationY 顶边高差仅 ~1.4px（几乎不可见）。
 //   用户认可的 .51 强侧翻是"矩阵累积"态顶边高差 ~27px；.52 修掉累积后强度丢失。
 //   .62 用干净可控的 GAIN 把 6° 放大到有效 ~15°，一次性达到同等强度且不逐帧累积。
+//   .63：宿主改回 container 下可见包装层（.51/.52 实证），container 自身变换被 dock scale 吞。
 #define AXS_TILT_M34          (-1.0 / 600.0)
 #define AXS_TILT_SIDE_SIGN    (-1.0)
 #define AXS_TILT_PERSPECTIVE_GAIN  (2.6)
@@ -2035,20 +2036,42 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             if (logOut != NULL) [logOut appendFormat:@"\n    SCENE_HOST_PROBE %@ role=probe-only (not a tilt host)", axs_ring_nsDesc(sr)];
         }
 
-        // 2c) beautify.60：container 是唯一主宿主（.52 真机认可：写本地容器 layer.transform
-        //     视觉真实倾斜，四角随变换变化；.52 日志 host=SCFloatingContainerView 单数）。
-        //     .59 曾把它降级为「sceneRoot 不可见才启用」，而 sceneRoot 变换被系统吞掉 →
-        //     全程零倾斜。现无条件启用，并清空其它候选避免 docked item/子树与 container
-        //     同时各叠一次 rotationY（双重倾斜）。wrapper 仍不作宿主（.28 被原生动画吞）。
+        // 2c) beautify.63：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
+        //     真机 sc-ring(34) 铁证：.62 把矩阵写进 container 自身（m13=0.088 m31=-0.269
+        //     m34=-0.00167，want==curNow），但 corners 顶边 y 恒 40.0/40.0、截图仍是正矩形；
+        //     因为 container 的 transform 被原生 dock scale(0.3287) 动画管线每帧吞掉。
+        //     .51 认可版 hosts=3，写的是 container 直接子级 UIView（BACKGROUND_WRAPPER /
+        //     hostView），want 累到 m13=-0.41 m34=-0.0065，才有顶边 y 差 27px 的强侧翻。
+        //     .60 引入的 [hosts removeAllObjects]+只留 container Treatment 是 .60/.61/.62
+        //     连续三版「没角度」的根因，这次删除。仅收集可见、承载内容、无 overlay、
+        //     无手势的本地包装层（.52 安全约束），container 自身不再叠加。
         {
-            CGFloat ca = 0.0; NSString *cr = nil;
-            if (container != nil && !axs_ring_isOverlayNode(container)
-                && axs_ring_tiltEffectiveVisible(container, &ca, &cr)) {
+            NSMutableArray *localWrappers = [NSMutableArray array];
+            for (UIView *sub in container.subviews) {
+                if (axs_ring_isOverlayNode(sub)) continue;
+                if (axs_ring_subtreeHasOverlay(sub)) continue;
+                // 注意：不能用 subtreeHasSceneContent 排除——container 直接子级 UIView 的子树
+                // 本就含 _UIScenePresentationView（远程内容），写这个父层才能带动内容一起侧翻
+                // （.51 认可实证）。只排除「自身就是 scene 根」的情况。
+                NSString *subCN = NSStringFromClass(sub.class);
+                if ([subCN rangeOfString:@"_UIScenePresentationView"].location != NSNotFound) continue;
+                if ([subCN rangeOfString:@"_UISceneLayerHostContainerView"].location != NSNotFound) continue;
+                if (sub.gestureRecognizers.count > 0) continue;       // 手势层保持平面
+                if (CGRectIsEmpty(sub.frame) && sub.layer.sublayers.count == 0) continue;
+                if (sub.layer.name != nil && [sub.layer.name rangeOfString:@"axsRing"].location != NSNotFound) continue;
+                CGFloat ea = 0.0; NSString *wr = nil;
+                if (!axs_ring_tiltEffectiveVisible(sub, &ea, &wr)) {
+                    if (logOut != NULL) [logOut appendFormat:@"\n    INVISIBLE_SKIP LOCAL_WRAPPER %@ %@", axs_ring_nsDesc(sub), wr ?: @"-"];
+                    continue;
+                }
+                if (![localWrappers containsObject:sub]) [localWrappers addObject:sub];
+                if (logOut != NULL) [logOut appendFormat:@"\n    HOST_CLASSIFY LOCAL_WRAPPER role=host\n    CONTAINER_SUB_HOST %@", axs_ring_nsDesc(sub)];
+            }
+            if (localWrappers.count > 0) {
                 [hosts removeAllObjects];
-                [hosts addObject:container];
-                if (logOut != NULL) [logOut appendFormat:@"\n    HOST_CLASSIFY LIVE_CONTAINER role=sole-primary-host (local transform)\n    CONTAINER_HOST %@", axs_ring_nsDesc(container)];
+                [hosts addObjectsFromArray:localWrappers];
             } else if (logOut != NULL) {
-                [logOut appendFormat:@"\n    INVISIBLE_SKIP LIVE_CONTAINER %@ %@", axs_ring_nsDesc(container), cr ?: @"-"];
+                [logOut appendFormat:@"\n    NO_LOCAL_WRAPPER container=%@ (fallback keep existing hosts)", axs_ring_nsDesc(container)];
             }
         }
 
@@ -2277,7 +2300,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.62): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.63): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2598,7 +2621,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.62): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.63): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f gain=%.1f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -2680,7 +2703,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.62): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.63): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -3011,7 +3034,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.62):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.63):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
