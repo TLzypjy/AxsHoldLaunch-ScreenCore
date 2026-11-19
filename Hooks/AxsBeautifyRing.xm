@@ -1911,7 +1911,7 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
                 guard++;
                 if (![it isKindOfClass:[NSDictionary class]]) {
                     if (logOut != NULL) [logOut appendFormat:@"\n    METADATA_TYPE_SKIP node=%@ reason=not-dictionary actualClass=%@",
-                                         axs_ring_nsDesc(it), NSStringFromClass(it.class)];
+                                         axs_ring_nsDesc(it), NSStringFromClass([(NSObject *)it class])];
                     continue;
                 }
                 UIView *v = it[@"axsNode"];
