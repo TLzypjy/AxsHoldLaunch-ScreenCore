@@ -2561,7 +2561,6 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         for (UIView *h in driver.tiltVisualHosts) {
             if (h == nil) continue;
             NSString *key = [NSString stringWithFormat:@"%p", h];
-            NSValue *baseVal = [driver.tiltVisualBase objectForKey:key];
             CATransform3D restore = axs_ring_tiltStripPerspective(h.layer.transform);
             h.layer.transform = restore;
             CATransform3D after = h.layer.transform;
