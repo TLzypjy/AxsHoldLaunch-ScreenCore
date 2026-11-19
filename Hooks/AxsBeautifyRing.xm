@@ -2331,11 +2331,11 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                         || fabs(sib.bounds.size.height - refBounds.size.height) > 1.0) continue;
                     CGFloat sea = 0.0; NSString *sr = nil;
                     if (!axs_ring_tiltEffectiveVisible(sib, &sea, &sr)) {
-                        if (logOut != NULL) [logOut appendFormat:@"\n    SHADOW_SIB_SKIP %@ %@", axs_ring_nsDesc(sib), sr ?: @"-"];
+                        if (probeLog != nil) [probeLog appendFormat:@"\n    SHADOW_SIB_SKIP %@ %@", axs_ring_nsDesc(sib), sr ?: @"-"];
                         continue;
                     }
                     [hosts addObject:sib];
-                    if (logOut != NULL) [logOut appendFormat:@"\n    SHADOW_SIB_ADDED %@ (full-size sibling follows tilt, .67)", axs_ring_nsDesc(sib)];
+                    if (probeLog != nil) [probeLog appendFormat:@"\n    SHADOW_SIB_ADDED %@ (full-size sibling follows tilt, .67)", axs_ring_nsDesc(sib)];
                 }
             }
             // beautify.59/52：宿主集合变化时，被淘汰的旧宿主恢复 transform/clips/mask 并移除
