@@ -176,7 +176,7 @@ jobs:
           # beautify.77：业务层把保存值夹紧到 0..AXS_TILT_ANGLE_MAX(12)，默认 3.0
           grep -Fq 'axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 3.0, 0.0, AXS_TILT_ANGLE_MAX)' Hooks/AxsBeautifyRing.xm || { echo "tilt angle clamp to AXS_TILT_ANGLE_MAX missing"; exit 1; }
           grep -Fq 'axs_ring_clamp(axs_ring_tiltAngle(), 0.0, AXS_TILT_ANGLE_MAX)' Hooks/AxsBeautifyRing.xm || { echo "applyTilt angle clamp to AXS_TILT_ANGLE_MAX missing"; exit 1; }
-          grep -Fq '#define AXS_TILT_ANGLE_MAX    (12.0)' Hooks/AxsBeautifyRing.xm || { echo "AXS_TILT_ANGLE_MAX 12 missing"; exit 1; }
+          grep -Fq '#define AXS_TILT_ANGLE_MAX    (30.0)' Hooks/AxsBeautifyRing.xm || { echo "AXS_TILT_ANGLE_MAX 12 missing"; exit 1; }
           python3 - <<PYEOF
           import plistlib, sys
           b = "$B/"
@@ -197,7 +197,7 @@ jobs:
               sys.exit("tilt rows not right after decor switch")
           tilt = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltAngle"][0]
           if tilt.get("cell") != "PSSliderCell" or tilt.get("min") != 0.0 \
-             or tilt.get("max") != 12.0 or tilt.get("step") != 0.5 or tilt.get("default") != 3.0:
+             or tilt.get("max") != 30.0 or tilt.get("step") != 0.5 or tilt.get("default") != 3.0:
               sys.exit("tilt angle slider spec wrong (expect 0..12 default 3): %r" % tilt)
           tiltsw = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltEnabled"][0]
           if tiltsw.get("cell") != "PSSwitchCell" or tiltsw.get("default") is not False:

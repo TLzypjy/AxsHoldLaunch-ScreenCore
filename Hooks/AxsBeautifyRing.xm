@@ -70,7 +70,7 @@
 #define AXS_TILT_SIDE_SIGN    (-1.0)
 #define AXS_TILT_PERSPECTIVE_GAIN  (2.6)
 // beautify.77：可调角度上限 6°→12°（用户要求增大）；默认 3.0 与 step 0.5 不变。
-#define AXS_TILT_ANGLE_MAX    (12.0)
+#define AXS_TILT_ANGLE_MAX    (30.0)
 
 static void axs_ring_scanTick(void);
 static void axs_ring_installLayoutHook(void);           // 定义在扫描节之后
