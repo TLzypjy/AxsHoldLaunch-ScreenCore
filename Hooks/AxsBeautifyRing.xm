@@ -73,6 +73,7 @@
 #define AXS_TILT_ANGLE_MAX    (30.0)
 
 static void axs_ring_scanTick(void);
+static void axs_ring_applyScanInterval(void);   // beautify.94：定义在扫描定时器静态变量之后
 static void axs_ring_installLayoutHook(void);           // 定义在扫描节之后
 static void axs_ring_probeNativeChainOnce(void);        // beautify.46：定义在 layout hook 之后
 static NSString *axs_ring_tiltNativeBaseDesc(id obj);   // beautify.59：定义在 native probe 之前被 applyTilt 调用
@@ -3343,26 +3344,6 @@ static void axs_ring_collectContainers(UIView *view, NSMutableArray *out, int de
     }
 }
 
-// beautify.94：空闲退避——扫描间隔按需重建（0.5s 活跃 / 2s 空闲）。
-// 无任何驱动且本轮无容器（用户没开分屏/浮窗/侧挂）时，全窗口树遍历
-// （SpringBoard 等大树共上千节点）每 0.5s 一次纯属浪费且在滚动/动画中
-// 造成规律性小卡顿（定时器挂在 NSRunLoopCommonModes）。退避到 2s 降 75%
-// 空闲开销；新容器的即时挂载由 SCFloatingContainerView layoutSubviews 钩子
-// 覆盖（不等扫描），有驱动或发现容器立即恢复 0.5s。
-static void axs_ring_applyScanInterval(void) {
-    if (axs_ring_scanTimer == nil) return;
-    if (axs_ring_scanIntervalCur == axs_ring_scanIntervalWanted) return;
-    [axs_ring_scanTimer invalidate];
-    axs_ring_scanTimer = [NSTimer timerWithTimeInterval:axs_ring_scanIntervalWanted
-                                                 target:axs_ring_healthTarget
-                                               selector:@selector(axsRingTick)
-                                               userInfo:nil
-                                                repeats:YES];
-    axs_ring_scanTimer.tolerance = 0.1;
-    [[NSRunLoop mainRunLoop] addTimer:axs_ring_scanTimer forMode:NSRunLoopCommonModes];
-    axs_ring_scanIntervalCur = axs_ring_scanIntervalWanted;
-}
-
 static void axs_ring_scanTick(void) {
     @try {
         if (!axs_ring_layoutHookInstalled) axs_ring_installLayoutHook(); // 类可能晚于 %ctor 注册
@@ -3575,6 +3556,26 @@ static void axs_ring_probeNativeChainOnce(void) {
 static NSTimer *axs_ring_scanTimer = nil;
 static NSTimeInterval axs_ring_scanIntervalCur = -1.0;   // beautify.94：当前生效的扫描间隔
 static NSTimeInterval axs_ring_scanIntervalWanted = 0.5; // beautify.94：期望间隔（活跃 0.5s / 空闲 2s）
+
+// beautify.94：空闲退避——扫描间隔按需重建（0.5s 活跃 / 2s 空闲）。
+// 无任何驱动且本轮无容器（用户没开分屏/浮窗/侧挂）时，全窗口树遍历
+// （SpringBoard 等大树共上千节点）每 0.5s 一次纯属浪费且在滚动/动画中
+// 造成规律性小卡顿（定时器挂在 NSRunLoopCommonModes）。退避到 2s 降 75%
+// 空闲开销；新容器的即时挂载由 SCFloatingContainerView layoutSubviews 钩子
+// 覆盖（不等扫描），有驱动或发现容器立即恢复 0.5s。
+static void axs_ring_applyScanInterval(void) {
+    if (axs_ring_scanTimer == nil) return;
+    if (axs_ring_scanIntervalCur == axs_ring_scanIntervalWanted) return;
+    [axs_ring_scanTimer invalidate];
+    axs_ring_scanTimer = [NSTimer timerWithTimeInterval:axs_ring_scanIntervalWanted
+                                                 target:axs_ring_healthTarget
+                                               selector:@selector(axsRingTick)
+                                               userInfo:nil
+                                                repeats:YES];
+    axs_ring_scanTimer.tolerance = 0.1;
+    [[NSRunLoop mainRunLoop] addTimer:axs_ring_scanTimer forMode:NSRunLoopCommonModes];
+    axs_ring_scanIntervalCur = axs_ring_scanIntervalWanted;
+}
 
 static AXSRingHealthTarget *axs_ring_healthTarget = nil;
 
