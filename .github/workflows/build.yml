@@ -240,7 +240,7 @@ jobs:
           grep -Fq "driver.ring.hidden = !ringAllowed;" Hooks/AxsBeautifyRing.xm || { echo "sync per-frame visibility missing"; exit 1; }
           grep -Fq "BOOL glowOn = axs_ring_glowAllowedFor(docked, container);" Hooks/AxsBeautifyRing.xm || { echo "sync glow per-type gate missing"; exit 1; }
           grep -Fq "BOOL docked = axs_ring_containerIsDocked(d.container);" Hooks/AxsBeautifyRing.xm || { echo "refresh per-driver classify missing"; exit 1; }
-          grep -Fq "!axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container))" Hooks/AxsBeautifyRing.xm || { echo "applyGlow per-container gate missing"; exit 1; }
+          grep -Fq "!axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container), driver.container)" Hooks/AxsBeautifyRing.xm || { echo "applyGlow per-container gate missing"; exit 1; }
           test "$(grep -c "decor classify" Hooks/AxsBeautifyRing.xm)" -eq 2 || { echo "classify log missing (expect attach + sync)"; exit 1; }
           echo "=== beautify.80 regression fix check (source-level) ==="
           # .42 idle-pause machinery must be fully rolled back (指令 三.1/三.2)

@@ -663,20 +663,23 @@ static BOOL axs_ring_decorHiddenWhileDragging(UIView *container) {
 
 // 按窗口类型分别接总开关（指令 三）：
 // docked=YES（侧贴小窗）：ringAllowed = master && ringOn，glowAllowed = master && glowOn；
-// docked=NO：beautify.80 起按渲染宽度区分——展开大浮窗照旧按 ringOn/glowOn 显示，
-// 挂起小窗左右拖动（渲染宽 < 半屏）隐藏装饰，消除拖动卡顿（.79 的全隐藏方案
-// 误伤大浮窗，已按用户反馈修正）。
+// docked=NO：
+//   - 挂起小窗左右拖动（渲染宽 < 半屏）：与贴边同规则（beautify.80 用户要求：
+//     master 开=拖动路过正常显示，master 关=拖动全程不显示）；
+//   - 展开大浮窗（渲染宽 ≥ 半屏）：忽略 master，按 ringOn/glowOn 显示。
 // 条件按单个 driver/单个容器判断——绝不因 master=NO 遍历全部 driver detach。
 static BOOL axs_ring_ringAllowedFor(BOOL docked, UIView *container) {
-    if (docked) return axs_ring_decorEnabled() && axs_ring_enabled();
-    if (axs_ring_decorHiddenWhileDragging(container)) return NO;
-    return axs_ring_enabled();
+    if (!docked && !axs_ring_decorHiddenWhileDragging(container)) {
+        return axs_ring_enabled();               // 展开大浮窗：忽略 master
+    }
+    return axs_ring_decorEnabled() && axs_ring_enabled();   // 贴边/拖动中的挂起小窗
 }
 
 static BOOL axs_ring_glowAllowedFor(BOOL docked, UIView *container) {
-    if (docked) return axs_ring_decorEnabled() && axs_ring_glowEnabled();
-    if (axs_ring_decorHiddenWhileDragging(container)) return NO;
-    return axs_ring_glowEnabled();
+    if (!docked && !axs_ring_decorHiddenWhileDragging(container)) {
+        return axs_ring_glowEnabled();           // 展开大浮窗：忽略 master
+    }
+    return axs_ring_decorEnabled() && axs_ring_glowEnabled(); // 贴边/拖动中的挂起小窗
 }
 
 static BOOL axs_ring_glowCustomColor(void) {
@@ -1048,7 +1051,7 @@ static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
     if (driver.glowInner == nil || driver.glowOuter == nil) return;
     // beautify.41：按本容器分类拦截——sync 每帧都会走到这里，必须在此拦，
     // 否则侧贴小窗（master=OFF）或光晕子开关 OFF 时会被 sync 每帧重新点亮
-    if (range <= 0.5 || !axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container))
+    if (range <= 0.5 || !axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container), driver.container)
         || axs_ring_glowBrightness() <= 0.5) {
         driver.glowInner.hidden = YES;
         driver.glowOuter.hidden = YES;
