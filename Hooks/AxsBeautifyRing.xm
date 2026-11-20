@@ -662,24 +662,25 @@ static BOOL axs_ring_decorHiddenWhileDragging(UIView *container) {
 }
 
 // 按窗口类型分别接总开关（指令 三）：
-// docked=YES（侧贴小窗）：ringAllowed = master && ringOn，glowAllowed = master && glowOn；
+// docked=YES（侧贴小窗）：beautify.81 起只按 ringOn/glowOn——用户反馈"大浮窗
+//   缩小后边框光晕消失"为 bug，装饰须跨缩小/贴边持续（master 不再压制贴边态）；
 // docked=NO：
-//   - 挂起小窗左右拖动（渲染宽 < 半屏）：与贴边同规则（beautify.80 用户要求：
-//     master 开=拖动路过正常显示，master 关=拖动全程不显示）；
+//   - 挂起小窗左右拖动（渲染宽 < 半屏）：与贴边同规则受 master 控制（beautify.80
+//     用户要求：master 开=拖动路过正常显示，master 关=拖动全程不显示）；
 //   - 展开大浮窗（渲染宽 ≥ 半屏）：忽略 master，按 ringOn/glowOn 显示。
 // 条件按单个 driver/单个容器判断——绝不因 master=NO 遍历全部 driver detach。
 static BOOL axs_ring_ringAllowedFor(BOOL docked, UIView *container) {
-    if (!docked && !axs_ring_decorHiddenWhileDragging(container)) {
-        return axs_ring_enabled();               // 展开大浮窗：忽略 master
+    if (!docked && axs_ring_decorHiddenWhileDragging(container)) {
+        return axs_ring_decorEnabled() && axs_ring_enabled();   // 拖动中的挂起小窗：受总闸控制
     }
-    return axs_ring_decorEnabled() && axs_ring_enabled();   // 贴边/拖动中的挂起小窗
+    return axs_ring_enabled();   // 贴边小窗 + 展开大浮窗：只按光圈开关
 }
 
 static BOOL axs_ring_glowAllowedFor(BOOL docked, UIView *container) {
-    if (!docked && !axs_ring_decorHiddenWhileDragging(container)) {
-        return axs_ring_glowEnabled();           // 展开大浮窗：忽略 master
+    if (!docked && axs_ring_decorHiddenWhileDragging(container)) {
+        return axs_ring_decorEnabled() && axs_ring_glowEnabled(); // 拖动中的挂起小窗：受总闸控制
     }
-    return axs_ring_decorEnabled() && axs_ring_glowEnabled(); // 贴边/拖动中的挂起小窗
+    return axs_ring_glowEnabled();   // 贴边小窗 + 展开大浮窗：只按光晕开关
 }
 
 static BOOL axs_ring_glowCustomColor(void) {
@@ -1806,6 +1807,21 @@ static void axs_ring_tiltSyncHitFrame(AXSRingLinkDriver *driver, BOOL shouldTilt
             || !isfinite(winBBox.size.width) || !isfinite(winBBox.size.height)) return;
         CGRect inSuper = (w != nil && ov.superview != nil)
                          ? [w convertRect:winBBox toView:ov.superview] : winBBox;
+        // beautify.81：只平移不缩放。旧逻辑把 overlay 缩放到投影 bbox（~81×208），
+        // 而边条/角区子视图按原始 311×624 空间布局——缩放后贴屏幕边缘一侧的子区
+        // 落到 overlay bounds 之外（触摸不会命中 superview bounds 外的子视图）：
+        // 右贴边死区在贴屏侧（无感），左贴边死区在朝中间一侧=用户自然抓取侧
+        // → 拖动手势全部失效（sc-ring(50)：左贴边卡死）。改为保持原始尺寸、
+        // 仅把中心平移到投影 bbox 中心，全部子区保持可用且仍覆盖梯形。
+        {
+            CGRect orig = [store objectForKey:key] != nil
+                          ? [[store objectForKey:key] CGRectValue] : ov.frame;
+            CGPoint cIn = CGPointMake(inSuper.origin.x + inSuper.size.width / 2.0,
+                                      inSuper.origin.y + inSuper.size.height / 2.0);
+            inSuper = CGRectMake(cIn.x - orig.size.width / 2.0,
+                                 cIn.y - orig.size.height / 2.0,
+                                 orig.size.width, orig.size.height);
+        }
         if (!CGRectEqualToRect(inSuper, ov.frame)) {
             [CATransaction begin];
             [CATransaction setDisableActions:YES];
