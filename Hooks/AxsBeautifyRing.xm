@@ -2403,7 +2403,7 @@ static void axs_ring_tiltShadowNeutralize(UIView *container) {
 // beautify.83：视图是否位于 SCDockedFloatingItemView 子树内（原生贴边迷你渲染/角标/
 // 关闭按钮）。原生 docked UI 绝不能成为倾斜宿主——sc-ring(82) 铁证：左贴边时原生显示
 // 28×28 关闭按钮（右贴边只有隐藏的 6.5×6.5 角标），DOCKED_ITEM 分支把它选为
-// DOCKED_ITEM_SUB_HOST，.73 归一化把它强改成 248×537.7 巨型视图（居中铺满窗口）、
+// 旧 SUB_HOST 路径，.73 归一化把它强改成 248×537.7 巨型视图（居中铺满窗口）、
 // 叠在容器上方且无手势却吞掉所有触摸 → 拖动/关闭全部失效 = 左贴边卡死；其 tilt
 // 形态即用户所见怪异梯形。右贴边无此按钮所以从不卡死。
 static BOOL axs_ring_insideDockedItemSubtree(UIView *v) {
