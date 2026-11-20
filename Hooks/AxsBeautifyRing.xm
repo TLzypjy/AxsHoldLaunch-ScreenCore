@@ -74,6 +74,9 @@
 
 static void axs_ring_scanTick(void);
 static void axs_ring_applyScanInterval(void);   // beautify.94：定义在扫描定时器静态变量之后
+static NSTimer *axs_ring_scanTimer = nil;                 // beautify.94：扫描定时器（间隔可变）
+static NSTimeInterval axs_ring_scanIntervalCur = -1.0;    // beautify.94：当前生效的扫描间隔
+static NSTimeInterval axs_ring_scanIntervalWanted = 0.5;  // beautify.94：期望间隔（活跃 0.5s / 空闲 2s）
 static void axs_ring_installLayoutHook(void);           // 定义在扫描节之后
 static void axs_ring_probeNativeChainOnce(void);        // beautify.46：定义在 layout hook 之后
 static NSString *axs_ring_tiltNativeBaseDesc(id obj);   // beautify.59：定义在 native probe 之前被 applyTilt 调用
@@ -3553,9 +3556,9 @@ static void axs_ring_probeNativeChainOnce(void) {
     });
 }
 @end
-static NSTimer *axs_ring_scanTimer = nil;
-static NSTimeInterval axs_ring_scanIntervalCur = -1.0;   // beautify.94：当前生效的扫描间隔
-static NSTimeInterval axs_ring_scanIntervalWanted = 0.5; // beautify.94：期望间隔（活跃 0.5s / 空闲 2s）
+
+
+static AXSRingHealthTarget *axs_ring_healthTarget = nil;
 
 // beautify.94：空闲退避——扫描间隔按需重建（0.5s 活跃 / 2s 空闲）。
 // 无任何驱动且本轮无容器（用户没开分屏/浮窗/侧挂）时，全窗口树遍历
@@ -3576,8 +3579,6 @@ static void axs_ring_applyScanInterval(void) {
     [[NSRunLoop mainRunLoop] addTimer:axs_ring_scanTimer forMode:NSRunLoopCommonModes];
     axs_ring_scanIntervalCur = axs_ring_scanIntervalWanted;
 }
-
-static AXSRingHealthTarget *axs_ring_healthTarget = nil;
 
 // 偏好变更后刷新已有存活环的颜色（TXT beautify.26 三.4）：重建渐变层
 // （自定义单色 ↔ 彩虹跑马灯互切），挂载/几何/圆角结构不动，环不断
