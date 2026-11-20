@@ -917,6 +917,8 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver);
 static void axs_ring_applyTilt(AXSRingLinkDriver *driver);
 static void axs_ring_resetTilt(AXSRingLinkDriver *driver);
 
+static void axs_ring_detachDriver(NSString *key);   // beautify.95：前置声明（tick 自检自拆用，定义在后部）
+
 @interface AXSRingLinkDriver : NSObject
 @property (nonatomic, assign) NSInteger deadFrames;   // beautify.95：容器离层连续帧计数（无扫描模式自检自拆）
 @property (nonatomic, weak) UIView *container;
