@@ -281,7 +281,7 @@ jobs:
           grep -Fq "BOOL geomChanged, BOOL colorChanged" Hooks/AxsBeautifyRing.xm || { echo "glow split rebuild missing"; exit 1; }
           # prefs snapshot: all config reads funnel through refreshConfigSnapshot
           grep -Fq "static void axs_ring_refreshConfigSnapshot(void)" Hooks/AxsBeautifyRing.xm || { echo "config snapshot missing"; exit 1; }
-          test "$(grep -c "axs_holdlaunch_theirValueForKey" Hooks/AxsBeautifyRing.xm)" -eq 14 || { echo "config reads drifted (expected 14 = 13 snapshot reads incl. 2 tilt + 1 selector)"; exit 1; }
+          test "$(grep -c "axs_holdlaunch_theirValueForKey" Hooks/AxsBeautifyRing.xm)" -eq 15 || { echo "config reads drifted (expected 15 = 14 snapshot reads incl. dock percent + 1 selector)"; exit 1; }
           grep -Fq "axs_ring_refreshConfigSnapshot();" Hooks/AxsBeautifyRing.xm || { echo "snapshot refresh call missing"; exit 1; }
           echo "=== beautify.89 side-tilt feature check (source-level) ==="
           # config getters (snapshot reads)
