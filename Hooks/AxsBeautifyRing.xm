@@ -69,7 +69,7 @@
 #define AXS_TILT_M34          (-1.0 / 600.0)
 #define AXS_TILT_SIDE_SIGN    (-1.0)
 #define AXS_TILT_PERSPECTIVE_GAIN  (2.6)
-// beautify.82：可调角度上限 6°→12°（用户要求增大）；默认 3.0 与 step 0.5 不变。
+// beautify.83：可调角度上限 6°→12°（用户要求增大）；默认 3.0 与 step 0.5 不变。
 #define AXS_TILT_ANGLE_MAX    (30.0)
 
 static void axs_ring_scanTick(void);
@@ -286,7 +286,7 @@ static void axs_ring_refreshConfigSnapshot(void) {
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitWindowCornerRadius" defaultValue:@8.0];
         axs_snap_configRadius = axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 8.0, 0.0, 60.0);
         // beautify.47：侧倾开关（默认 NO）+ 3D 透视角度（默认 3.0）
-        // beautify.82：上限 6.0→12.0（AXS_TILT_ANGLE_MAX），用户要求增大可调角度。
+        // beautify.83：上限 6.0→12.0（AXS_TILT_ANGLE_MAX），用户要求增大可调角度。
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyTiltEnabled" defaultValue:@NO];
         axs_snap_tiltEnabled = [v isKindOfClass:[NSNumber class]] ? [v boolValue] : NO;
         v = [cfg axs_holdlaunch_theirValueForKey:@"splitBeautifyTiltAngle" defaultValue:@3.0];
@@ -649,7 +649,7 @@ static void axs_ring_tiltLogDockState(UIView *container) {
     }
 }
 
-// beautify.82：挂起小窗拖动判定——未贴边且渲染宽度 < 半屏（挂起小窗渲染约
+// beautify.83：挂起小窗拖动判定——未贴边且渲染宽度 < 半屏（挂起小窗渲染约
 // 20% 屏宽，展开大浮窗约 71%）。拖动横穿屏幕时隐藏装饰，消除大模糊光晕
 // 实时渲染造成的卡顿；大浮窗（展开态）不受影响。
 static BOOL axs_ring_decorHiddenWhileDragging(UIView *container) {
@@ -663,7 +663,7 @@ static BOOL axs_ring_decorHiddenWhileDragging(UIView *container) {
 
 // 按窗口类型分别接总开关（指令 三）：
 // docked=YES（侧贴小窗）：ringAllowed = master && ringOn，glowAllowed = master && glowOn。
-//   beautify.82：恢复 .80 语义——.81 曾把贴边也改成只按 ringOn/glowOn（忽略 master），
+//   beautify.83：恢复 .80 语义——.81 曾把贴边也改成只按 ringOn/glowOn（忽略 master），
 //   导致「小窗边框美化」开关控制不了贴边挂起小窗（sc-ring(51) 用户反馈）。挂起小窗
 //   全时段（贴边+拖动）都受「小窗边框美化」控制；展开大浮窗不受 master，按 ringOn/glowOn。
 // docked=NO：
@@ -714,7 +714,7 @@ static UIColor *axs_ring_glowColor(void) {
     if (axs_ring_enabled() && axs_ring_customColor()) {
         return axs_ring_color();                 // 边框单色 = ringFrameColor
     }
-    // beautify.82：其余情况一律彩虹跑马灯——包括光圈外框关闭时，光晕以原光圈
+    // beautify.83：其余情况一律彩虹跑马灯——包括光圈外框关闭时，光晕以原光圈
     // 的跑马灯形式独立继续显示（用户明确要求各控制各的：圈关晕仍跑马灯）。
     // conic 渐变每 4.0s 转一圈（见 makeGradient 的 spin.duration），用同一周期
     // 与起点算当前色相；光圈开且边框彩虹时与边框色相同步，光圈关时独立循环。
@@ -725,7 +725,7 @@ static UIColor *axs_ring_glowColor(void) {
 }
 
 // 是否处于「彩虹跑马灯」：需要每帧刷新光晕色相（不重建几何、不另加动画）。
-// beautify.82：不再要求光圈开启——跟随模式下（光晕定制关）除"光圈开+边框单色"
+// beautify.83：不再要求光圈开启——跟随模式下（光晕定制关）除"光圈开+边框单色"
 // 的静态跟随外，一律逐帧跑马灯，光圈关闭时光晕独立继续跑马灯显示。
 static BOOL axs_ring_glowFollowsRainbow(void) {
     if (!axs_ring_glowEnabled() || axs_ring_glowCustomColor()) return NO;
@@ -947,9 +947,9 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver);
 @property (nonatomic, assign) NSTimeInterval tiltVisualProbeTime;    // 视觉宿主重探节流
 @property (nonatomic, assign) BOOL loggedZOrder;                     // beautify.59：ZORDER 日志只写一次
 @property (nonatomic, assign) BOOL lastDockSnap;                     // beautify.59：上帧贴边态（翻转时抓拍快照）
-@property (nonatomic, assign) BOOL tiltShadowWasActive;              // beautify.82：本 driver 是否处于倾斜态（全局计数对账用）
-@property (nonatomic, assign) int scanMissCount;                     // beautify.82：连续缺席扫描次数（宽限期防抖）
-@property (nonatomic, assign) BOOL tiltShadowProbed;                 // beautify.82：SHADOW_PROBE 每次倾斜会话只输出一次
+@property (nonatomic, assign) BOOL tiltShadowWasActive;              // beautify.83：本 driver 是否处于倾斜态（全局计数对账用）
+@property (nonatomic, assign) int scanMissCount;                     // beautify.83：连续缺席扫描次数（宽限期防抖）
+@property (nonatomic, assign) BOOL tiltShadowProbed;                 // beautify.83：SHADOW_PROBE 每次倾斜会话只输出一次
 - (void)tick;
 @end
 
@@ -1358,7 +1358,7 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
             }
         } else if (!CATransform3DIsIdentity(src.transform)
                    && src.superlayer == mount) {
-            // beautify.82：src 是倾斜宿主（ring/glow 贴合的层）时，其 frame 是变换后
+            // beautify.83：src 是倾斜宿主（ring/glow 贴合的层）时，其 frame 是变换后
             // 包围盒——环会被画成外接矩形而与梯形错位。改用未变换 frame（锚点居中
             // ±bounds/2，归一后即 container bounds），环与梯形在 mount 坐标系一致。
             bounds = CGRectMake(src.position.x - src.bounds.size.width / 2.0,
@@ -1509,7 +1509,7 @@ static void axs_ring_syncDriver(AXSRingLinkDriver *driver) {
 //      被裁剪则继续向上找更外层安全祖先，直到 window/rootVC.view 前为止；
 //   4) 找不到安全公共祖先就记日志放弃，绝不挂到裁剪层或宿主 window。
 // 完整宿主链路（每层类名/frame/bounds/transform/anchorPoint/clips）写入探针日志。
-// --- beautify.82：透视矩阵 concat 顺序修正（真正的"没有倾斜"根因）------------
+// --- beautify.83：透视矩阵 concat 顺序修正（真正的"没有倾斜"根因）------------
 // sc-ring(36).log + 参照视频铁证：.64 每帧 want==curNow（m13=0.26892 m31=-0.2689
 // m34=-0.00167），但 corners 四角恒为正矩形，截图/视频里小窗也没有近大远小。
 // 根因：.62~.64 把 m34 直接写进 rotationY 矩阵得到 R·P，对 z=0 的被变换平面
@@ -1809,7 +1809,7 @@ static void axs_ring_tiltSyncHitFrame(AXSRingLinkDriver *driver, BOOL shouldTilt
             || !isfinite(winBBox.size.width) || !isfinite(winBBox.size.height)) return;
         CGRect inSuper = (w != nil && ov.superview != nil)
                          ? [w convertRect:winBBox toView:ov.superview] : winBBox;
-        // beautify.82：只平移不缩放。旧逻辑把 overlay 缩放到投影 bbox（~81×208），
+        // beautify.83：只平移不缩放。旧逻辑把 overlay 缩放到投影 bbox（~81×208），
         // 而边条/角区子视图按原始 311×624 空间布局——缩放后贴屏幕边缘一侧的子区
         // 落到 overlay bounds 之外（触摸不会命中 superview bounds 外的子视图）：
         // 右贴边死区在贴屏侧（无感），左贴边死区在朝中间一侧=用户自然抓取侧
@@ -2082,37 +2082,26 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             NSString *diCN = NSStringFromClass(di.class);
             BOOL isDockedVisual = ([diCN rangeOfString:@"DockedFloatingItem"].location != NSNotFound)
                                   && !axs_ring_subtreeHasOverlay(di);
-            if (di.gestureRecognizers.count == 0 || isDockedVisual) {
-                if (![hosts containsObject:di]) [hosts addObject:di];
-                if (isDockedVisual) hasDockedVisualHost = YES;
-                if (logOut != NULL) {
-                    [logOut appendFormat:@"\n    HOST_CLASSIFY DOCKED_ITEM role=host%@",
-                     isDockedVisual ? @" (visible docked preview)" : @""];
-                    [logOut appendFormat:@"\n    DOCKED_ITEM_HOST (gesture-free, content in sublayers)%@",
-                     isDockedVisual ? @" [.64 visual root]" : @""];
-                    if (di.gestureRecognizers.count > 0 && isDockedVisual) {
-                        [logOut appendFormat:@"\n    DOCKED_ITEM_TAP_ROOT_VISUAL_HOST gestures=%lu (tap root is the visible window; overlay stays planar)",
-                         (unsigned long)di.gestureRecognizers.count];
-                    }
-                }
-            } else {
-                // 带手势（指令 四.3）：禁止倾斜交互根，选其子级有效可见、非手势的最大本地分支
+            // beautify.83：docked item 本体/子树一律不做倾斜宿主（log-only 保留诊断）。
+            // .64 曾让贴边可见 docked 本体做视觉宿主，.66 已证其子树不画内容（仅角标），
+            // 真正画面在 container 下的包装层（2c 分支无条件收集）。本体/子视图被
+            // tilt/归一化会破坏原生贴边 UI 并产生巨型吞触摸视图（左贴边卡死根因，
+            // sc-ring(82)：左贴时原生显示 28×28 关闭按钮，被旧逻辑选为最大可见子级
+            // 宿主后强改成 248×537.7 巨型视图）。
+            if (logOut != NULL) {
+                [logOut appendFormat:@"\n    DOCKED_ITEM_NEVER_HOST %@ isDockedVisual=%d (.83: native docked UI stays untouched; content hosts come from container wrappers)",
+                 axs_ring_nsDesc(di), isDockedVisual ? 1 : 0];
                 UIView *bestSub = nil; CGFloat bestArea = 0.0;
                 for (UIView *sub in di.subviews) {
                     if (axs_ring_isOverlayNode(sub) || sub.gestureRecognizers.count > 0) continue;
                     CGFloat sa = 0.0; NSString *sr = nil;
-                    if (!axs_ring_tiltEffectiveVisible(sub, &sa, &sr)) {
-                        if (logOut != NULL) [logOut appendFormat:@"\n    INVISIBLE_SKIP sub %@ %@", axs_ring_nsDesc(sub), sr ?: @"-"];
-                        continue;
-                    }
+                    if (!axs_ring_tiltEffectiveVisible(sub, &sa, &sr)) continue;
                     CGFloat area = sub.frame.size.width * sub.frame.size.height;
                     if (area > bestArea) { bestArea = area; bestSub = sub; }
                 }
                 if (bestSub != nil) {
-                    if (![hosts containsObject:bestSub]) [hosts addObject:bestSub];
-                    if (logOut != NULL) [logOut appendFormat:@"\n    DOCKED_ITEM_SUB_HOST (gesture root protected) %@", axs_ring_nsDesc(bestSub)];
-                } else if (logOut != NULL) {
-                    [logOut appendFormat:@"\n    DOCKED_ITEM skipped: gesture root without safe local sub-branch"];
+                    [logOut appendFormat:@"\n    DOCKED_ITEM_SUB_SKIPPED %@ (.83: native docked UI never a tilt host)",
+                     axs_ring_nsDesc(bestSub)];
                 }
             }
         }
@@ -2143,7 +2132,7 @@ static NSArray *axs_ring_collectVisualHosts(UIView *container, NSMutableString *
             if (logOut != NULL) [logOut appendFormat:@"\n    SCENE_HOST_PROBE %@ role=probe-only (not a tilt host)", axs_ring_nsDesc(sr)];
         }
 
-        // 2c) beautify.82：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
+        // 2c) beautify.83：恢复 .51/.52 用户认可的「container 下可见包装层」作宿主。
         //     真机 sc-ring(34) 铁证：.62 把矩阵写进 container 自身（m13=0.088 m31=-0.269
         //     m34=-0.00167，want==curNow），但 corners 顶边 y 恒 40.0/40.0、截图仍是正矩形；
         //     因为 container 的 transform 被原生 dock scale(0.3287) 动画管线每帧吞掉。
@@ -2326,7 +2315,7 @@ static void axs_ring_tiltCollectHitRegions(UIView *root, NSMutableArray *out, in
     for (UIView *sub in root.subviews) axs_ring_tiltCollectHitRegions(sub, out, depth + 1);
 }
 
-// beautify.82：全局阴影暂存表 + 活跃倾斜计数。per-driver 存储在 driver 重建时会
+// beautify.83：全局阴影暂存表 + 活跃倾斜计数。per-driver 存储在 driver 重建时会
 // 孤儿化（.68/.69 实测：宿主 0.24/60 原生阴影被清零后 driver 重建，永久丢失无法恢复）。
 // 改为进程级：任意 driver 处于倾斜态时计数>0，计数归零（或 detach 对账）时统一恢复。
 static NSMutableDictionary<NSString *, NSArray *> *axs_ring_tiltShadowSavedG = nil;
@@ -2349,7 +2338,7 @@ static void axs_ring_tiltShadowRestoreAll(void) {
     [axs_ring_tiltShadowSavedG removeAllObjects];
 }
 
-// beautify.82：收集阴影中性化候选节点（container/root/docked item/container 非 overlay 子层）。
+// beautify.83：收集阴影中性化候选节点（container/root/docked item/container 非 overlay 子层）。
 static void axs_ring_tiltShadowCollect(UIView *container, NSMutableArray *shadowNodes, NSMutableArray *probeNodes) {
     if (container == nil || container.layer == nil) return;
     [shadowNodes addObject:container];
@@ -2375,7 +2364,7 @@ static void axs_ring_tiltShadowCollect(UIView *container, NSMutableArray *shadow
     }
 }
 
-// beautify.82：attach 时预中性化。滑条/开关交互会令 ScreenCore 重建贴边容器
+// beautify.83：attach 时预中性化。滑条/开关交互会令 ScreenCore 重建贴边容器
 // （sc-ring(43)：STALE_HOST_EVICT effectiveAlpha=0 → 容器重建 → detach→restore
 // →重挂），重建间隙内新容器首帧前阴影可见即灰带闪现。attach 时若已贴边且侧倾
 // 开，立即清零，消除间隙；后续由 applyTilt 的 shadowHold 门控维持。
@@ -2397,7 +2386,7 @@ static void axs_ring_tiltShadowNeutralize(UIView *container) {
                 continue;
             }
         }
-        // beautify.82：同 applyTilt——原生重设 shadowOpacity 时持续压回 0。
+        // beautify.83：同 applyTilt——原生重设 shadowOpacity 时持续压回 0。
         if (so > 0.001) {
             [CATransaction begin];
             [CATransaction setDisableActions:YES];
@@ -2407,10 +2396,28 @@ static void axs_ring_tiltShadowNeutralize(UIView *container) {
     }
 }
 
-// beautify.82：全尺寸兄弟层补全（probe 与每帧共用）。原生侧会把背景壳 bounds 适配到
+// beautify.83：全尺寸兄弟层补全（probe 与每帧共用）。原生侧会把背景壳 bounds 适配到
 // 倾斜内容的呈现包围盒（sc-ring(45)：host bounds 232.10×656.09 == 宿主倾斜后 frame，
 // 反馈闭环），归一后它们与宿主同尺寸，必须与宿主一起倾斜才能贴合梯形。
 // 每帧补全消除「容器重建 → 下一拍 probe」之间的空窗（期间白卡未倾斜可见）。
+// beautify.83：视图是否位于 SCDockedFloatingItemView 子树内（原生贴边迷你渲染/角标/
+// 关闭按钮）。原生 docked UI 绝不能成为倾斜宿主——sc-ring(82) 铁证：左贴边时原生显示
+// 28×28 关闭按钮（右贴边只有隐藏的 6.5×6.5 角标），DOCKED_ITEM 分支把它选为
+// DOCKED_ITEM_SUB_HOST，.73 归一化把它强改成 248×537.7 巨型视图（居中铺满窗口）、
+// 叠在容器上方且无手势却吞掉所有触摸 → 拖动/关闭全部失效 = 左贴边卡死；其 tilt
+// 形态即用户所见怪异梯形。右贴边无此按钮所以从不卡死。
+static BOOL axs_ring_insideDockedItemSubtree(UIView *v) {
+    UIView *p = v;
+    int hops = 0;
+    while (p != nil && hops < 8) {
+        NSString *cn = NSStringFromClass(p.class);
+        if ([cn rangeOfString:@"DockedFloatingItem"].location != NSNotFound) return YES;
+        p = p.superview;
+        hops++;
+    }
+    return NO;
+}
+
 static void axs_ring_tiltFillSiblingHosts(UIView *container, NSMutableArray *hosts, BOOL dockNow, BOOL logDecisions) {
     if (hosts.count == 0 || container == nil) return;
     // 以 container.bounds 为"全尺寸"参照（.69）：比"最大宿主 bounds"稳定，判定不振荡。
@@ -2418,9 +2425,11 @@ static void axs_ring_tiltFillSiblingHosts(UIView *container, NSMutableArray *hos
     for (UIView *sib in container.subviews) {
         if (sib == nil || [hosts containsObject:sib]) continue;
         if (axs_ring_isOverlayNode(sib) || axs_ring_subtreeHasOverlay(sib)) continue;
+        if (axs_ring_insideDockedItemSubtree(sib)) continue;      // .83：原生 docked UI 绝不入列
         NSString *scn = NSStringFromClass(sib.class);
         if ([scn rangeOfString:@"_UIScenePresentationView"].location != NSNotFound
             || [scn rangeOfString:@"_UISceneLayerHostContainerView"].location != NSNotFound) continue;
+        if (sib.gestureRecognizers.count > 0) continue;           // .83：恢复手势过滤（.68 放宽曾放进原生手势视图）
         if (sib.layer.name != nil && [sib.layer.name rangeOfString:@"axsRing"].location != NSNotFound) continue;
         // 只补全与宿主同尺寸的层：浅色背景壳全尺寸，6.5×6.5 角标被面积差排除
         if (CGRectIsEmpty(sib.bounds) || fabs(sib.bounds.size.width - refBounds.size.width) > 1.0
@@ -2438,7 +2447,7 @@ static void axs_ring_tiltFillSiblingHosts(UIView *container, NSMutableArray *hos
             // 窗口 hidden 被拒——不对称导致 .67 补全从未命中（sc-ring(39) hosts 恒为 2）。
             // 贴边稳态下与已入选宿主同窗，可见性随宿主，放行。
             sibVisible = YES;
-            sr = [sr stringByAppendingString:@" (accepted: window-hidden docked steady, .82)"];
+            sr = [sr stringByAppendingString:@" (accepted: window-hidden docked steady, .83)"];
         }
         if (!sibVisible) {
             if (logDecisions && dockNow) axs_ring_log(@"ring tilt SHADOW_SIB_SKIP %@ %@", axs_ring_nsDesc(sib), sr ?: @"-");
@@ -2494,7 +2503,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         if (needProbe) {
             NSMutableString *probeLog = [NSMutableString string];
             NSMutableArray *hosts = [NSMutableArray arrayWithArray:axs_ring_collectVisualHosts(container, probeLog)];
-            // beautify.82/73：消除倾斜后露出的浅灰白"阴影"。container 下与宿主同尺寸、
+            // beautify.83/73：消除倾斜后露出的浅灰白"阴影"。container 下与宿主同尺寸、
             // 可见、非 overlay/手势/scene 根、尚未入选的直接子 UIView 一并纳入 hosts，
             // 走同一套 nativeBase 写入/复位/淘汰状态机，浅色壳随之一起侧翻。
             // .73：逻辑抽到 axs_ring_tiltFillSiblingHosts，probe 与每帧共用（每帧调用
@@ -2555,7 +2564,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     for (UIView *r in regs) [ovDesc appendFormat:@"\n    region %@", axs_ring_nsHitRegion(r)];
                 }
                 for (UIView *h0 in hosts) [ovDesc appendFormat:@"\n    hostView %@", axs_ring_nsView3D(h0)];
-                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.82): container=%@%@%@",
+                axs_ring_log(@"ring tilt VISUAL HOSTS (beautify.83): container=%@%@%@",
                              axs_ring_nsDesc(container), probeLog, ovDesc);
             }
         }
@@ -2582,7 +2591,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         }
         CATransform3D tiltRotation = CATransform3DIdentity;
         if (shouldTilt) {
-            // beautify.82（核心根因修复）：透视必须先于旋转复合，即 M = P · R。
+            // beautify.83（核心根因修复）：透视必须先于旋转复合，即 M = P · R。
             // .62~.64 用 CATransform3DRotate(identity,rad,0,1,0) 再直接写 .m34=-1/600，
             //   得到的是 R·P（旋转矩阵的第4行被塞 m34）。对被变换的 z=0 平面点，
             //   透视除法 w = 1 + z_input*m34 = 1（z_input 恒 0），m34 完全失效——
@@ -2600,7 +2609,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             tiltRotation.m14 = -sinRad * AXS_TILT_M34;   // = sin(rad)/d
             tiltRotation.m34 =  cosRad * AXS_TILT_M34;   // = -cos(rad)/d
         }
-        // beautify.82：原生 layer shadow 诊断 + 中性化（全局健壮版）。
+        // beautify.83：原生 layer shadow 诊断 + 中性化（全局健壮版）。
         // sc-ring(41) 截图像素测量：灰色带沿倾斜后的梯形顶边平行延伸且带圆角——
         // 它是倾斜宿主自身的原生 layer shadow（sc-ring(40) PROBE：0.24/60/hasPath=1，
         // 随层倾斜所以与梯形平行）。.68 曾清零（当时看不到），.69 收窄中性化范围后
@@ -2608,7 +2617,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         // 非 overlay 子层（含宿主）；b) 暂存表改进程级全局（driver 重建不再孤儿化）；
         // c) 全局活跃倾斜计数归零时统一恢复（多 driver 并存互不打架）。
         if (axs_ring_tiltShadowSavedG == nil) axs_ring_tiltShadowSavedG = [NSMutableDictionary dictionary];
-        // beautify.82：保持门控改为「贴边 + 侧倾开」，与角度无关——滑条拖到 0 也
+        // beautify.83：保持门控改为「贴边 + 侧倾开」，与角度无关——滑条拖到 0 也
         // 不恢复灰带（sc-ring(43)：angle 0.5→0.0 即 SHADOW_RESTORED，用户见灰带回归）。
         BOOL shadowHold = tiltOn && dockNow && container.window != nil;
         if (shadowHold && !driver.tiltShadowWasActive) {
@@ -2646,7 +2655,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                             continue;
                         }
                     }
-                    // beautify.82：原生容器重建/外观刷新会重新设置 shadowOpacity（sc-ring(48)
+                    // beautify.83：原生容器重建/外观刷新会重新设置 shadowOpacity（sc-ring(48)
                     // 实测：角度回 0 触发原生重建 → 新容器阴影被原生重设 → 旧逻辑"已登记即
                     // 跳过"再也不清 → 灰带回归）。shadowHold 期间只要当前 >0 一律压回 0；
                     // 登记表只保存首次捕获的原值，退出贴边恢复用。
@@ -2662,7 +2671,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                 axs_ring_tiltShadowRestoreAll();
             }
         }
-        // beautify.82：光圈(ring)/光晕(glowInner/glowOuter)跟随倾斜——用户实测反馈
+        // beautify.83：光圈(ring)/光晕(glowInner/glowOuter)跟随倾斜——用户实测反馈
         // "光圈和光晕没有跟着倾斜"。三者经 findMount 挂在未倾斜的 container.layer 上，
         // 窗口内容倾斜成梯形后它们保持矩形：a) 视觉上光圈错位；b) 半透明光晕填充在
         // 梯形边缘与矩形光圈之间露出一条彩带，即用户从 .66 起持续反馈的"灰色阴影"
@@ -2681,7 +2690,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                 }
             }
         }
-        // beautify.82：子层几何归一 + 每帧兄弟补全。sc-ring(45) 决定性证据：
+        // beautify.83：子层几何归一 + 每帧兄弟补全。sc-ring(45) 决定性证据：
         //   贴边稳态两个宿主 bounds 不同（白卡 232.10×656.09 vs 黑内容 267.72×580.27），
         //   同一旋转矩阵绕各自中心转，梯形必然错位——白卡/光圈与窗口之间露出楔形，
         //   即用户所见"阴影"与"倾斜角度对不上"。且白卡 bounds 逐位等于宿主倾斜后的
@@ -2992,7 +3001,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         }
 
         // 命中区按第一视觉宿主投影四角同步（只改 frame，overlay 自身保持平面）。
-        // beautify.82：贴边态完全禁用同步——贴边小窗被原生以 ~0.355 缩放渲染
+        // beautify.83：贴边态完全禁用同步——贴边小窗被原生以 ~0.355 缩放渲染
         // （sc-ring(51) 实测：投影 bbox 81×208pt，屏上橙按钮区 210pt 高），同步的
         // convertRect 换算在该缩放链下把手势 overlay 推离真实位置（.80 缩放模式、
         // .81 平移模式双双失效），触摸穿透 overlay 落到内容视图（视频铁证：贴边
@@ -3021,7 +3030,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
             axs_ring_tiltApplyLogTime = now;
             id del = [container respondsToSelector:@selector(delegate)] ? [(id)container delegate] : nil;
             NSString *nativeBaseDesc = axs_ring_tiltNativeBaseDesc(del != nil ? del : container);
-            axs_ring_log(@"ring tilt 3D apply (beautify.82): enabled=%d docked=%d angle=%.1f "
+            axs_ring_log(@"ring tilt 3D apply (beautify.83): enabled=%d docked=%d angle=%.1f "
                          @"side=%d sideSign=%.1f rad=%.4f gain=%.1f m34=%.6f container=%@ "
                          @"hosts=%lu overlayAncestorTilted=%d trigger=%@ nativeBase=%@ corners=%@%@",
                          tiltOn ? 1 : 0, docked ? 1 : 0, angle, side,
@@ -3106,7 +3115,7 @@ static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
         driver.tiltHasWrote = NO;
         driver.tiltVerifyPending = 0;
         driver.tiltLastWrote = CATransform3DIdentity;
-        axs_ring_log(@"ring tilt 3D reset (beautify.82): hosts=%lu%@",
+        axs_ring_log(@"ring tilt 3D reset (beautify.83): hosts=%lu%@",
                      (unsigned long)driver.tiltVisualHosts.count, resid);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring tilt reset", exception, driver.container);
@@ -3204,7 +3213,7 @@ static void axs_ring_attachContainer(UIView *container) {
     // beautify.43：link 常驻不暂停，首帧同步由下方 axs_ring_syncDriver 完成
     axs_ring_drivers[key] = driver;
 
-    // beautify.82：attach 即预清零贴边容器的原生阴影（重建间隙内新容器首帧前
+    // beautify.83：attach 即预清零贴边容器的原生阴影（重建间隙内新容器首帧前
     // 阴影可见即灰带闪现，sc-ring(43) 滑条交互触发容器重建实测）。后续由
     // applyTilt 的 shadowHold 门控维持，退出贴边统一恢复。
     if (axs_ring_tiltEnabled() && axs_ring_containerIsDocked(container)) {
@@ -3255,7 +3264,7 @@ static void axs_ring_detachDriver(NSString *key) {
     AXSRingLinkDriver *driver = axs_ring_drivers[key];
     if (driver == nil) return;
     axs_ring_resetTilt(driver);               // beautify.44：恢复侧倾，绝不残留 transform
-    // beautify.82：detach 对账——driver 带倾斜计数销毁时递减并恢复阴影，杜绝孤儿化
+    // beautify.83：detach 对账——driver 带倾斜计数销毁时递减并恢复阴影，杜绝孤儿化
     if (driver.tiltShadowWasActive) {
         driver.tiltShadowWasActive = NO;
         axs_ring_tiltShadowActiveCount--;
@@ -3301,7 +3310,7 @@ static void axs_ring_scanTick(void) {
         }
 
         // a) 已消失的容器 → detach（displayLink invalidate + 摘环）
-        // beautify.82：宽限期防抖。sc-ring(42) 实测：贴边稳态中每次设置交互
+        // beautify.83：宽限期防抖。sc-ring(42) 实测：贴边稳态中每次设置交互
         // （滑条/开关）会令原生侧瞬时改动容器 alpha/窗口可见性，容器掉出 live
         // 一拍即被 detach——倾斜复位（闪烁）+ 阴影恢复（灰带闪现）+ 重挂再倾斜，
         // 单次会话 detach/attach 各 120 次。改为连续 4 拍（0.5s×4=2s）缺席才拆；
@@ -3327,7 +3336,7 @@ static void axs_ring_scanTick(void) {
 
         if (!axs_ring_enabled()) {
             // TXT 二.6：光圈外框关闭 → 摘除装饰。
-            // beautify.82：侧倾开启时保留 driver——光圈外框(=本总闸 ringOn)关闭时
+            // beautify.83：侧倾开启时保留 driver——光圈外框(=本总闸 ringOn)关闭时
             // 本分支每 0.5s 拆全部 driver，布局钩子立刻重挂（attach 守卫 3064 行
             // 本就放行"仅侧倾"），形成拆挂死循环：倾斜↔未倾斜抖动 191 次
             // （sc-ring(46) 实测）。侧倾是独立功能，ring/glow 的显隐由每帧
@@ -3470,7 +3479,7 @@ static void axs_ring_probeNativeChainOnce(void) {
                 if (i != NULL) [report appendFormat:@"\n    ivar %@ = YES", iv];
             }
         }
-        axs_ring_log(@"ring native chain probe (beautify.82):%@", report);
+        axs_ring_log(@"ring native chain probe (beautify.83):%@", report);
     } @catch (NSException *exception) {
         axs_ring_logException(@"ring native chain probe", exception, nil);
     }
