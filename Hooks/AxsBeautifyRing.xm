@@ -2881,8 +2881,7 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                     }
                     [driver.tiltVisualWrote setObject:[NSValue valueWithCATransform3D:keepT] forKey:key];
                     anyWrote = YES;
-                    [hostLog appendFormat:@"
-    host=%@ keepShrink scale=%.2f cur=%@",
+                    [hostLog appendFormat:@"\n    host=%@ keepShrink scale=%.2f cur=%@",
                      axs_ring_nsDesc(h), extraScale, axs_ring_nsTransform3D(cur)];
                     continue;
                 }
