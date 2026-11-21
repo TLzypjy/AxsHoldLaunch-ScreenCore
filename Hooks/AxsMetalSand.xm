@@ -203,7 +203,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
 @property (nonatomic, assign) CGFloat duration;
 @property (nonatomic, assign) AXSMetalDustUniforms u;
 @property (nonatomic, assign) int grainCount;
-- (void)startWithTexture:(id<MTLTexture>)tex
+- (BOOL)startWithTexture:(id<MTLTexture>)tex
                   frame:(CGRect)frame
                viewport:(CGSize)viewport
                duration:(CGFloat)dur
@@ -215,7 +215,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
 
 @implementation AXSMetalSandRenderer
 
-- (void)startWithTexture:(id<MTLTexture>)tex
+- (BOOL)startWithTexture:(id<MTLTexture>)tex
                   frame:(CGRect)frame
                viewport:(CGSize)viewport
                duration:(CGFloat)dur
@@ -250,15 +250,49 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     u.notificationSweep = 2.0f;  // mode 2 = lock-screen fine sand (BL -> TR)
     self.u = u;
 
+    // .105: explicitly set the drawable pixel size. Without this the freshly
+    // created CAMetalLayer may report a zero/1x1 drawable and nextDrawable
+    // silently fails -> nothing ever renders.
+    CGSize layerPt = view.bounds.size;
+    if (layerPt.width <= 0 || layerPt.height <= 0) layerPt = viewport;
+    CGFloat scale = self.metalLayer.contentsScale > 0 ? self.metalLayer.contentsScale : 1.0;
+    self.metalLayer.drawableSize = CGSizeMake(layerPt.width * scale, layerPt.height * scale);
+
+    // Force layout so the layer has real geometry before the first draw.
+    [view layoutIfNeeded];
+    [overlay layoutIfNeeded];
+
+    // .105: synchronous first-frame probe. Draw time=0 (full image, grains at
+    // rest) ONCE right now. If the whole Metal chain works we get YES; if the
+    // layer/drawable/pipeline is broken we get NO and can fall back to UIView
+    // instead of claiming success with nothing visible.
+    BOOL firstFrameOK = [self renderOnce];
+    axs_msd_log(@"metal first-frame probe %@ drawable=%lux%lu layer=%lux%lu",
+                firstFrameOK ? @"OK" : @"FAIL",
+                (unsigned long)self.metalLayer.drawableSize.width,
+                (unsigned long)self.metalLayer.drawableSize.height,
+                (unsigned long)layerPt.width, (unsigned long)layerPt.height);
+    if (!firstFrameOK) {
+        self.texture = nil;
+        self.metalLayer = nil;
+        return NO;
+    }
+
     self.start = CACurrentMediaTime();
     self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
     [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    return YES;
 }
 
-- (void)renderOnce {
-    if (sMsdPipeline == nil || self.texture == nil || self.metalLayer == nil) return;
+- (BOOL)renderOnce {
+    if (sMsdPipeline == nil || self.texture == nil || self.metalLayer == nil) return NO;
+    // .105: guard against a zero-sized layer -> nextDrawable returns nil and
+    // the whole render silently no-ops (the .104 "no visible effect" bug).
+    if (self.metalLayer.bounds.size.width <= 0 || self.metalLayer.bounds.size.height <= 0) {
+        return NO;
+    }
     id<CAMetalDrawable> drawable = [self.metalLayer nextDrawable];
-    if (drawable == nil) return;
+    if (drawable == nil) return NO;
     MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
     rpd.colorAttachments[0].texture = drawable.texture;
     rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
@@ -269,8 +303,9 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     // newCommandBuffer; runtime behaviour is identical to the bracket form.
     id<MTLCommandBuffer> cb = ((id<MTLCommandBuffer> (*)(id, SEL))objc_msgSend)(
         sMsdDevice, @selector(newCommandBuffer));
-    if (cb == nil) return;
+    if (cb == nil) return NO;
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
+    if (enc == nil) return NO;
     [enc setRenderPipelineState:sMsdPipeline];
     [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     [enc setFragmentTexture:self.texture atIndex:0];
@@ -281,6 +316,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     [enc endEncoding];
     [cb presentDrawable:drawable];
     [cb commit];
+    return YES;
 }
 
 - (void)tick:(CADisplayLink *)link {
@@ -335,6 +371,13 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
     MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
                                                                                   width:w height:h mipmapped:NO];
     td.usage = MTLTextureUsageShaderRead;
+    // .105 ROOT CAUSE: iOS textures default to MTLStorageModePrivate, and
+    // replaceRegion:withBytes: is NOT allowed on private storage -> the upload
+    // silently fails, the texture stays all-zero (fully transparent), so every
+    // grain renders invisible. Shared mode makes CPU bytes visible to the GPU.
+    if (@available(iOS 13.0, *)) {
+        td.storageMode = MTLStorageModeShared;
+    }
     id<MTLTexture> tex = [device newTextureWithDescriptor:td];
     if (tex == nil) return nil;
     [tex replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
@@ -397,8 +440,18 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration) {
 
         int particles = 14000;  // DustParticles default in the reference plugin
         float seed = (float)(arc4random_uniform(100000)) / 1000.0f;
-        [renderer startWithTexture:tex frame:frameInWindow viewport:overlay.bounds.size
-                          duration:duration overlay:overlay view:view seed:seed particles:particles];
+        // .105: startWithTexture now does a synchronous first-frame probe and
+        // returns NO if Metal cannot actually draw. Only claim success when it
+        // really rendered, otherwise let the caller fall back to UIView so the
+        // effect is never blank.
+        BOOL started = [renderer startWithTexture:tex frame:frameInWindow viewport:overlay.bounds.size
+                                          duration:duration overlay:overlay view:view seed:seed particles:particles];
+        if (!started) {
+            [sMsdActiveRenderers removeObject:renderer];
+            overlay.hidden = YES;
+            axs_msd_log(@"metal sand first-frame FAILED -> caller will fall back");
+            return NO;
+        }
 
         axs_msd_log(@"metal sand started grains=%d dur=%.2f img=%lux%lu frame=%@ scene=%@",
                     particles, duration,
