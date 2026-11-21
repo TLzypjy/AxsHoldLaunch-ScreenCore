@@ -1,6 +1,6 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.102
+版本：2.0.5+beautify.103
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
@@ -21,6 +21,11 @@ beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关�
   7 玻璃碎裂（5x6 大块、随机飞溅+重力+强旋转 EaseIn）
 - 日志 burst 行新增 style=N(name) 字段，便于确认选中的样式生效。
 - CI：build.yml / package_beautify.sh 版本升 .99，新增样式键与样式枚举的源码/dylib 断言。
+
+beautify.103 变更（新增动画速度控制）：
+  - 新增全局开关 splitBeautifyDismissSpeed（滑块 0.3~3.0，默认 1.0，越大越快）
+  - 作用于全部 9 种消散样式：动画时长与延迟按 1/速度 缩放，清理延时同步缩放
+  - 中英面板文案「消散动画速度 / Dismiss Speed」，其余效果与开关不变
 
 beautify.102 变更（彩砂加密，实机反馈 .101 不够碎）：
   - 网格单元 5.5pt -> 3.2pt，颗粒数量约提升 3 倍（典型浮窗约 6000 个，硬上限 6000 防卡顿）
@@ -46,4 +51,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.102_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.103_iphoneos-arm64.deb（CI 交付）

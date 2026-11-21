@@ -134,6 +134,32 @@ static NSInteger axs_dm_style(void) {
     return s;
 }
 
+// beautify.103: dismissal animation speed. The panel exposes 0.3..3.0 (higher
+// = faster); this returns the DURATION scale (= 1/speed) so every style can
+// simply multiply its timings. Default 1.0 keeps all previous behaviour.
+static CGFloat axs_dm_speedScale(void) {
+    CGFloat speed = 1.0;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return 1.0;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyDismissSpeed", @1.0);
+            if ([value isKindOfClass:[NSNumber class]]) {
+                speed = [value floatValue];
+                if (speed < 0.3) speed = 0.3;
+                if (speed > 3.0) speed = 3.0;
+            }
+        }
+    } @catch (NSException *ignored) {
+        speed = 1.0;
+    }
+    if (speed < 0.3) speed = 1.0;   // NaN / zero guard
+    return 1.0 / speed;
+}
+
 static NSString *axs_dm_styleName(NSInteger style) {
     switch (style) {
         case AXSDismissStyleGravity:       return @"gravity";
@@ -286,7 +312,8 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
             rows = (int)lround((CGFloat)rows * k);
         }
 
-        const CGFloat total = 1.30;   // DustDuration default
+        CGFloat speedScale = axs_dm_speedScale();
+        const CGFloat total = 1.30 * speedScale;   // DustDuration default / speed
         const CGFloat D = 110.0;      // DustDistance default
         CGFloat tileW = fw / (CGFloat)cols;
         CGFloat tileH = fh / (CGFloat)rows;
@@ -391,7 +418,7 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
         [axs_dm_activeOverlays addObject:overlay];
         axs_dm_overlayWindow = overlay;
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.8 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((1.8 * speedScale + 0.15) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 [root removeFromSuperlayer];
@@ -421,6 +448,7 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     @try {
         NSInteger style = axs_dm_style();
         NSString *styleName = axs_dm_styleName(style);
+        CGFloat speedScale = axs_dm_speedScale();
         // ColorSand uses its own grain-field engine; do not touch the original
         // 8 grid-based styles below.
         if (style == AXSDismissStyleColorSand) {
@@ -589,6 +617,9 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
                 }
             }
 
+            // beautify.103: apply the global speed multiplier to every style.
+            dur *= speedScale;
+            delay *= speedScale;
             [UIView animateWithDuration:dur delay:delay
                                 options:curve
                              animations:^{
@@ -602,7 +633,7 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
             } completion:nil];
         }
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((1.5 * speedScale + 0.15) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 for (UIView *v in overlay.subviews) [v removeFromSuperview];
