@@ -1,25 +1,25 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.97
+版本：2.0.5+beautify.98
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
      packaging/package_beautify.sh、基线 deb（packaging/base/）、GitHub Actions 工作流。
 
-beautify.97 变更（动画方案第 ① 步：浮窗消散粒子，默认关闭的试验版）：
-- 新增 Hooks/AxsDismissEffect.xm：hook sc_closeSession: / sc_closeSession:animated: /
-  sc_closeAllSessions，原实现照常调用、返回值与行为完全不变，仅叠加粒子视觉。
-- 关闭浮窗前把 SCFloatingContainerView 截图切成 10x10 网格，交给 CAEmitterLayer
-  从浮窗位置飞散淡出（约 1 秒），用临时高层级 UIWindow 承载，结束自动清理。
-- 新开关 splitBeautifyDismissAnimEnabled（设置-美化-浮窗消散动画），默认 NO，
-  只有打开时才触发；读取 com.susudear.screencoreprefs 域（面板写入的域）。
-- 全程 @try + 签名校验（axs_dm_sigMatches）：签名不符/找不到容器/截图失败一律
-  安全跳过，绝不阻断原生关闭。
-- 日志 /var/mobile/Documents/sc-dismiss-effect.log（[AxsHoldLaunch:DME]），记录
-  触发入口、容器 frame、粒子数、清理。
-- 解除 package_beautify.sh 中 "dylib has no sc_closeSession selector" 反向断言，
-  改为正向验证粒子模块标记编译进 dylib。
-- beautify.96 的全屏探测模块（AxsFullscreenProbe.xm）保留，仍在等待实机日志。
+beautify.98 变更（修复 .97 粒子"逻辑执行但看不见"的问题）：
+- 根因：.97 用 initWithFrame 创建承载粒子层的 UIWindow，iOS 13+ 下这种窗口没有
+  windowScene 就不会合成到屏幕，所以日志显示截图/生成 100 粒子/清理都成功，
+  但画面上完全没有效果。
+- 修复 1：新窗口显式绑定 host.windowScene（overlay.windowScene = host.windowScene）。
+- 修复 2：粒子渲染从 CAEmitterLayer 改为 10x10 个 UIImageView 网格飞散飞出+旋转+
+  缩小+淡出，避免 CAEmitterCell.contents 需 CGImageRef 而非 UIImage 的坑，渲染链路可控。
+- 日志新增 scene=set/NIL 字段，便于下次确认窗口确实挂到场景。
+- .97 的其余部分保持不变：hook sc_closeSession: / sc_closeSession:animated: /
+  sc_closeAllSessions，原实现照常调用；开关 splitBeautifyDismissAnimEnabled（默认 NO）；
+  签名校验 + 全程 @try；日志 /var/mobile/Documents/sc-dismiss-effect.log。
+- CI 断言同步：build.yml 版本改 .98，dismiss 检查从 CAEmitterLayer 改为验证
+  windowScene 修复标记；package_beautify.sh 版本改 .98。
+- .96 全屏探测模块保留。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.97_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.98_iphoneos-arm64.deb（CI 交付）

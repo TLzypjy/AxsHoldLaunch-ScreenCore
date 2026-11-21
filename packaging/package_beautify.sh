@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.97"
+VERSION="2.0.5+beautify.98"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -96,10 +96,10 @@ check "dylib has no overlay engine marker" sh -c "test \$(strings -a '$DYLIB_DIR
 check "dylib has no overlay window marker" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'ring window frame') -eq 0"
 check "dylib has no overlay window class" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'AXSRingOverlayWindow') -eq 0"
 check "dylib has no sc_sessionDidBeginHosting selector" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'sc_sessionDidBeginHosting:') -eq 0"
-# beautify.97: the dismiss-particle module hooks sc_closeSession: via
+# beautify.97+: the dismiss-particle module hooks sc_closeSession: via
 # NSSelectorFromString (original behaviour untouched), so the old reverse
 # "no sc_closeSession selector" assertion is intentionally replaced.
-check "dylib has dismiss module load log (beautify.97)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
+check "dylib has dismiss module load log (beautify.98)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
 check "dylib has dismiss log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-dismiss-effect.log'"
 check "dylib has dismiss switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissAnimEnabled'"
 check "dylib has dismiss emit burst log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'emit: burst cells='"

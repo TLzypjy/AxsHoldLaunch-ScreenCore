@@ -140,7 +140,12 @@ static UIImage *axs_dm_snapshot(UIView *view) {
 static UIWindow *axs_dm_overlayWindow = nil;
 static NSMutableArray *axs_dm_activeOverlays = nil;
 
-// Dice the snapshot into a grid of small CGImages used as emitter textures.
+// Dice the snapshot into a grid of UIImageViews and fly them outward.
+// ROOT CAUSE FIX (beautify.98): on iOS 13+ a UIWindow created with only
+// initWithFrame: has no windowScene and therefore renders NOTHING even when
+// hidden=NO. That is why the .97 burst executed (logs proved it) but was
+// invisible. Using plain UIImageViews instead of CAEmitterLayer also removes
+// all the fragile emitter/texture parameter pitfalls.
 static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameInWindow) {
     @try {
         UIImage *shot = axs_dm_snapshot(sourceView);
@@ -156,7 +161,6 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
             return;
         }
 
-        // Find (or create) a key window to host the burst.
         UIWindow *host = nil;
         for (UIScene *scene in [[UIApplication sharedApplication] connectedScenes]) {
             if (![scene isKindOfClass:[UIWindowScene class]]) continue;
@@ -171,79 +175,72 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         }
 
         UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
+        // CRITICAL: bind the scene or the window is invisible on iOS 13+.
+        if ([overlay respondsToSelector:@selector(setWindowScene:)]) {
+            overlay.windowScene = host.windowScene;
+        }
         overlay.windowLevel = UIWindowLevelAlert + 500;
         overlay.backgroundColor = [UIColor clearColor];
         overlay.userInteractionEnabled = NO;
         overlay.hidden = NO;
 
-        CAEmitterLayer *emitter = [CAEmitterLayer layer];
-        emitter.frame = overlay.bounds;
-        emitter.emitterPosition = CGPointMake(CGRectGetMidX(sourceFrameInWindow),
-                                              CGRectGetMidY(sourceFrameInWindow));
-        emitter.emitterShape = kCAEmitterLayerRectangle;
-        emitter.emitterSize = sourceFrameInWindow.size;
-        // Keep source colours intact; additive would blow the screenshot out to white.
-        emitter.renderMode = kCAEmitterLayerOldestFirst;
-        emitter.birthRate = 0.0;  // global gate, opened briefly below
-        emitter.beginTime = CACurrentMediaTime();
-
         const int cols = 10;
         const int rows = 10;
-        NSUInteger cellW = px / cols;
-        NSUInteger cellH = py / rows;
-        int made = 0;
-        NSMutableArray *cells = [NSMutableArray arrayWithCapacity:cols * rows];
+        CGFloat pieceW = sourceFrameInWindow.size.width / (CGFloat)cols;
+        CGFloat pieceH = sourceFrameInWindow.size.height / (CGFloat)rows;
+        NSMutableArray *pieces = [NSMutableArray arrayWithCapacity:cols * rows];
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
-                CGRect crop = CGRectMake(c * cellW, r * cellH, cellW, cellH);
+                CGRect crop = CGRectMake((CGFloat)c * (CGFloat)px / (CGFloat)cols,
+                                         (CGFloat)r * (CGFloat)py / (CGFloat)rows,
+                                         (CGFloat)px / (CGFloat)cols,
+                                         (CGFloat)py / (CGFloat)rows);
                 CGImageRef piece = CGImageCreateWithImageInRect(full, crop);
                 if (piece == NULL) continue;
-                CAEmitterCell *cell = [CAEmitterCell emitterCell];
-                // Assign the UIImage object itself (retained by cell.contents),
-                // not the raw CGImageRef which would dangle after release.
-                UIImage *texture = [UIImage imageWithCGImage:piece];
-                cell.contents = (id)texture;
+                UIImage *texture = [UIImage imageWithCGImage:piece
+                                                       scale:shot.scale
+                                                 orientation:UIImageOrientationUp];
+                UIImageView *iv = [[UIImageView alloc] initWithImage:texture];
+                iv.frame = CGRectMake(sourceFrameInWindow.origin.x + (CGFloat)c * pieceW,
+                                      sourceFrameInWindow.origin.y + (CGFloat)r * pieceH,
+                                      pieceW, pieceH);
+                [overlay addSubview:iv];
+                [pieces addObject:iv];
                 CGImageRelease(piece);
-                // birthRate lives on the layer as the global gate; each cell
-                // contributes one slice, so keep per-cell rate at 1.
-                cell.birthRate = 1.0;
-                cell.lifetime = 0.85;
-                cell.lifetimeRange = 0.25;
-                cell.velocity = 120.0;
-                cell.velocityRange = 90.0;
-                cell.emissionRange = (CGFloat)(2.0 * M_PI);
-                cell.yAcceleration = 60.0;
-                cell.scale = 0.9;
-                cell.scaleRange = 0.5;
-                cell.scaleSpeed = -0.7;
-                cell.alphaSpeed = -1.2;
-                cell.spin = (CGFloat)((arc4random_uniform(200)) - 100) / 100.0;
-                cell.name = @"dismiss";
-                [cells addObject:cell];
-                made++;
             }
         }
-        emitter.emitterCells = cells;
-        [overlay.layer addSublayer:emitter];
+        int made = (int)pieces.count;
+        if (made == 0) {
+            axs_dm_log(@"emit: no pieces, skip");
+            overlay.hidden = YES;
+            return;
+        }
 
         if (axs_dm_activeOverlays == nil) axs_dm_activeOverlays = [NSMutableArray array];
         [axs_dm_activeOverlays addObject:overlay];
         axs_dm_overlayWindow = overlay;
 
-        // Open the gate for ~0.08s. With per-cell rate 1, that yields roughly
-        // one particle per grid slice (~100 total) instead of a thousand.
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.02 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            emitter.birthRate = 12.0;
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            emitter.birthRate = 0.0;
-        });
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.4 * NSEC_PER_SEC)),
+        for (UIImageView *iv in pieces) {
+            CGFloat ang = (CGFloat)(arc4random_uniform(628)) / 100.0;
+            CGFloat dist = 100.0 + (CGFloat)(arc4random_uniform(220));
+            CGFloat dx = cos(ang) * dist;
+            CGFloat dy = sin(ang) * dist - 40.0;
+            CGFloat spin = ((CGFloat)arc4random_uniform(200) - 100.0) / 100.0;
+            CGFloat delay = (CGFloat)(arc4random_uniform(12)) / 100.0;
+            [UIView animateWithDuration:0.75 delay:delay
+                                options:UIViewAnimationOptionCurveEaseOut
+                             animations:^{
+                iv.center = CGPointMake(iv.center.x + dx, iv.center.y + dy);
+                iv.transform = CGAffineTransformScale(
+                    CGAffineTransformMakeRotation(spin), 0.12, 0.12);
+                iv.alpha = 0.0;
+            } completion:nil];
+        }
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.15 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
-                [emitter removeFromSuperlayer];
+                for (UIView *v in overlay.subviews) [v removeFromSuperview];
                 overlay.hidden = YES;
                 [axs_dm_activeOverlays removeObject:overlay];
                 if (axs_dm_overlayWindow == overlay) axs_dm_overlayWindow = nil;
@@ -251,9 +248,10 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
             }
             axs_dm_log(@"emit: cleaned overlay cells=%d", made);
         });
-        axs_dm_log(@"emit: burst cells=%d img=%lux%lu frame=%@",
+        axs_dm_log(@"emit: burst cells=%d img=%lux%lu frame=%@ scene=%@",
                    made, (unsigned long)px, (unsigned long)py,
-                   NSStringFromCGRect(sourceFrameInWindow));
+                   NSStringFromCGRect(sourceFrameInWindow),
+                   overlay.windowScene ? @"set" : @"NIL");
     } @catch (NSException *e) {
         axs_dm_log(@"emit: EXCEPTION %@", [e reason]);
     }
