@@ -192,16 +192,18 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         NSUInteger cellW = px / cols;
         NSUInteger cellH = py / rows;
         int made = 0;
+        NSMutableArray *cells = [NSMutableArray arrayWithCapacity:cols * rows];
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
                 CGRect crop = CGRectMake(c * cellW, r * cellH, cellW, cellH);
                 CGImageRef piece = CGImageCreateWithImageInRect(full, crop);
                 if (piece == NULL) continue;
                 CAEmitterCell *cell = [CAEmitterCell emitterCell];
-                // Wrap the CGImage in a UIImage so ARC owns the texture; a raw
-                // CGImageRef with __bridge would dangle after CGImageRelease.
+                // Assign the UIImage object itself (retained by cell.contents),
+                // not the raw CGImageRef which would dangle after release.
                 UIImage *texture = [UIImage imageWithCGImage:piece];
-                cell.contents = (id)texture.CGImage;
+                cell.contents = (id)texture;
+                CGImageRelease(piece);
                 // birthRate lives on the layer as the global gate; each cell
                 // contributes one slice, so keep per-cell rate at 1.
                 cell.birthRate = 1.0;
@@ -217,11 +219,11 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
                 cell.alphaSpeed = -1.2;
                 cell.spin = (CGFloat)((arc4random_uniform(200)) - 100) / 100.0;
                 cell.name = @"dismiss";
-                [emitter addEmitterCell:cell];
-                CGImageRelease(piece);
+                [cells addObject:cell];
                 made++;
             }
         }
+        emitter.emitterCells = cells;
         [overlay.layer addSublayer:emitter];
 
         if (axs_dm_activeOverlays == nil) axs_dm_activeOverlays = [NSMutableArray array];
