@@ -1,25 +1,26 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.98
+版本：2.0.5+beautify.99
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
      packaging/package_beautify.sh、基线 deb（packaging/base/）、GitHub Actions 工作流。
 
-beautify.98 变更（修复 .97 粒子"逻辑执行但看不见"的问题）：
-- 根因：.97 用 initWithFrame 创建承载粒子层的 UIWindow，iOS 13+ 下这种窗口没有
-  windowScene 就不会合成到屏幕，所以日志显示截图/生成 100 粒子/清理都成功，
-  但画面上完全没有效果。
-- 修复 1：新窗口显式绑定 host.windowScene（overlay.windowScene = host.windowScene）。
-- 修复 2：粒子渲染从 CAEmitterLayer 改为 10x10 个 UIImageView 网格飞散飞出+旋转+
-  缩小+淡出，避免 CAEmitterCell.contents 需 CGImageRef 而非 UIImage 的坑，渲染链路可控。
-- 日志新增 scene=set/NIL 字段，便于下次确认窗口确实挂到场景。
-- .97 的其余部分保持不变：hook sc_closeSession: / sc_closeSession:animated: /
-  sc_closeAllSessions，原实现照常调用；开关 splitBeautifyDismissAnimEnabled（默认 NO）；
-  签名校验 + 全程 @try；日志 /var/mobile/Documents/sc-dismiss-effect.log。
-- CI 断言同步：build.yml 版本改 .98，dismiss 检查从 CAEmitterLayer 改为验证
-  windowScene 修复标记；package_beautify.sh 版本改 .98。
-- .96 全屏探测模块保留。
+beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关）：
+- 沿用 .98 的"截图 → 切网格 → UIImageView 飞散"引擎与 windowScene 修复，不改 hook、不改原生行为。
+- 新配置键 splitBeautifyDismissStyle（整数 0~7，默认 0），面板"美化"组加
+  "消散动画样式"菜单选择项（SCMenuSelectionCell），中英 8 个样式本地化。
+- 8 种样式：
+  0 方块飞散（.98 原样，10x10 随机飞散+旋转+淡出）
+  1 重力下落（初速向下、EaseIn 加速、带重量感）
+  2 漩涡吸入（朝浮窗中心径向+切向螺旋，缩到 0）
+  3 冲击波（从中心径向炸开，按距中心距离递增延迟）
+  4 灰尘飘散（14x14 细网格、缓慢上浮+横漂、小缩放）
+  5 像素溶解（12x12 不移动、按随机延迟逐块 alpha 归零）
+  6 百叶窗（8x14、按行递增延迟逐条擦除）
+  7 玻璃碎裂（5x6 大块、随机飞溅+重力+强旋转 EaseIn）
+- 日志 burst 行新增 style=N(name) 字段，便于确认选中的样式生效。
+- CI：build.yml / package_beautify.sh 版本升 .99，新增样式键与样式枚举的源码/dylib 断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.98_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.99_iphoneos-arm64.deb（CI 交付）

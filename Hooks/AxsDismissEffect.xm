@@ -87,6 +87,67 @@ static BOOL axs_dm_enabled(void) {
     return enabled;
 }
 
+// --- dismiss style ----------------------------------------------------------
+// 8 styles share one master switch. Style 0 preserves the .98 behaviour.
+typedef NS_ENUM(NSInteger, AXSDismissStyle) {
+    AXSDismissStyleBlockBurst = 0,
+    AXSDismissStyleGravity,
+    AXSDismissStyleVortex,
+    AXSDismissStyleShockwave,
+    AXSDismissStyleDust,
+    AXSDismissStylePixelDissolve,
+    AXSDismissStyleBlinds,
+    AXSDismissStyleGlass,
+};
+
+static NSInteger axs_dm_style(void) {
+    NSInteger s = AXSDismissStyleBlockBurst;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return s;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyDismissStyle", @0);
+            if ([value isKindOfClass:[NSNumber class]]) {
+                s = [value integerValue];
+                if (s < 0 || s > AXSDismissStyleGlass) s = AXSDismissStyleBlockBurst;
+            }
+        }
+    } @catch (NSException *ignored) {
+        s = AXSDismissStyleBlockBurst;
+    }
+    return s;
+}
+
+static NSString *axs_dm_styleName(NSInteger style) {
+    switch (style) {
+        case AXSDismissStyleGravity:       return @"gravity";
+        case AXSDismissStyleVortex:        return @"vortex";
+        case AXSDismissStyleShockwave:     return @"shockwave";
+        case AXSDismissStyleDust:          return @"dust";
+        case AXSDismissStylePixelDissolve: return @"pixel";
+        case AXSDismissStyleBlinds:        return @"blinds";
+        case AXSDismissStyleGlass:         return @"glass";
+        default:                           return @"burst";
+    }
+}
+
+static void axs_dm_gridForStyle(NSInteger style, int *cols, int *rows) {
+    switch (style) {
+        case AXSDismissStyleDust:          *cols = 14; *rows = 14; break;
+        case AXSDismissStylePixelDissolve: *cols = 12; *rows = 12; break;
+        case AXSDismissStyleBlinds:        *cols = 8;  *rows = 14; break;
+        case AXSDismissStyleGlass:         *cols = 5;  *rows = 6;  break;
+        default:                           *cols = 10; *rows = 10; break;
+    }
+}
+
+static CGFloat axs_dm_randRange(CGFloat lo, CGFloat hi) {
+    return lo + ((CGFloat)arc4random_uniform(1000) / 1000.0) * (hi - lo);
+}
+
 // --- view tree helpers ------------------------------------------------------
 static UIView *axs_dm_findContainerView(void) {
     UIView *found = nil;
@@ -148,6 +209,8 @@ static NSMutableArray *axs_dm_activeOverlays = nil;
 // all the fragile emitter/texture parameter pitfalls.
 static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameInWindow) {
     @try {
+        NSInteger style = axs_dm_style();
+        NSString *styleName = axs_dm_styleName(style);
         UIImage *shot = axs_dm_snapshot(sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: snapshot failed");
@@ -175,7 +238,6 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         }
 
         UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
-        // CRITICAL: bind the scene or the window is invisible on iOS 13+.
         if ([overlay respondsToSelector:@selector(setWindowScene:)]) {
             overlay.windowScene = host.windowScene;
         }
@@ -184,10 +246,13 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         overlay.userInteractionEnabled = NO;
         overlay.hidden = NO;
 
-        const int cols = 10;
-        const int rows = 10;
+        int cols = 10, rows = 10;
+        axs_dm_gridForStyle(style, &cols, &rows);
         CGFloat pieceW = sourceFrameInWindow.size.width / (CGFloat)cols;
         CGFloat pieceH = sourceFrameInWindow.size.height / (CGFloat)rows;
+        CGFloat ctrX = CGRectGetMidX(sourceFrameInWindow);
+        CGFloat ctrY = CGRectGetMidY(sourceFrameInWindow);
+
         NSMutableArray *pieces = [NSMutableArray arrayWithCapacity:cols * rows];
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < cols; c++) {
@@ -204,6 +269,7 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
                 iv.frame = CGRectMake(sourceFrameInWindow.origin.x + (CGFloat)c * pieceW,
                                       sourceFrameInWindow.origin.y + (CGFloat)r * pieceH,
                                       pieceW, pieceH);
+                iv.tag = r * 1000 + c;
                 [overlay addSubview:iv];
                 [pieces addObject:iv];
                 CGImageRelease(piece);
@@ -221,23 +287,106 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         axs_dm_overlayWindow = overlay;
 
         for (UIImageView *iv in pieces) {
-            CGFloat ang = (CGFloat)(arc4random_uniform(628)) / 100.0;
-            CGFloat dist = 100.0 + (CGFloat)(arc4random_uniform(220));
-            CGFloat dx = cos(ang) * dist;
-            CGFloat dy = sin(ang) * dist - 40.0;
-            CGFloat spin = ((CGFloat)arc4random_uniform(200) - 100.0) / 100.0;
-            CGFloat delay = (CGFloat)(arc4random_uniform(12)) / 100.0;
-            [UIView animateWithDuration:0.75 delay:delay
-                                options:UIViewAnimationOptionCurveEaseOut
+            NSInteger row = iv.tag / 1000;
+            CGFloat cx = iv.center.x, cy = iv.center.y;
+            CGFloat dx = 0, dy = 0, spin = 0, sc = 1, delay = 0, dur = 0.75;
+            UIViewAnimationOptions curve = UIViewAnimationOptionCurveEaseOut;
+
+            switch (style) {
+                case AXSDismissStyleGravity: {
+                    dx = axs_dm_randRange(-50, 50);
+                    dy = axs_dm_randRange(80, 220);
+                    spin = axs_dm_randRange(-0.9, 0.9);
+                    sc = axs_dm_randRange(0.35, 0.65);
+                    delay = axs_dm_randRange(0, 0.15);
+                    dur = 1.05; curve = UIViewAnimationOptionCurveEaseIn;
+                    break;
+                }
+                case AXSDismissStyleVortex: {
+                    CGFloat vx = ctrX - cx, vy = ctrY - cy;
+                    CGFloat len = hypotf(vx, vy); if (len < 1) len = 1;
+                    vx /= len; vy /= len;
+                    CGFloat pull = len + axs_dm_randRange(20, 80);
+                    CGFloat tang = axs_dm_randRange(90, 160);
+                    dx = vx * pull - vy * tang;
+                    dy = vy * pull + vx * tang;
+                    spin = axs_dm_randRange(-3.0, 3.0);
+                    sc = 0.0;
+                    delay = ((CGFloat)row / (CGFloat)rows) * 0.18;
+                    dur = 0.85;
+                    break;
+                }
+                case AXSDismissStyleShockwave: {
+                    CGFloat vx = cx - ctrX, vy = cy - ctrY;
+                    CGFloat len = hypotf(vx, vy); if (len < 1) len = 1;
+                    vx /= len; vy /= len;
+                    CGFloat dist = len + axs_dm_randRange(160, 280);
+                    dx = vx * dist; dy = vy * dist;
+                    spin = 0; sc = 0.2;
+                    delay = len / 320.0;
+                    dur = 0.7;
+                    break;
+                }
+                case AXSDismissStyleDust: {
+                    dx = axs_dm_randRange(-45, 45);
+                    dy = axs_dm_randRange(-170, -60);
+                    spin = axs_dm_randRange(-0.5, 0.5);
+                    sc = axs_dm_randRange(0.15, 0.4);
+                    delay = axs_dm_randRange(0, 0.3);
+                    dur = 1.25;
+                    break;
+                }
+                case AXSDismissStylePixelDissolve: {
+                    dx = 0; dy = 0; spin = 0; sc = 1;
+                    delay = axs_dm_randRange(0, 0.7);
+                    dur = 0.18;
+                    break;
+                }
+                case AXSDismissStyleBlinds: {
+                    dx = (row % 2 == 0) ? 16 : -16;
+                    dy = 0; spin = 0; sc = 1;
+                    delay = ((CGFloat)row / (CGFloat)(rows > 1 ? rows - 1 : 1)) * 0.6;
+                    dur = 0.25;
+                    break;
+                }
+                case AXSDismissStyleGlass: {
+                    CGFloat ang = axs_dm_randRange(0, 6.2831853);
+                    CGFloat dist = axs_dm_randRange(120, 300);
+                    dx = cosf(ang) * dist;
+                    dy = sinf(ang) * dist + 90;
+                    spin = axs_dm_randRange(-2.6, 2.6);
+                    sc = axs_dm_randRange(0.25, 0.5);
+                    delay = axs_dm_randRange(0, 0.08);
+                    dur = 0.95; curve = UIViewAnimationOptionCurveEaseIn;
+                    break;
+                }
+                default: {
+                    CGFloat ang = axs_dm_randRange(0, 6.2831853);
+                    CGFloat dist = axs_dm_randRange(100, 320);
+                    dx = cosf(ang) * dist;
+                    dy = sinf(ang) * dist - 40;
+                    spin = axs_dm_randRange(-1.0, 1.0);
+                    sc = 0.12;
+                    delay = axs_dm_randRange(0, 0.12);
+                    dur = 0.75;
+                    break;
+                }
+            }
+
+            [UIView animateWithDuration:dur delay:delay
+                                options:curve
                              animations:^{
-                iv.center = CGPointMake(iv.center.x + dx, iv.center.y + dy);
-                iv.transform = CGAffineTransformScale(
-                    CGAffineTransformMakeRotation(spin), 0.12, 0.12);
+                if (dx != 0 || dy != 0) {
+                    iv.center = CGPointMake(cx + dx, cy + dy);
+                }
+                iv.transform = CGAffineTransformConcat(
+                    CGAffineTransformMakeRotation(spin),
+                    CGAffineTransformMakeScale(sc, sc));
                 iv.alpha = 0.0;
             } completion:nil];
         }
 
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.15 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 for (UIView *v in overlay.subviews) [v removeFromSuperview];
@@ -248,8 +397,8 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
             }
             axs_dm_log(@"emit: cleaned overlay cells=%d", made);
         });
-        axs_dm_log(@"emit: burst cells=%d img=%lux%lu frame=%@ scene=%@",
-                   made, (unsigned long)px, (unsigned long)py,
+        axs_dm_log(@"emit: burst cells=%d style=%ld(%@) img=%lux%lu frame=%@ scene=%@",
+                   made, (long)style, styleName, (unsigned long)px, (unsigned long)py,
                    NSStringFromCGRect(sourceFrameInWindow),
                    overlay.windowScene ? @"set" : @"NIL");
     } @catch (NSException *e) {
