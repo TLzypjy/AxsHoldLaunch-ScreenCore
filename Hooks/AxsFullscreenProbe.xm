@@ -4,6 +4,17 @@
 #include <string.h>
 #include <stdlib.h>
 
+// Declare the substrate hooking entry point explicitly: this translation unit
+// has no %hook block, so Logos does not inject substrate.h here. Declaring the
+// symbol directly avoids depending on header injection order across .xm files.
+#ifdef __cplusplus
+extern "C" {
+#endif
+void MSHookMessageEx(Class cls, SEL sel, IMP replacement, IMP *result);
+#ifdef __cplusplus
+}
+#endif
+
 // ---------------------------------------------------------------------------
 // beautify.96 - STEP 0: large-floating-window -> fullscreen probe
 //
