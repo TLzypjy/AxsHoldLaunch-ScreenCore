@@ -1,6 +1,6 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.103
+版本：2.0.5+beautify.104
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
@@ -21,6 +21,13 @@ beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关�
   7 玻璃碎裂（5x6 大块、随机飞溅+重力+强旋转 EaseIn）
 - 日志 burst 行新增 style=N(name) 字段，便于确认选中的样式生效。
 - CI：build.yml / package_beautify.sh 版本升 .99，新增样式键与样式枚举的源码/dylib 断言。
+
+beautify.104 变更（消散卡顿根治：Metal GPU 引擎）：
+  - 新增 Hooks/AxsMetalSand.xm：移植原插件 Metal shader，截图上传为一张纹理，
+    一次 drawPrimitives 画 14000 颗粒（左下→右上推进前沿），GPU 渲染主线程零负担
+  - CAMetalLayer + CADisplayLink 逐帧驱动，运行时编译 shader 并缓存 pipeline
+  - 第 9 种彩砂样式优先走 Metal，设备不支持/编译失败自动回退 UIView 方案
+  - Makefile 链接 Metal/QuartzCore；速度滑块沿用 .103，其余 8 种样式不变
 
 beautify.103 变更（新增动画速度控制）：
   - 新增全局开关 splitBeautifyDismissSpeed（滑块 0.3~3.0，默认 1.0，越大越快）
@@ -51,4 +58,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.103_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.104_iphoneos-arm64.deb（CI 交付）

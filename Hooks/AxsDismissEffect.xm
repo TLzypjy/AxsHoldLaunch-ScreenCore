@@ -16,6 +16,10 @@ void MSHookMessageEx(Class cls, SEL sel, IMP replacement, IMP *result);
 }
 #endif
 
+// beautify.104: Metal fine-sand renderer (Hooks/AxsMetalSand.xm). Returns YES
+// when the GPU engine took over; NO means caller should fall back to UIView.
+BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration);
+
 // ---------------------------------------------------------------------------
 // beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
 // the reference plugin's Metal "fine sand" shader (mode 2). The card is diced
@@ -449,10 +453,22 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         NSInteger style = axs_dm_style();
         NSString *styleName = axs_dm_styleName(style);
         CGFloat speedScale = axs_dm_speedScale();
-        // ColorSand uses its own grain-field engine; do not touch the original
-        // 8 grid-based styles below.
+        // ColorSand: prefer the GPU Metal engine (.104). If Metal is unavailable
+        // (old device / compile failure) fall back to the UIView sand field.
+        // Either way the original 8 grid-based styles below are untouched.
         if (style == AXSDismissStyleColorSand) {
-            axs_dm_emitColorSand(sourceView, sourceFrameInWindow, style, styleName);
+            UIImage *sandShot = axs_dm_snapshot(sourceView);
+            CGFloat sandDuration = 1.30 * speedScale;
+            BOOL usedMetal = NO;
+            if (sandShot != nil && sandShot.CGImage != nil) {
+                usedMetal = axs_metalSandPlay(sandShot, sourceFrameInWindow, sandDuration);
+            }
+            if (!usedMetal) {
+                axs_dm_log(@"sand: metal unavailable, using UIView fallback");
+                axs_dm_emitColorSand(sourceView, sourceFrameInWindow, style, styleName);
+            } else {
+                axs_dm_log(@"sand: metal engine active duration=%.2f", sandDuration);
+            }
             return;
         }
         UIImage *shot = axs_dm_snapshot(sourceView);
