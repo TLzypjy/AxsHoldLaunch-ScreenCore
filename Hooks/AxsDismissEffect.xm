@@ -17,11 +17,15 @@ void MSHookMessageEx(Class cls, SEL sel, IMP replacement, IMP *result);
 #endif
 
 // ---------------------------------------------------------------------------
-// beautify.100 - 9th style: ColorSand. Reproduces the iOS notification swipe
-// clear effect from the reference video: the card stays put and "sandifies"
-// into a dense field of fine pastel grains (pink/purple/blue/white) that drift
-// UP and to the RIGHT, while the card snapshot fades out as a whole (no scale,
-// no spin, no fall-back gravity). The 8 existing styles are untouched.
+// beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
+// the reference plugin's Metal "fine sand" shader (mode 2). The card is diced
+// into a dense grid; each tile keeps its ORIGINAL screenshot pixels and is
+// round-masked into a sand grain. A diagonal breakup front sweeps from the
+// BOTTOM-LEFT corner to the TOP-RIGHT corner -- tiles lift off in that order
+// (begin = (unit.x + 1 - unit.y) * 0.18), then drift up-right, shrink, spin
+// slightly and fade. This replaces the .100 pure-colour random field, which
+// had the right direction but no sweep front and no source-image texture.
+// The 8 existing styles remain untouched.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -154,6 +158,13 @@ static void axs_dm_gridForStyle(NSInteger style, int *cols, int *rows) {
     }
 }
 
+// fract(sin(dot(v,(127.1,311.7)))*43758.5453) -- identical hash to the
+// reference plugin's Metal dustHash, so grain randomness matches per-cell.
+static float axs_dm_dustHash(CGFloat x, CGFloat y) {
+    double v = sin((double)x * 127.1 + (double)y * 311.7) * 43758.5453;
+    return (float)(v - floor(v));
+}
+
 static CGFloat axs_dm_randRange(CGFloat lo, CGFloat hi) {
     return lo + ((CGFloat)arc4random_uniform(1000) / 1000.0) * (hi - lo);
 }
@@ -211,11 +222,16 @@ static UIImage *axs_dm_snapshot(UIView *view) {
 static UIWindow *axs_dm_overlayWindow = nil;
 static NSMutableArray *axs_dm_activeOverlays = nil;
 
-// beautify.100: pastel "sand" dissolve, matching the reference video where a
-// dismissed iOS notification banner keeps its place and turns into a dense
-// field of fine pink/purple/blue/white grains drifting UP and to the RIGHT.
-// Plain UIViews (no CAEmitterLayer) on the same windowScene-bound overlay as
-// every other style, so it inherits the .98 visibility fix.
+// beautify.101: fine-sand dissolve with a bottom-left -> top-right breakup
+// front, ported from the reference plugin's Metal mode-2 shader. The source
+// screenshot is diced into a dense grid; each tile keeps its REAL pixels (a
+// CGImage slice) and morphs into a round sand grain. Every tile carries its
+// own launch delay so a diagonal front sweeps across the card: bottom-left
+// lifts first, top-right last (begin = (x + 1 - y) * 0.18 + r*0.025). Grains
+// then fly UP-RIGHT, shrink to 24%-56%, spin slightly and fade, over ~1.3s --
+// matching DustDuration/DustDistance defaults of the reference plugin.
+// Runs on the same windowScene-bound overlay as all styles (.98 visibility
+// fix). The 8 original styles are untouched.
 static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
                                  NSInteger style, NSString *styleName) {
     @try {
@@ -227,6 +243,10 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
         CGImageRef full = shot.CGImage;
         NSUInteger px = CGImageGetWidth(full);
         NSUInteger py = CGImageGetHeight(full);
+        if (px == 0 || py == 0) {
+            axs_dm_log(@"emit: sand empty image %lux%lu", (unsigned long)px, (unsigned long)py);
+            return;
+        }
 
         UIWindow *host = nil;
         for (UIScene *scene in [[UIApplication sharedApplication] connectedScenes]) {
@@ -250,37 +270,108 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
         overlay.userInteractionEnabled = NO;
         overlay.hidden = NO;
 
-        // Base layer: the whole card fades where it stands. It drifts slightly
-        // up-right but never scales away or spins -- the video shows the body
-        // dissolving in place, not shrinking to a point.
-        UIImageView *base = [[UIImageView alloc] initWithImage:shot];
-        base.frame = sourceFrameInWindow;
-        base.contentMode = UIViewContentModeScaleToFill;
-        [overlay addSubview:base];
+        // Pick a dense grid (~5pt grains), capped for SpringBoard safety.
+        CGFloat fw = sourceFrameInWindow.size.width;
+        CGFloat fh = sourceFrameInWindow.size.height;
+        int cols = (int)lround(fw / 5.5);
+        int rows = (int)lround(fh / 5.5);
+        if (cols < 20) cols = 20; if (cols > 56) cols = 56;
+        if (rows < 14) rows = 14; if (rows > 44) rows = 44;
 
-        NSArray *sandColors = @[
-            [UIColor colorWithRed:0.957 green:0.659 blue:0.816 alpha:1.0], // pink
-            [UIColor colorWithRed:0.725 green:0.627 blue:0.910 alpha:1.0], // purple
-            [UIColor colorWithRed:0.561 green:0.722 blue:0.918 alpha:1.0], // blue
-            [UIColor colorWithRed:0.937 green:0.918 blue:0.969 alpha:1.0], // white
-            [UIColor colorWithRed:0.659 green:0.847 blue:0.816 alpha:1.0], // mint
-        ];
+        const CGFloat total = 1.30;   // DustDuration default
+        const CGFloat D = 110.0;      // DustDistance default
+        CGFloat tileW = fw / (CGFloat)cols;
+        CGFloat tileH = fh / (CGFloat)rows;
+        CGFloat ox = sourceFrameInWindow.origin.x;
+        CGFloat oy = sourceFrameInWindow.origin.y;
 
-        NSMutableArray *grains = [NSMutableArray arrayWithCapacity:360];
-        for (int i = 0; i < 360; i++) {
-            CGFloat gs = axs_dm_randRange(1.2, 3.2);
-            CGFloat gx = sourceFrameInWindow.origin.x
-                       + axs_dm_randRange(0, sourceFrameInWindow.size.width);
-            CGFloat gy = sourceFrameInWindow.origin.y
-                       + axs_dm_randRange(0, sourceFrameInWindow.size.height);
-            UIView *g = [[UIView alloc] initWithFrame:CGRectMake(gx, gy, gs, gs)];
-            g.backgroundColor = [sandColors objectAtIndex:arc4random_uniform((uint32_t)sandColors.count)];
-            g.layer.cornerRadius = gs * 0.5;
-            g.alpha = axs_dm_randRange(0.55, 1.0);
-            [overlay addSubview:g];
-            [grains addObject:g];
+        CALayer *root = [CALayer layer];
+        root.frame = overlay.bounds;
+        [overlay.layer addSublayer:root];
+
+        NSUInteger seed = axs_dm_seq + 1;
+        int made = 0;
+        CFTimeInterval now = CACurrentMediaTime();
+        CGFloat cw = (CGFloat)px / (CGFloat)cols;
+        CGFloat ch = (CGFloat)py / (CGFloat)rows;
+
+        for (int r = 0; r < rows; r++) {
+            for (int c = 0; c < cols; c++) {
+                // source-pixel crop (+1px overlap hides seams when scaled to fill)
+                CGFloat cxp = (CGFloat)c * cw;
+                CGFloat cyp = (CGFloat)r * ch;
+                CGFloat cwi = cw + 1.0, chi = ch + 1.0;
+                if (cxp + cwi > (CGFloat)px) cwi = (CGFloat)px - cxp;
+                if (cyp + chi > (CGFloat)py) chi = (CGFloat)py - cyp;
+                if (cwi <= 0 || chi <= 0) continue;
+                CGImageRef piece = CGImageCreateWithImageInRect(
+                    full, CGRectMake(cxp, cyp, cwi, chi));
+                if (piece == NULL) continue;
+
+                CGFloat ux = ((CGFloat)c + 0.5) / (CGFloat)cols; // 0 left -> 1 right
+                CGFloat uy = ((CGFloat)r + 0.5) / (CGFloat)rows; // 0 top  -> 1 bottom
+
+                float r1 = axs_dm_dustHash((CGFloat)c + (CGFloat)seed,
+                                           (CGFloat)r + (CGFloat)seed * 0.371);
+                float r2 = axs_dm_dustHash((CGFloat)c + (CGFloat)seed + 19.7,
+                                           (CGFloat)r + (CGFloat)seed * 0.371 + 19.7);
+                float r3 = axs_dm_dustHash((CGFloat)c + (CGFloat)seed + 72.3,
+                                           (CGFloat)r + (CGFloat)seed * 0.371 + 72.3);
+
+                CALayer *g = [CALayer layer];
+                g.contents = (__bridge id)piece;
+                g.contentsGravity = kCAGravityResize;
+                g.frame = CGRectMake(ox + (CGFloat)c * tileW,
+                                     oy + (CGFloat)r * tileH,
+                                     tileW + 0.6, tileH + 0.6);
+                g.masksToBounds = YES;
+                g.cornerRadius = 0.0;
+                [root addSublayer:g];
+                CGImageRelease(piece);
+                made++;
+
+                // bottom-left -> top-right front: 0 at bottom-left, 0.36 at top-right
+                CGFloat begin = (ux + 1.0 - uy) * 0.18 + r1 * 0.025;
+                CGFloat delay = begin * total;                  // 0 .. ~0.5s
+                CGFloat dur   = (0.56 + 0.035 * r2) * total;    // ~0.73 - 0.77s
+
+                // drift up-right; slight rightward jitter, no gravity fall
+                CGFloat dx = (0.62 + 1.05 * r1) * D + (r2 - 0.5) * D * 0.40;
+                CGFloat dy = -(0.45 + 1.05 * r2) * D;
+                CGFloat endScale = 0.24 + 0.32 * r3;            // 0.24 .. 0.56
+                CGFloat endAngle = (r3 - 0.5) * 4.8;             // +-2.4 rad
+                CGFloat rad = MIN(tileW, tileH) * 0.5;
+
+                CATransform3D t1 = CATransform3DMakeScale(endScale, endScale, 1.0);
+                t1 = CATransform3DRotate(t1, endAngle, 0, 0, 1);
+
+                CABasicAnimation *ta = [CABasicAnimation animationWithKeyPath:@"transform"];
+                ta.fromValue = [NSValue valueWithCATransform3D:CATransform3DIdentity];
+                ta.toValue   = [NSValue valueWithCATransform3D:t1];
+
+                CABasicAnimation *pa = [CABasicAnimation animationWithKeyPath:@"position"];
+                CGPoint p0 = g.position;
+                pa.fromValue = [NSValue valueWithCGPoint:p0];
+                pa.toValue   = [NSValue valueWithCGPoint:CGPointMake(p0.x + dx, p0.y + dy)];
+
+                CAKeyframeAnimation *oa = [CAKeyframeAnimation animationWithKeyPath:@"opacity"];
+                oa.values = @[@1.0, @1.0, @0.0];
+                oa.keyTimes = @[@0.0, @(0.32 + 0.20 * r2), @1.0];
+
+                CABasicAnimation *ra = [CABasicAnimation animationWithKeyPath:@"cornerRadius"];
+                ra.fromValue = @0.0;
+                ra.toValue   = @(rad);
+
+                CAAnimationGroup *grp = [CAAnimationGroup animation];
+                grp.animations = @[ta, pa, oa, ra];
+                grp.duration = dur;
+                grp.beginTime = now + delay;
+                grp.fillMode = kCAFillModeForwards;
+                grp.removedOnCompletion = NO;
+                grp.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+                [g addAnimation:grp forKey:@"sand"];
+            }
         }
-        int made = (int)grains.count;
         if (made == 0) {
             axs_dm_log(@"emit: sand no grains, skip");
             overlay.hidden = YES;
@@ -291,40 +382,16 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
         [axs_dm_activeOverlays addObject:overlay];
         axs_dm_overlayWindow = overlay;
 
-        // Card body: gentle up-right drift + whole-image fade, ~0.6s.
-        CGPoint baseCtr = base.center;
-        [UIView animateWithDuration:0.6 delay:0
-                            options:UIViewAnimationOptionCurveEaseOut
-                         animations:^{
-            base.center = CGPointMake(baseCtr.x + 40, baseCtr.y - 40);
-            base.alpha = 0.0;
-        } completion:nil];
-
-        // Grains: drift up and to the RIGHT (dx > 0, dy < 0), no gravity fall.
-        for (UIView *g in grains) {
-            CGFloat cx = g.center.x, cy = g.center.y;
-            CGFloat dx = axs_dm_randRange(30, 130);
-            CGFloat dy = axs_dm_randRange(-170, -60);
-            CGFloat delay = axs_dm_randRange(0, 0.22);
-            CGFloat dur = axs_dm_randRange(0.6, 1.0);
-            [UIView animateWithDuration:dur delay:delay
-                                options:UIViewAnimationOptionCurveEaseOut
-                             animations:^{
-                g.center = CGPointMake(cx + dx, cy + dy);
-                g.alpha = 0.0;
-            } completion:nil];
-        }
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.6 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.8 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
-                for (UIView *v in overlay.subviews) [v removeFromSuperview];
+                [root removeFromSuperlayer];
                 overlay.hidden = YES;
                 [axs_dm_activeOverlays removeObject:overlay];
                 if (axs_dm_overlayWindow == overlay) axs_dm_overlayWindow = nil;
             } @catch (NSException *ignored) {
             }
-            axs_dm_log(@"emit: sand cleaned grains=%d", made);
+            axs_dm_log(@"emit: sand cleaned grains=%d grid=%dx%d", made, cols, rows);
         });
         axs_dm_log(@"emit: burst cells=%d style=%ld(%@) img=%lux%lu frame=%@ scene=%@",
                    made, (long)style, styleName, (unsigned long)px, (unsigned long)py,
