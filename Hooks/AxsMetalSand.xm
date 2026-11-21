@@ -15,6 +15,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 // ---- logging (shares the dismiss log so one file tells the whole story) ----
 static NSString * const AXS_MSD_LOG_PATH = @"/var/mobile/Documents/sc-dismiss-effect.log";
@@ -228,7 +229,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     self.grainCount = count;
     self.metalLayer = (CAMetalLayer *)view.layer;
 
-    AXSMetalDustUniforms u = {0};
+    AXSMetalDustUniforms u = {{0}};
     u.viewport[0] = (float)viewport.width;
     u.viewport[1] = (float)viewport.height;
     u.origin[0] = (float)frame.origin.x;
@@ -264,7 +265,11 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
     rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
 
-    id<MTLCommandBuffer> cb = [sMsdDevice newCommandBuffer];
+    // objc_msgSend avoids a clang protocol-method lookup quirk on this SDK for
+    // newCommandBuffer; runtime behaviour is identical to the bracket form.
+    id<MTLCommandBuffer> cb = ((id<MTLCommandBuffer> (*)(id, SEL))objc_msgSend)(
+        sMsdDevice, @selector(newCommandBuffer));
+    if (cb == nil) return;
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
     [enc setRenderPipelineState:sMsdPipeline];
     [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
