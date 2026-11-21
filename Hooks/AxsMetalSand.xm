@@ -260,7 +260,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
 
     // Force layout so the layer has real geometry before the first draw.
     [view layoutIfNeeded];
-    [overlay layoutIfNeeded];
+    [win layoutIfNeeded];
 
     // .105: synchronous first-frame probe. Draw time=0 (full image, grains at
     // rest) ONCE right now. If the whole Metal chain works we get YES; if the
