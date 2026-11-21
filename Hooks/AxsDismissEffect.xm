@@ -17,6 +17,14 @@ void MSHookMessageEx(Class cls, SEL sel, IMP replacement, IMP *result);
 #endif
 
 // ---------------------------------------------------------------------------
+// beautify.100 - 9th style: ColorSand. Reproduces the iOS notification swipe
+// clear effect from the reference video: the card stays put and "sandifies"
+// into a dense field of fine pastel grains (pink/purple/blue/white) that drift
+// UP and to the RIGHT, while the card snapshot fades out as a whole (no scale,
+// no spin, no fall-back gravity). The 8 existing styles are untouched.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // beautify.97 - floating window DISMISS particle effect (STEP 1 of the
 // animation plan). Scope is deliberately tiny and low-risk:
 //
@@ -88,7 +96,7 @@ static BOOL axs_dm_enabled(void) {
 }
 
 // --- dismiss style ----------------------------------------------------------
-// 8 styles share one master switch. Style 0 preserves the .98 behaviour.
+// 9 styles share one master switch. Style 0 preserves the .98 behaviour.
 typedef NS_ENUM(NSInteger, AXSDismissStyle) {
     AXSDismissStyleBlockBurst = 0,
     AXSDismissStyleGravity,
@@ -98,6 +106,7 @@ typedef NS_ENUM(NSInteger, AXSDismissStyle) {
     AXSDismissStylePixelDissolve,
     AXSDismissStyleBlinds,
     AXSDismissStyleGlass,
+    AXSDismissStyleColorSand,   // beautify.100: pastel sand drifting up-right
 };
 
 static NSInteger axs_dm_style(void) {
@@ -112,7 +121,7 @@ static NSInteger axs_dm_style(void) {
             id value = imp(cfg, sel, @"splitBeautifyDismissStyle", @0);
             if ([value isKindOfClass:[NSNumber class]]) {
                 s = [value integerValue];
-                if (s < 0 || s > AXSDismissStyleGlass) s = AXSDismissStyleBlockBurst;
+                if (s < 0 || s > AXSDismissStyleColorSand) s = AXSDismissStyleBlockBurst;
             }
         }
     } @catch (NSException *ignored) {
@@ -130,6 +139,7 @@ static NSString *axs_dm_styleName(NSInteger style) {
         case AXSDismissStylePixelDissolve: return @"pixel";
         case AXSDismissStyleBlinds:        return @"blinds";
         case AXSDismissStyleGlass:         return @"glass";
+        case AXSDismissStyleColorSand:     return @"sand";
         default:                           return @"burst";
     }
 }
@@ -201,6 +211,130 @@ static UIImage *axs_dm_snapshot(UIView *view) {
 static UIWindow *axs_dm_overlayWindow = nil;
 static NSMutableArray *axs_dm_activeOverlays = nil;
 
+// beautify.100: pastel "sand" dissolve, matching the reference video where a
+// dismissed iOS notification banner keeps its place and turns into a dense
+// field of fine pink/purple/blue/white grains drifting UP and to the RIGHT.
+// Plain UIViews (no CAEmitterLayer) on the same windowScene-bound overlay as
+// every other style, so it inherits the .98 visibility fix.
+static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
+                                 NSInteger style, NSString *styleName) {
+    @try {
+        UIImage *shot = axs_dm_snapshot(sourceView);
+        if (shot == nil || shot.CGImage == nil) {
+            axs_dm_log(@"emit: sand snapshot failed");
+            return;
+        }
+        CGImageRef full = shot.CGImage;
+        NSUInteger px = CGImageGetWidth(full);
+        NSUInteger py = CGImageGetHeight(full);
+
+        UIWindow *host = nil;
+        for (UIScene *scene in [[UIApplication sharedApplication] connectedScenes]) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                if (w.isKeyWindow) { host = w; break; }
+            }
+            if (host != nil) break;
+        }
+        if (host == nil) {
+            axs_dm_log(@"emit: sand no key window");
+            return;
+        }
+
+        UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
+        if ([overlay respondsToSelector:@selector(setWindowScene:)]) {
+            overlay.windowScene = host.windowScene;
+        }
+        overlay.windowLevel = UIWindowLevelAlert + 500;
+        overlay.backgroundColor = [UIColor clearColor];
+        overlay.userInteractionEnabled = NO;
+        overlay.hidden = NO;
+
+        // Base layer: the whole card fades where it stands. It drifts slightly
+        // up-right but never scales away or spins -- the video shows the body
+        // dissolving in place, not shrinking to a point.
+        UIImageView *base = [[UIImageView alloc] initWithImage:shot];
+        base.frame = sourceFrameInWindow;
+        base.contentMode = UIViewContentModeScaleToFill;
+        [overlay addSubview:base];
+
+        NSArray *sandColors = @[
+            [UIColor colorWithRed:0.957 green:0.659 blue:0.816 alpha:1.0], // pink
+            [UIColor colorWithRed:0.725 green:0.627 blue:0.910 alpha:1.0], // purple
+            [UIColor colorWithRed:0.561 green:0.722 blue:0.918 alpha:1.0], // blue
+            [UIColor colorWithRed:0.937 green:0.918 blue:0.969 alpha:1.0], // white
+            [UIColor colorWithRed:0.659 green:0.847 blue:0.816 alpha:1.0], // mint
+        ];
+
+        NSMutableArray *grains = [NSMutableArray arrayWithCapacity:360];
+        for (int i = 0; i < 360; i++) {
+            CGFloat gs = axs_dm_randRange(1.2, 3.2);
+            CGFloat gx = sourceFrameInWindow.origin.x
+                       + axs_dm_randRange(0, sourceFrameInWindow.size.width);
+            CGFloat gy = sourceFrameInWindow.origin.y
+                       + axs_dm_randRange(0, sourceFrameInWindow.size.height);
+            UIView *g = [[UIView alloc] initWithFrame:CGRectMake(gx, gy, gs, gs)];
+            g.backgroundColor = [sandColors objectAtIndex:arc4random_uniform((uint32_t)sandColors.count)];
+            g.layer.cornerRadius = gs * 0.5;
+            g.alpha = axs_dm_randRange(0.55, 1.0);
+            [overlay addSubview:g];
+            [grains addObject:g];
+        }
+        int made = (int)grains.count;
+        if (made == 0) {
+            axs_dm_log(@"emit: sand no grains, skip");
+            overlay.hidden = YES;
+            return;
+        }
+
+        if (axs_dm_activeOverlays == nil) axs_dm_activeOverlays = [NSMutableArray array];
+        [axs_dm_activeOverlays addObject:overlay];
+        axs_dm_overlayWindow = overlay;
+
+        // Card body: gentle up-right drift + whole-image fade, ~0.6s.
+        CGPoint baseCtr = base.center;
+        [UIView animateWithDuration:0.6 delay:0
+                            options:UIViewAnimationOptionCurveEaseOut
+                         animations:^{
+            base.center = CGPointMake(baseCtr.x + 40, baseCtr.y - 40);
+            base.alpha = 0.0;
+        } completion:nil];
+
+        // Grains: drift up and to the RIGHT (dx > 0, dy < 0), no gravity fall.
+        for (UIView *g in grains) {
+            CGFloat cx = g.center.x, cy = g.center.y;
+            CGFloat dx = axs_dm_randRange(30, 130);
+            CGFloat dy = axs_dm_randRange(-170, -60);
+            CGFloat delay = axs_dm_randRange(0, 0.22);
+            CGFloat dur = axs_dm_randRange(0.6, 1.0);
+            [UIView animateWithDuration:dur delay:delay
+                                options:UIViewAnimationOptionCurveEaseOut
+                             animations:^{
+                g.center = CGPointMake(cx + dx, cy + dy);
+                g.alpha = 0.0;
+            } completion:nil];
+        }
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.6 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            @try {
+                for (UIView *v in overlay.subviews) [v removeFromSuperview];
+                overlay.hidden = YES;
+                [axs_dm_activeOverlays removeObject:overlay];
+                if (axs_dm_overlayWindow == overlay) axs_dm_overlayWindow = nil;
+            } @catch (NSException *ignored) {
+            }
+            axs_dm_log(@"emit: sand cleaned grains=%d", made);
+        });
+        axs_dm_log(@"emit: burst cells=%d style=%ld(%@) img=%lux%lu frame=%@ scene=%@",
+                   made, (long)style, styleName, (unsigned long)px, (unsigned long)py,
+                   NSStringFromCGRect(sourceFrameInWindow),
+                   overlay.windowScene ? @"set" : @"NIL");
+    } @catch (NSException *e) {
+        axs_dm_log(@"emit: sand EXCEPTION %@", [e reason]);
+    }
+}
+
 // Dice the snapshot into a grid of UIImageViews and fly them outward.
 // ROOT CAUSE FIX (beautify.98): on iOS 13+ a UIWindow created with only
 // initWithFrame: has no windowScene and therefore renders NOTHING even when
@@ -211,6 +345,12 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     @try {
         NSInteger style = axs_dm_style();
         NSString *styleName = axs_dm_styleName(style);
+        // ColorSand uses its own grain-field engine; do not touch the original
+        // 8 grid-based styles below.
+        if (style == AXSDismissStyleColorSand) {
+            axs_dm_emitColorSand(sourceView, sourceFrameInWindow, style, styleName);
+            return;
+        }
         UIImage *shot = axs_dm_snapshot(sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: snapshot failed");

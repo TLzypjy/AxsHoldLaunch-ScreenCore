@@ -1,6 +1,6 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.99
+版本：2.0.5+beautify.100
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
@@ -22,5 +22,17 @@ beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关�
 - 日志 burst 行新增 style=N(name) 字段，便于确认选中的样式生效。
 - CI：build.yml / package_beautify.sh 版本升 .99，新增样式键与样式枚举的源码/dylib 断言。
 
+beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
+- 复刻参考视频里 iOS 通知横幅左滑清除后的消散动画：卡片留在原地整体渐隐，
+  同时"沙化"成一整片细密的粉/紫/蓝/白彩砂，向右上方飘散（无重力回落）。
+- 依据逐帧像素重心测量修正方向：消散主体 cy 1632→1538（持续上升）、
+  cx 376→500（右移），故砂粒 dx=+30~130、dy=-60~-170。
+- 独立发射函数 axs_dm_emitColorSand，走与 .98 相同的 windowScene 绑定 overlay，
+  360 个细小 UIView 圆点（1.2~3.2pt）+ 底层整图 alpha 渐隐（0.6s，不缩放不旋转），
+  不触碰原有 8 种网格样式与原生的 closeSession 调用。
+- 仍共用总开关 splitBeautifyDismissAnimEnabled；splitBeautifyDismissStyle 增加值 8，
+  面板中英本地化 "彩砂飘散 / Color sand"，validValues 0..8。
+- 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
+
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.99_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.100_iphoneos-arm64.deb（CI 交付）
