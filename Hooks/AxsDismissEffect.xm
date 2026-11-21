@@ -270,13 +270,21 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
         overlay.userInteractionEnabled = NO;
         overlay.hidden = NO;
 
-        // Pick a dense grid (~5pt grains), capped for SpringBoard safety.
+        // Dense grid for a fine-sand look. .102: cell shrunk 5.5pt -> 3.2pt
+        // (roughly 3x more grains than .101). Hard total cap keeps SpringBoard
+        // layer/animation creation bounded so this never turns into a stutter.
         CGFloat fw = sourceFrameInWindow.size.width;
         CGFloat fh = sourceFrameInWindow.size.height;
-        int cols = (int)lround(fw / 5.5);
-        int rows = (int)lround(fh / 5.5);
-        if (cols < 20) cols = 20; if (cols > 56) cols = 56;
-        if (rows < 14) rows = 14; if (rows > 44) rows = 44;
+        int cols = (int)lround(fw / 3.2);
+        int rows = (int)lround(fh / 3.2);
+        if (cols < 28) cols = 28; if (cols > 96) cols = 96;
+        if (rows < 20) rows = 20; if (rows > 76) rows = 76;
+        const int AXS_SAND_MAX = 6000;
+        if (cols * rows > AXS_SAND_MAX) {
+            CGFloat k = sqrtf((CGFloat)AXS_SAND_MAX / (CGFloat)(cols * rows));
+            cols = (int)lround((CGFloat)cols * k);
+            rows = (int)lround((CGFloat)rows * k);
+        }
 
         const CGFloat total = 1.30;   // DustDuration default
         const CGFloat D = 110.0;      // DustDistance default
@@ -335,11 +343,12 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
                 CGFloat delay = begin * total;                  // 0 .. ~0.5s
                 CGFloat dur   = (0.56 + 0.035 * r2) * total;    // ~0.73 - 0.77s
 
-                // drift up-right; slight rightward jitter, no gravity fall
-                CGFloat dx = (0.62 + 1.05 * r1) * D + (r2 - 0.5) * D * 0.40;
-                CGFloat dy = -(0.45 + 1.05 * r2) * D;
-                CGFloat endScale = 0.24 + 0.32 * r3;            // 0.24 .. 0.56
-                CGFloat endAngle = (r3 - 0.5) * 4.8;             // +-2.4 rad
+                // drift up-right; slight jitter, no gravity fall. .102: wider
+                // per-grain scatter so the field reads as loose fine sand.
+                CGFloat dx = (0.62 + 1.05 * r1) * D + (r2 - 0.5) * D * 0.80;
+                CGFloat dy = -(0.45 + 1.05 * r2) * D + (r1 - 0.5) * D * 0.35;
+                CGFloat endScale = 0.16 + 0.26 * r3;            // 0.16 .. 0.42
+                CGFloat endAngle = (r3 - 0.5) * 6.4;             // +-3.2 rad
                 CGFloat rad = MIN(tileW, tileH) * 0.5;
 
                 CATransform3D t1 = CATransform3DMakeScale(endScale, endScale, 1.0);
