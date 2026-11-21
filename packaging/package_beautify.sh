@@ -102,7 +102,7 @@ check "dylib has no sc_sessionDidBeginHosting selector" sh -c "test \$(strings -
 check "dylib has dismiss module load log (beautify.97)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
 check "dylib has dismiss log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-dismiss-effect.log'"
 check "dylib has dismiss switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissAnimEnabled'"
-check "dylib has dismiss emitter layer" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'CAEmitterLayer'"
+check "dylib has dismiss emit burst log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'emit: burst cells='"
 # beautify.95: sc_* selectors are now probed for EXISTENCE only (NSSelectorFromString
 # + class_getInstanceMethod in axs_ring_probeNativeChainOnce), never hooked. Assert the
 # native-chain probe log is compiled in instead of forbidding the selector string.
