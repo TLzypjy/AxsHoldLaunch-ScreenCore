@@ -1,10 +1,21 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.95
+版本：2.0.5+beautify.96
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
      packaging/package_beautify.sh、基线 deb（packaging/base/）、GitHub Actions 工作流。
 
-打包日期：2026-11-17
-构建产物：com.susudear.screencore_2.0.5+beautify.95_iphoneos-arm64.deb（CI 交付）
+beautify.96 变更（第 0 步探测版，纯日志、不改行为）：
+- 新增 Hooks/AxsFullscreenProbe.xm：hook 大浮窗→全屏原生链路的 4 个方法，只打日志：
+    sc_handleFullscreenTap: / sc_floatingContainerViewDidRequestFullscreen: /
+    sc_floatingSceneManager:promoteSceneToFullscreenForSession:completion: /
+    sc_promoteFrontmostFloatingSceneToFullscreen
+  记录调用顺序、source frame 时机、completion 回调时机，日志写入
+  /var/mobile/Documents/sc-fullscreen-probe.log
+- 安全护栏：hook 前校验方法参数全为对象指针（基本类型跳过并打印 enc）；
+  只 hook 首个声明类；日志全程 @try 吞异常；3s/12s 延迟补挂，按 selector 去重防重复 hook。
+- 解除 package_beautify.sh 的 "no fullscreen selectors" 反向断言，改为验证探测标记已编译。
+
+打包日期：2026-11-22
+构建产物：com.susudear.screencore_2.0.5+beautify.96_iphoneos-arm64.deb（CI 交付）

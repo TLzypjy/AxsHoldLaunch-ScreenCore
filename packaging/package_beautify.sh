@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.95"
+VERSION="2.0.5+beautify.96"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -115,7 +115,15 @@ check "dylib has layout hook install log" sh -c "strings -a '$DYLIB_DIR/AxsHoldL
 check "dylib has tree probe" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tree: window=%@ frame=%@ bounds=%@'"
 check "dylib has no AXSRingFrame class" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'AXSRingFrame') -eq 0"
 check "dylib has rotation marquee (z keypath)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'transform.rotation.z'"
-check "dylib has no fullscreen selectors" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -Ec 'sc_handleFullscreenTap|sc_floatingContainerViewDidRequestFullscreen|promoteSceneToFullscreen') -eq 0"
+# beautify.96: fullscreen probe (STEP 0, log-only). The old reverse assertion
+# "dylib has no fullscreen selectors" is intentionally removed: the probe now
+# installs MSHookMessageEx hooks on the large-floating -> fullscreen chain to
+# LOG call order / source frame / completion timing only (never changes behavior).
+# Assert the probe markers are compiled in instead.
+check "dylib has fullscreen probe load log (beautify.96)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'FSP module loaded in SpringBoard'"
+check "dylib has fullscreen probe log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-fullscreen-probe.log'"
+check "dylib has fullscreen probe argsSafe guard" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'argsSafe='"
+check "dylib has fullscreen promoteSession hook" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'promoteSceneToFullscreenForSession'"
 check "dylib has holdpress log in Documents" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/AxsHoldLaunch.log'"
 check "dylib has no Caches log path left" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'Caches/AxsHoldLaunch.log') -eq 0"
 # beautify.95: diagnostic probe logs compiled into the dylib (指令 二/三/四/五/八)
