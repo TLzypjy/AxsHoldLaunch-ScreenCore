@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.107"
+VERSION="2.0.5+beautify.108"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -99,7 +99,7 @@ check "dylib has no sc_sessionDidBeginHosting selector" sh -c "test \$(strings -
 # beautify.97+: the dismiss-particle module hooks sc_closeSession: via
 # NSSelectorFromString (original behaviour untouched), so the old reverse
 # "no sc_closeSession selector" assertion is intentionally replaced.
-check "dylib has dismiss module load log (beautify.107)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
+check "dylib has dismiss module load log (beautify.108)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
 check "dylib has dismiss log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-dismiss-effect.log'"
 check "dylib has dismiss switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissAnimEnabled'"
 check "dylib has dismiss emit burst log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'emit: burst cells='"
@@ -109,7 +109,7 @@ check "dylib has ColorSand grains log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaun
 # beautify.104: GPU Metal fine-sand engine markers
 check "dylib has Metal shader compile log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal compiled OK pipeline ready'"
 check "dylib has Metal sand start log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal sand started grains='"
-# beautify.107: reference-plugin selector that actually exists on the device
+# beautify.108: reference-plugin selector that actually exists on the device
 check "dylib has Metal commandBuffer selector" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'commandBuffer'"
 # beautify.95: sc_* selectors are now probed for EXISTENCE only (NSSelectorFromString
 # + class_getInstanceMethod in axs_ring_probeNativeChainOnce), never hooked. Assert the
@@ -180,16 +180,21 @@ echo "=== packaged: $DEB ==="
 RH_PKG="$OUT/rh-pkg"
 rm -rf "$RH_PKG"
 mkdir -p "$RH_PKG/DEBIAN"
-# control: identical metadata (Depends on mobilesubstrate preferenceloader
-# altlist is satisfied by the roothide bootstrap's own repos).
+# control: same metadata EXCEPT Architecture. roothide packages use
+# iphoneos-arm64e (a bootstrap-layout marker, not the CPU arch). Sileo on
+# roothide Bootstrap treats iphoneos-arm64 as plain rootless and pops the
+# "convert .deb" dialog; arm64e installs directly. Depends are untouched --
+# mobilesubstrate/preferenceloader are provided by the roothide bootstrap.
 cp "$PKG/DEBIAN/control" "$RH_PKG/DEBIAN/control"
+sed -i 's/^Architecture: iphoneos-arm64$/Architecture: iphoneos-arm64e/' "$RH_PKG/DEBIAN/control"
+grep -q '^Architecture: iphoneos-arm64e$' "$RH_PKG/DEBIAN/control"
 # lift everything under var/jb/ up to the roothide package root
 ( cd "$PKG/var/jb" && tar cf - . ) | ( cd "$RH_PKG" && tar xf - )
 # sanity: the dylibs + prefs bundle must have made the move intact
 test -f "$RH_PKG/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib"
 test -f "$RH_PKG/Library/PreferenceBundles/ScreenCorePrefs.bundle/SplitSettings.plist"
 test ! -e "$RH_PKG/var/jb"
-RH_DEB="$OUT/com.susudear.screencore_${VERSION}_iphoneos-arm64-roothide.deb"
+RH_DEB="$OUT/com.susudear.screencore_${VERSION}_iphoneos-arm64e-roothide.deb"
 dpkg-deb --root-owner-group -b "$RH_PKG" "$RH_DEB"
 echo "=== roothide dpkg-deb -I ==="
 dpkg-deb -I "$RH_DEB"

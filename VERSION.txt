@@ -1,10 +1,20 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.107
+版本：2.0.5+beautify.108
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
      packaging/package_beautify.sh、基线 deb（packaging/base/）、GitHub Actions 工作流。
+
+beautify.108 变更（隐根包直装修复：Architecture 改为 iphoneos-arm64e）：
+- 根因：roothide（隐根）包的标记是 Architecture: iphoneos-arm64e（bootstrap 布局标记，
+  与 CPU 架构无关）。上一版隐根包只改对了扁平路径布局，Architecture 仍是 iphoneos-arm64
+  （rootless），Sileo 仍当它是 rootless 包 → 弹出"转换 .deb"（RootHide Patcher）对话框。
+- 修正：打包脚本对隐根变体 control 执行 sed，Architecture 强制为 iphoneos-arm64e；
+  CI 新增 Architecture=iphoneos-arm64e 断言；产物名同步为 _iphoneos-arm64e-roothide.deb。
+- 依赖字段保持不变（mobilesubstrate/preferenceloader 由 roothide bootstrap 提供）；
+  包内不带 .jbroot 链接（roothide 的 dpkg 安装时自动创建，与 RootHide Patcher 产物一致）。
+- 效果：隐根包在 roothide Bootstrap 上直接安装，不再弹转换框。
 
 beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关）：
 - 沿用 .98 的"截图 → 切网格 → UIImageView 飞散"引擎与 windowScene 修复，不改 hook、不改原生行为。
@@ -89,4 +99,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.107_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.108_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
