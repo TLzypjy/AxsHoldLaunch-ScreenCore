@@ -330,7 +330,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.123: ARC-open assemble animation ------------------------------
+// ---- beautify.124: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -383,7 +383,6 @@ static void axs_open_markGone(UIView *v) {
 
 // .122: animation-modification window state (declared before first use)
 static CFAbsoluteTime axs_open_interceptUntil = 0;
-static UIView *axs_open_interceptCard = nil;
 
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
@@ -491,10 +490,6 @@ static void axs_open_becameVisible(UIView *v) {
         if (v.window == nil) return;
         if (v.bounds.size.width < 40 || v.bounds.size.height < 40) return;
         CFAbsoluteTime nowT = CACurrentMediaTime();
-        if (nowT - axs_open_lastDismissHide < 3.0) {
-            axs_dm_log(@"OPEN candidate skipped (dismiss restore)");
-            return;
-        }
         NSNumber *gone = objc_getAssociatedObject(v, &axs_open_goneKey);
         CGFloat goneAt = gone ? [gone doubleValue] : -1e9;
         if (nowT - goneAt < 0.4) {
@@ -508,7 +503,6 @@ static void axs_open_becameVisible(UIView *v) {
         axs_dm_log(@"OPEN candidate accepted frame=%@",
                    NSStringFromCGRect([v convertRect:v.bounds toView:nil]));
         UIView *card = v;
-        axs_open_interceptCard = card;
         axs_open_interceptUntil = CACurrentMediaTime() + 3.0;
         CGFloat density = axs_dm_densityScale();
         CGFloat duration = 0.85;
@@ -601,18 +595,15 @@ static CFAbsoluteTime axs_open_touchBeganAt = 0;
 static IMP axs_open_orig_addAnimation = NULL;
 static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString *key) {
     @try {
-        if (anim != nil && CACurrentMediaTime() < axs_open_interceptUntil
-            && axs_open_interceptCard != nil) {
-            CALayer *l = (CALayer *)self;
-            int depth = 0;
-            while (l != nil && depth < 8) {
-                if (l == axs_open_interceptCard.layer) {
-                    anim.duration = 0.01;
-                    anim.beginTime = CACurrentMediaTime();
-                    break;
-                }
-                l = l.superlayer;
-                depth++;
+        if (anim != nil && CACurrentMediaTime() < axs_open_interceptUntil) {
+            // .124: match by the layer's delegate (view-backed layers have
+            // their view as delegate) so the clamp is armed before the card
+            // pointer even exists. Only the floating container's tree clamps.
+            id delegate = [(CALayer *)self delegate];
+            if (delegate != nil
+                && strcmp(object_getClassName(delegate), "SCFloatingContainerView") == 0) {
+                anim.duration = 0.01;
+                anim.beginTime = CACurrentMediaTime();
             }
         }
     } @catch (NSException *ignored) { }
@@ -651,6 +642,12 @@ static void axs_open_sendEvent(id self, SEL _cmd, UIEvent *event) {
         } else if ([t phase] == UITouchPhaseEnded) {
             axs_open_lastTouchUp = loc;
             axs_open_lastTouchUpAt = CACurrentMediaTime();
+            // .124: arm the animation-clamp window EARLY. The ARC tap -> menu ->
+            // present sequence adds the native animations BEFORE becameVisible
+            // runs, so arming only there missed them entirely (.123). The
+            // filter inside the hook matches by layer delegate class name, so
+            // no card pointer is needed yet.
+            axs_open_interceptUntil = CACurrentMediaTime() + 5.0;
             // a long press (>=0.15s hold, matches the ARC trigger duration
             // setting) on one spot = the finger was held on the ARC icon.
             CGFloat held = CACurrentMediaTime() - axs_open_touchBeganAt;
@@ -716,7 +713,12 @@ static void axs_dm_trigger(NSString *tag) {
         CGFloat sp = axs_dm_speedScale();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((1.9 * sp + 0.3) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            @try { container.hidden = NO; } @catch (NSException *ignored) { }
+            @try {
+                // .124: precise event-level suppression of the open detector
+                // (replaces the old 3s time window the user asked to remove)
+                axs_open_selfRestore = YES;
+                container.hidden = NO;
+            } @catch (NSException *ignored) { }
         });
     }
 }
@@ -821,14 +823,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.123: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.124: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.123, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.124, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

@@ -1,6 +1,15 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.123
+版本：2.0.5+beautify.124
+
+beautify.124 变更（钳制窗口提前 + 移除 3 秒窗口抑制）：
+- .123 日志：每次都走 1 帧闪现回退（设备 hidden 快照必空），且 addAnimation 钳制
+  未生效——arm 时机在 becameVisible（异步、太晚），原生呼出动画在那之前已添加完毕。
+- 修复 ①：sendEvent 每次触摸抬起即 arm 5s 钳制窗口（覆盖 ARC 长按→菜单→present
+  全程）；hook 过滤改为按 layer delegate 的类名（SCFloatingContainerView）匹配，
+  不再依赖卡片指针。
+- 修复 ②（用户要求）：移除 3 秒 dismiss-restore 时间窗口抑制，改为 dismiss 恢复
+  卡片前直接置 selfRestore 标志（事件级精确抑制）。
 
 beautify.123 变更（修复 .122 安全模式崩溃）：
 - .122 实测 SIGSEGV 进安全模式。ips 崩溃栈：ScreenCore → UIWindow _setHidden:forced:
@@ -261,4 +270,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.123_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.124_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
