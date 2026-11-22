@@ -303,7 +303,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.129: ARC-open assemble animation ------------------------------
+// ---- beautify.130: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -406,6 +406,50 @@ static CGFloat axs_open_density(void) {
     return density;
 }
 
+// .130: afterScreenUpdates:YES snapshot -- commits a fresh render-server
+// round trip; unlike the afterScreenUpdates:NO path (blank on hidden views on
+// this device), this one has never been tried and can capture hidden views.
+static UIImage *axs_dm_snapshotAfterUpdates(UIView *view) {
+    UIImage *img = nil;
+    @try {
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        UIGraphicsImageRenderer *renderer =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:view.bounds format:fmt];
+        img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [view drawViewHierarchyInRect:view.bounds afterScreenUpdates:YES];
+        }];
+    } @catch (NSException *ignored) {
+        img = nil;
+    }
+    return img;
+}
+
+// blank probe: samples the alpha channel on a sparse grid (BGRA little-endian
+// premultiplied-first: alpha in byte 3)
+static BOOL axs_dm_imageIsBlank(UIImage *img) {
+    if (img == nil || img.CGImage == NULL) return YES;
+    CGImageRef cg = img.CGImage;
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    if (w == 0 || h == 0) return YES;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    size_t bpr = w * 4;
+    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
+    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
+                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(cs);
+    const uint8_t *px = (const uint8_t *)[data bytes];
+    size_t step = ((w * h) / 256) + 1;
+    BOOL anyOpaque = NO;
+    for (size_t i = 0; i < w * h; i += step) {
+        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
+    }
+    return !anyOpaque;
+}
+
 // .128: NO-TEXTURE assemble -- the grains are plain glowing dots (1x1 white
 // texture; every sample is white). The old snapshot-based texture was a dead
 // end on this device (hidden / renderInContext / offscreen snapshots all came
@@ -464,7 +508,10 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         }
         CGRect frame = [card convertRect:card.bounds toView:nil];
         CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
-        BOOL settled = (frame.size.width > 40.0 && frame.size.width < screenW * 0.85);
+        // .130: require >=0.15s of settle time so the app content has a
+        // chance to load before the texture is captured
+        BOOL settled = (polls >= 5 && frame.size.width > 40.0
+                        && frame.size.width < screenW * 0.85);
         if (!settled && polls < 15) {
             __weak UIView *weakCard = card;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
@@ -481,13 +528,24 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .129: texture = the app-snapshot image already living in the card's
-        // view tree (ScreenCore shows the app snapshot on open). Reading a
-        // UIImageView.image is pure data -- no render pipeline involved, works
-        // perfectly while the card is hidden. Fallback: glowing white dots.
+        // .130 texture ladder (the card stays hidden the whole time):
+        // 1. app-snapshot UIImageView.image in the card tree (pure data read)
+        // 2. drawViewHierarchy afterScreenUpdates:YES on the hidden card
+        //    (fresh render-server commit -- never tried before)
+        // 3. glowing white dots
         UIImage *shot = axs_open_findAppSnapshot(card);
-        NSString *texKind = shot ? @"app-snapshot" : @"white-dots";
-        if (shot == nil) shot = axs_open_getWhiteTexture();
+        NSString *texKind = shot ? @"app-snapshot" : nil;
+        if (shot == nil) {
+            UIImage *hiddenShot = axs_dm_snapshotAfterUpdates(card);
+            if (!axs_dm_imageIsBlank(hiddenShot)) {
+                shot = hiddenShot;
+                texKind = @"hidden-after-updates";
+            }
+        }
+        if (shot == nil) {
+            shot = axs_open_getWhiteTexture();
+            texKind = @"white-dots";
+        }
         if (shot == nil) {
             axs_dm_log(@"OPEN white texture failed, native card restored");
             axs_open_assembleInFlight = NO;
@@ -914,14 +972,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.129: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.130: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.129, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.130, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
