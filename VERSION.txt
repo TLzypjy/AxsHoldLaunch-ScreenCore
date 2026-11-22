@@ -1,6 +1,29 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.111
+版本：2.0.5+beautify.112
+
+beautify.112 变更（全部样式统一 GPU 引擎 + 粒子密度滑块）：
+- 用户决策：新增密度滑块后，CPU 路径靠上限防卡顿是倒设计 → 8 种 UIView 网格样式
+  全部迁入 Metal vertex shader，UIView CPU 路径彻底退役（Metal 不可用=无消散，
+  卡片原生关闭，不再有 CPU 兜底）。
+- shader：DustUniforms 增加 style 字段，nlDustVertex 按 style 分支——
+  0 方块飞散（随机四向溅射-40pt 上偏，ease-out）
+  1 重力下落（ease-in，dy 80~220）
+  2 漩涡吸入（径向穿心+切向 90~160，缩到 0）
+  3 冲击波（径向炸开，按到心距离延迟 len/320）
+  4 灰尘飘散（上浮-60~-170 + 横漂）
+  5 像素溶解（原地，随机延迟 0~0.7）
+  6 百叶窗（按行 0.6s 递进，±16pt 横移）
+  7 玻璃碎裂（随机溅射+90pt 下坠，ease-in，强旋转）
+  8 彩砂（保留 .104 参考模型原样）
+  ease 曲线对应 UIView 的 EaseOut/EaseIn（quad 近似）；styles 0-7 breakage=0 保持方片。
+- 密度：splitBeautifyDismissDensity（0.5~3.0，step 0.1，默认 1.0）——
+  彩砂 grains=14000×密度（上限 40000）；网格样式 cols/rows=基准网格×密度（上限 240）。
+  基准网格照抄原 gridForStyle：Dust14/14、Pixel12/12、Blinds8/14、Glass5/6、其余10/10。
+- 时长：axs_dm_styleBaseDuration 每样式基准时长表（0.87/1.20/1.03/1.83/1.55/0.88/0.85/1.03/1.30），
+  与 shader 内 begin/span 分母逐字对应，速度滑块照旧缩放整体时间线。
+- 删除：axs_dm_emitColorSand、UIView 网格路径、axs_dm_randRange/dustHash/gridForStyle、
+  overlay 全局变量；trigger 隐藏卡片逻辑不变。
 
 beautify.111 变更（消散双重画面修复 + 速度滑块连续步进）：
 - 问题 1：消散时除粒子外，原卡片本体还在跑 ScreenCore 自己的关闭动画（向右下角收走），
@@ -132,4 +155,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.111_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.112_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

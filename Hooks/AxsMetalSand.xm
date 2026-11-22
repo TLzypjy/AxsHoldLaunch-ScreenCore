@@ -1,14 +1,14 @@
 // ---------------------------------------------------------------------------
-// beautify.104 - Metal fine-sand renderer, ported from the reference plugin
-// (com.example.noticelisttweak / NoticeListTweak.dylib mode 2). The whole card
-// is uploaded as ONE texture and rendered as columns*rows instanced quads in a
-// SINGLE drawPrimitives call on the GPU. No per-grain CALayer, no main-thread
-// per-frame work -> fine sand (14000 grains) without the UIView stutter.
+// beautify.112 - unified Metal GPU renderer for ALL 9 dismiss styles. The
+// whole card is uploaded as ONE texture and rendered as columns*rows instanced
+// quads in a SINGLE drawPrimitives call on the GPU. The 8 former UIView grid
+// styles (beautify.98/.99) were ported into per-style vertex shader branches,
+// so there is no CPU layer path anymore -- UIView remains only as a concept
+// that was fully retired in .112 (Metal unavailable = no dissolve effect).
 //
-// The MSL source below is reconstructed from the shader embedded verbatim in
-// the reference dylib (strings showed the full source; single "}" lines were
-// dropped by the extractor and are restored here). It is compiled at runtime
-// with newLibraryWithSource and cached, exactly like the reference plugin.
+// The sand shader lineage is reconstructed from the shader embedded verbatim
+// in the reference dylib (com.example.noticelisttweak / NoticeListTweak.dylib
+// mode 2). Compiled at runtime with newLibraryWithSource and cached.
 // ---------------------------------------------------------------------------
 
 #import <UIKit/UIKit.h>
@@ -46,7 +46,15 @@ static void axs_msd_log(NSString *format, ...) {
     }
 }
 
-// ---- MSL source (reconstructed from the reference dylib) -------------------
+// ---- MSL source -------------------------------------------------------------
+// beautify.112: ONE unified GPU engine for ALL 9 styles. The 8 former UIView
+// grid styles are ported into the vertex shader as per-style branches -- each
+// style is just a different begin/span/dx/dy/shrink/rotation model over the
+// same instanced-quad pipeline. UIView is no longer an engine; if Metal is
+// unavailable there is simply no dissolve (the card closes natively).
+// Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
+// AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
+// fractions of T0 so the speed slider keeps working unchanged.
 static NSString * const AXS_MSD_SHADER = @"\
 #include <metal_stdlib>\n\
 using namespace metal;\n\
@@ -59,7 +67,7 @@ struct DustUniforms {\n\
     float time;\n\
     float distance;\n\
     float seed;\n\
-    float notificationSweep;\n\
+    uint style;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -83,31 +91,106 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r = dustHash(noiseCell);\n\
     float r2 = dustHash(noiseCell + 19.7);\n\
     float r3 = dustHash(noiseCell + 72.3);\n\
-    bool fineSand = u.notificationSweep>1.5;\n\
-    float frontier = u.notificationSweep>0.5 ? unit.x*0.34 + unit.y*0.02\n\
-                                            : (1.0-unit.x)*0.25 + unit.y*0.075;\n\
-    float begin = frontier + r*(u.notificationSweep>0.5 ? 0.04 : 0.095);\n\
-    if (fineSand) begin = (unit.x + 1.0-unit.y)*0.18 + r*0.025;\n\
-    float progress = clamp((u.time-begin)/(0.56 + 0.035*r2), 0.0, 1.0);\n\
+    float r4 = dustHash(noiseCell + 43.7);\n\
+    float2 rel = (unit-0.5)*u.cardSize;\n\
+    float len = length(rel); if (len < 1.0) len = 1.0;\n\
+    float2 dirOut = rel/len;\n\
+    float2 dirIn = -dirOut;\n\
+    float begin; float span;\n\
+    float dx; float dy; float spinEnd; float scEnd;\n\
+    int easeMode = 0;\n\
+    if (u.style == 8u) {\n\
+        begin = (unit.x + 1.0-unit.y)*0.18 + r*0.025;\n\
+        span  = 0.56 + 0.035*r2;\n\
+    } else if (u.style == 1u) {\n\
+        dx = (r-0.5)*100.0;\n\
+        dy = 80.0+140.0*r2;\n\
+        spinEnd = (r3-0.5)*1.8;\n\
+        scEnd = 0.35+0.30*r4;\n\
+        begin = r4*0.15/1.20;\n\
+        span = 1.05/1.20;\n\
+        easeMode = 1;\n\
+    } else if (u.style == 2u) {\n\
+        float pull = len + 20.0+60.0*r;\n\
+        float tang = 90.0+70.0*r2;\n\
+        dx = dirIn.x*pull - dirIn.y*tang;\n\
+        dy = dirIn.y*pull + dirIn.x*tang;\n\
+        spinEnd = (r3-0.5)*6.0;\n\
+        scEnd = 0.0;\n\
+        begin = unit.y*0.18/1.03;\n\
+        span = 0.85/1.03;\n\
+    } else if (u.style == 3u) {\n\
+        float dist = len + 160.0+120.0*r2;\n\
+        dx = dirOut.x*dist;\n\
+        dy = dirOut.y*dist;\n\
+        spinEnd = 0.0;\n\
+        scEnd = 0.2;\n\
+        begin = (len/320.0)/1.83;\n\
+        span = 0.70/1.83;\n\
+    } else if (u.style == 4u) {\n\
+        dx = (r-0.5)*90.0;\n\
+        dy = -(60.0+110.0*r2);\n\
+        spinEnd = (r3-0.5)*1.0;\n\
+        scEnd = 0.15+0.25*r4;\n\
+        begin = r4*0.30/1.55;\n\
+        span = 1.25/1.55;\n\
+    } else if (u.style == 5u) {\n\
+        dx = 0.0; dy = 0.0; spinEnd = 0.0; scEnd = 1.0;\n\
+        begin = r*0.70/0.88;\n\
+        span = 0.18/0.88;\n\
+    } else if (u.style == 6u) {\n\
+        dx = (uint(cell.y) % 2u == 0u) ? 16.0 : -16.0;\n\
+        dy = 0.0; spinEnd = 0.0; scEnd = 1.0;\n\
+        begin = unit.y*0.60/0.85;\n\
+        span = 0.25/0.85;\n\
+    } else if (u.style == 7u) {\n\
+        dx = cos(r*6.2831853)*(120.0+180.0*r2);\n\
+        dy = sin(r*6.2831853)*(120.0+180.0*r2)+90.0;\n\
+        spinEnd = (r3-0.5)*5.2;\n\
+        scEnd = 0.25+0.25*r4;\n\
+        begin = r4*0.08/1.03;\n\
+        span = 0.95/1.03;\n\
+        easeMode = 1;\n\
+    } else {\n\
+        dx = cos(r*6.2831853)*(100.0+220.0*r2);\n\
+        dy = sin(r*6.2831853)*(100.0+220.0*r2)-40.0;\n\
+        spinEnd = (r3-0.5)*2.0;\n\
+        scEnd = 0.12;\n\
+        begin = r4*0.12/0.87;\n\
+        span = 0.75/0.87;\n\
+    }\n\
+    float progress = clamp((u.time-begin)/span, 0.0, 1.0);\n\
     float burst = smoothstep(0.0,0.18,progress);\n\
-    float motion = pow(progress,1.12);\n\
-    float dx = (0.62 + 1.05*r)*u.distance*motion;\n\
-    float dy = -(0.45 + 1.05*r2)*u.distance*motion\n\
-               + sin(progress*7.0+r3*6.283)*u.distance*0.13*motion;\n\
-    dx += (r2-0.5)*u.distance*0.40*motion;\n\
+    float motion;\n\
+    if (easeMode == 1) motion = progress*progress;\n\
+    else if (easeMode == 0) motion = 1.0-(1.0-progress)*(1.0-progress);\n\
+    else motion = pow(progress,1.12);\n\
+    float dxm; float dym; float shrink; float angle;\n\
+    if (u.style == 8u) {\n\
+        dxm = (0.62 + 1.05*r)*u.distance*motion + (r2-0.5)*u.distance*0.40*motion;\n\
+        dym = -(0.45 + 1.05*r2)*u.distance*motion + sin(progress*7.0+r3*6.283)*u.distance*0.13*motion;\n\
+        shrink = mix(1.0, mix(0.24,0.56,r3), smoothstep(0.01,0.65,progress));\n\
+        angle = (r3-0.5)*4.8*motion;\n\
+    } else {\n\
+        dxm = dx*motion;\n\
+        dym = dy*motion;\n\
+        shrink = mix(1.0, scEnd, motion);\n\
+        angle = spinEnd*motion;\n\
+    }\n\
     float2 tileSize = u.cardSize/grid;\n\
-    float shrink = mix(1.0, mix(0.24,0.56,r3), smoothstep(0.01,0.65,progress));\n\
     float2 delta = (corner-0.5)*tileSize*shrink;\n\
-    float angle = (r3-0.5)*4.8*motion;\n\
     float c=cos(angle),s=sin(angle);\n\
     delta=float2(c*delta.x-s*delta.y,s*delta.x+c*delta.y);\n\
-    float2 p = u.origin + unit*u.cardSize + delta + float2(dx,dy);\n\
+    float2 p = u.origin + unit*u.cardSize + delta + float2(dxm,dym);\n\
     DustVertex out;\n\
     out.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
     out.uv=(cell+corner)/grid;\n\
     out.local=corner;\n\
-    out.fade=1.0-smoothstep(0.32+0.20*r2,1.0,progress);\n\
-    out.breakage=burst;\n\
+    float fade;\n\
+    if (u.style == 8u) fade = 1.0-smoothstep(0.32+0.20*r2,1.0,progress);\n\
+    else fade = 1.0-motion;\n\
+    out.fade=fade;\n\
+    out.breakage=(u.style == 8u) ? burst : 0.0;\n\
     return out;\n\
 }\n\
 fragment float4 nlDustFragment(DustVertex in [[stage_in]], texture2d<float> image [[texture(0)]]) {\n\
@@ -118,7 +201,7 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], texture2d<float> imag
     return color*(in.fade*shape);\n\
 }\n";
 
-// C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 48 bytes.
+// C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 52 bytes.
 typedef struct {
     float viewport[2];
     float origin[2];
@@ -128,7 +211,7 @@ typedef struct {
     float time;
     float distance;
     float seed;
-    float notificationSweep;
+    uint32_t style;
 } AXSMetalDustUniforms;
 
 // ---- cached device + queue + pipeline (compiled once, reused) --------------
@@ -229,7 +312,8 @@ static NSMutableArray *sMsdActiveRenderers = nil;
                 overlay:(UIWindow *)win
                    view:(AXSMetalSandView *)view
                    seed:(float)seed
-               particles:(int)count;
+                  style:(uint32_t)style
+                density:(CGFloat)density;
 @end
 
 @implementation AXSMetalSandRenderer
@@ -241,11 +325,11 @@ static NSMutableArray *sMsdActiveRenderers = nil;
                 overlay:(UIWindow *)win
                    view:(AXSMetalSandView *)view
                    seed:(float)seed
-               particles:(int)count {
+                  style:(uint32_t)style
+                density:(CGFloat)density {
     self.texture = tex;
     self.duration = dur;
     self.overlay = win;
-    self.grainCount = count;
     self.metalLayer = (CAMetalLayer *)view.layer;
 
     AXSMetalDustUniforms u = {{0}};
@@ -255,18 +339,39 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     u.origin[1] = (float)frame.origin.y;
     u.cardSize[0] = (float)frame.size.width;
     u.cardSize[1] = (float)frame.size.height;
-    // distribute `count` cells by card aspect ratio -> roughly square grains
-    CGFloat aspect = frame.size.height > 0.5 ? frame.size.width / frame.size.height : 1.0;
-    uint32_t cols = (uint32_t)lround(sqrtf((float)count * (float)aspect));
+    u.time = 0.0f;
+    u.distance = 110.0f;     // DustDistance default (sand drift distance)
+    u.seed = seed;
+    u.style = style;
+    // Grid = per-style base resolution scaled by the density slider.
+    // Style 8 (sand) keeps the reference plugin's particle-count model
+    // (14000 * density distributed by card aspect); the 8 grid styles scale
+    // their characteristic base grids (Glass stays chunky 5x6, Dust 14x14...).
+    uint32_t cols, rows;
+    if (style == 8u) {
+        int particles = (int)lround(14000.0 * density);
+        if (particles < 200) particles = 200;
+        if (particles > 40000) particles = 40000;
+        CGFloat aspect = frame.size.height > 0.5 ? frame.size.width / frame.size.height : 1.0;
+        cols = (uint32_t)lround(sqrtf((float)particles * (float)aspect));
+        rows = (uint32_t)((particles + (int)cols - 1) / (int)cols);
+    } else {
+        int baseCols = 10, baseRows = 10;
+        switch (style) {
+            case 4u: baseCols = 14; baseRows = 14; break;   // Dust
+            case 5u: baseCols = 12; baseRows = 12; break;   // Pixel dissolve
+            case 6u: baseCols = 8;  baseRows = 14; break;   // Blinds
+            case 7u: baseCols = 5;  baseRows = 6;  break;   // Glass
+            default: break;                                  // 10x10 grid styles
+        }
+        cols = (uint32_t)lround((CGFloat)baseCols * density);
+        rows = (uint32_t)lround((CGFloat)baseRows * density);
+    }
     if (cols < 2) cols = 2; if (cols > 240) cols = 240;
-    uint32_t rows = (uint32_t)((count + (int)cols - 1) / (int)cols);
     if (rows < 2) rows = 2; if (rows > 240) rows = 240;
     u.columns = cols;
     u.rows = rows;
-    u.time = 0.0f;
-    u.distance = 110.0f;     // DustDistance default
-    u.seed = seed;
-    u.notificationSweep = 2.0f;  // mode 2 = lock-screen fine sand (BL -> TR)
+    self.grainCount = (int)(cols * rows);
     self.u = u;
 
     // .105: explicitly set the drawable pixel size. Without this the freshly
@@ -422,10 +527,11 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
 }
 
 // ---- public entry point: returns YES if Metal took over the effect --------
-BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration) {
+BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                       uint32_t style, CGFloat density) {
     @try {
         if (!axs_msd_ensurePipeline()) {
-            axs_msd_log(@"metal sand unavailable -> caller will fall back");
+            axs_msd_log(@"metal unavailable -> no dissolve effect");
             return NO;
         }
         if (shot == nil || shot.CGImage == nil) {
@@ -474,23 +580,22 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration) {
         if (sMsdActiveRenderers == nil) sMsdActiveRenderers = [NSMutableArray array];
         [sMsdActiveRenderers addObject:renderer];
 
-        int particles = 14000;  // DustParticles default in the reference plugin
         float seed = (float)(arc4random_uniform(100000)) / 1000.0f;
-        // .105: startWithTexture now does a synchronous first-frame probe and
+        // .105: startWithTexture does a synchronous first-frame probe and
         // returns NO if Metal cannot actually draw. Only claim success when it
-        // really rendered, otherwise let the caller fall back to UIView so the
-        // effect is never blank.
+        // really rendered.
         BOOL started = [renderer startWithTexture:tex frame:frameInWindow viewport:overlay.bounds.size
-                                          duration:duration overlay:overlay view:view seed:seed particles:particles];
+                                          duration:duration overlay:overlay view:view seed:seed
+                                            style:style density:density];
         if (!started) {
             [sMsdActiveRenderers removeObject:renderer];
             overlay.hidden = YES;
-            axs_msd_log(@"metal sand first-frame FAILED -> caller will fall back");
+            axs_msd_log(@"metal first-frame FAILED");
             return NO;
         }
 
-        axs_msd_log(@"metal sand started grains=%d dur=%.2f img=%lux%lu frame=%@ scene=%@",
-                    particles, duration,
+        axs_msd_log(@"metal started style=%u grains=%d dur=%.2f density=%.2f img=%lux%lu frame=%@ scene=%@",
+                    style, renderer.grainCount, duration, density,
                     (unsigned long)CGImageGetWidth(shot.CGImage),
                     (unsigned long)CGImageGetHeight(shot.CGImage),
                     NSStringFromCGRect(frameInWindow),

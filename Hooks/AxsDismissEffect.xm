@@ -18,7 +18,8 @@ void MSHookMessageEx(Class cls, SEL sel, IMP replacement, IMP *result);
 
 // beautify.104: Metal fine-sand renderer (Hooks/AxsMetalSand.xm). Returns YES
 // when the GPU engine took over; NO means caller should fall back to UIView.
-BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration);
+BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                       uint32_t style, CGFloat density);
 
 // ---------------------------------------------------------------------------
 // beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
@@ -164,6 +165,48 @@ static CGFloat axs_dm_speedScale(void) {
     return 1.0 / speed;
 }
 
+// beautify.112: particle density multiplier from the panel (0.5..3.0, default
+// 1.0). Scales the per-style grain grid; applied inside the Metal renderer.
+static CGFloat axs_dm_densityScale(void) {
+    CGFloat density = 1.0;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return 1.0;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyDismissDensity", @1.0);
+            if ([value isKindOfClass:[NSNumber class]]) {
+                density = [value floatValue];
+                if (density < 0.5) density = 0.5;
+                if (density > 3.0) density = 3.0;
+            }
+        }
+    } @catch (NSException *ignored) {
+        density = 1.0;
+    }
+    if (density <= 0.0 || density != density) density = 1.0;   // NaN / zero guard
+    return density;
+}
+
+// beautify.112: per-style base timeline (seconds at speed=1). These values are
+// mirrored 1:1 inside the Metal vertex shader (begin/span are fractions of
+// T0), so the speed slider keeps scaling the whole timeline uniformly.
+static CGFloat axs_dm_styleBaseDuration(NSInteger style) {
+    switch (style) {
+        case AXSDismissStyleGravity:       return 1.20;  // 0.15 delay + 1.05 anim
+        case AXSDismissStyleVortex:        return 1.03;  // 0.18 + 0.85
+        case AXSDismissStyleShockwave:     return 1.83;  // max 1.13 + 0.70
+        case AXSDismissStyleDust:          return 1.55;  // 0.30 + 1.25
+        case AXSDismissStylePixelDissolve: return 0.88;  // 0.70 + 0.18
+        case AXSDismissStyleBlinds:        return 0.85;  // 0.60 + 0.25
+        case AXSDismissStyleGlass:         return 1.03;  // 0.08 + 0.95
+        case AXSDismissStyleColorSand:     return 1.30;  // reference sand
+        default:                           return 0.87;  // 0.12 + 0.75
+    }
+}
+
 static NSString *axs_dm_styleName(NSInteger style) {
     switch (style) {
         case AXSDismissStyleGravity:       return @"gravity";
@@ -176,60 +219,6 @@ static NSString *axs_dm_styleName(NSInteger style) {
         case AXSDismissStyleColorSand:     return @"sand";
         default:                           return @"burst";
     }
-}
-
-static void axs_dm_gridForStyle(NSInteger style, int *cols, int *rows) {
-    switch (style) {
-        case AXSDismissStyleDust:          *cols = 14; *rows = 14; break;
-        case AXSDismissStylePixelDissolve: *cols = 12; *rows = 12; break;
-        case AXSDismissStyleBlinds:        *cols = 8;  *rows = 14; break;
-        case AXSDismissStyleGlass:         *cols = 5;  *rows = 6;  break;
-        default:                           *cols = 10; *rows = 10; break;
-    }
-}
-
-// fract(sin(dot(v,(127.1,311.7)))*43758.5453) -- identical hash to the
-// reference plugin's Metal dustHash, so grain randomness matches per-cell.
-static float axs_dm_dustHash(CGFloat x, CGFloat y) {
-    double v = sin((double)x * 127.1 + (double)y * 311.7) * 43758.5453;
-    return (float)(v - floor(v));
-}
-
-static CGFloat axs_dm_randRange(CGFloat lo, CGFloat hi) {
-    return lo + ((CGFloat)arc4random_uniform(1000) / 1000.0) * (hi - lo);
-}
-
-// --- view tree helpers ------------------------------------------------------
-static UIView *axs_dm_findContainerView(void) {
-    UIView *found = nil;
-    @try {
-        UIApplication *app = [UIApplication sharedApplication];
-        for (UIScene *scene in app.connectedScenes) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *win in ((UIWindowScene *)scene).windows) {
-                NSMutableArray *stack = [NSMutableArray arrayWithObject:win];
-                int guard = 0;
-                while (stack.count > 0 && guard < 600 && found == nil) {
-                    UIView *v = [stack lastObject];
-                    [stack removeLastObject];
-                    guard++;
-                    if (v == nil) continue;
-                    NSString *cn = NSStringFromClass(v.class);
-                    if ([cn isEqualToString:@"SCFloatingContainerView"]
-                        && v.window != nil && !v.hidden && v.frame.size.width > 40) {
-                        found = v;
-                        break;
-                    }
-                    [stack addObjectsFromArray:v.subviews];
-                }
-                if (found != nil) break;
-            }
-            if (found != nil) break;
-        }
-    } @catch (NSException *ignored) {
-        found = nil;
-    }
-    return found;
 }
 
 static UIImage *axs_dm_snapshot(UIView *view) {
@@ -248,431 +237,38 @@ static UIImage *axs_dm_snapshot(UIView *view) {
     return img;
 }
 
-// --- particle overlay -------------------------------------------------------
-static UIWindow *axs_dm_overlayWindow = nil;
-static NSMutableArray *axs_dm_activeOverlays = nil;
-
-// beautify.101: fine-sand dissolve with a bottom-left -> top-right breakup
-// front, ported from the reference plugin's Metal mode-2 shader. The source
-// screenshot is diced into a dense grid; each tile keeps its REAL pixels (a
-// CGImage slice) and morphs into a round sand grain. Every tile carries its
-// own launch delay so a diagonal front sweeps across the card: bottom-left
-// lifts first, top-right last (begin = (x + 1 - y) * 0.18 + r*0.025). Grains
-// then fly UP-RIGHT, shrink to 24%-56%, spin slightly and fade, over ~1.3s --
-// matching DustDuration/DustDistance defaults of the reference plugin.
-// Runs on the same windowScene-bound overlay as all styles (.98 visibility
-// fix). The 8 original styles are untouched.
-// .111: returns YES when the sand effect actually started playing.
-static BOOL axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
-                                 NSInteger style, NSString *styleName) {
-    @try {
-        UIImage *shot = axs_dm_snapshot(sourceView);
-        if (shot == nil || shot.CGImage == nil) {
-            axs_dm_log(@"emit: sand snapshot failed");
-            return NO;
-        }
-        CGImageRef full = shot.CGImage;
-        NSUInteger px = CGImageGetWidth(full);
-        NSUInteger py = CGImageGetHeight(full);
-        if (px == 0 || py == 0) {
-            axs_dm_log(@"emit: sand empty image %lux%lu", (unsigned long)px, (unsigned long)py);
-            return NO;
-        }
-
-        UIWindow *host = nil;
-        for (UIScene *scene in [[UIApplication sharedApplication] connectedScenes]) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-                if (w.isKeyWindow) { host = w; break; }
-            }
-            if (host != nil) break;
-        }
-        if (host == nil) {
-            axs_dm_log(@"emit: sand no key window");
-            return NO;
-        }
-
-        UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
-        if ([overlay respondsToSelector:@selector(setWindowScene:)]) {
-            overlay.windowScene = host.windowScene;
-        }
-        overlay.windowLevel = UIWindowLevelAlert + 500;
-        overlay.backgroundColor = [UIColor clearColor];
-        overlay.userInteractionEnabled = NO;
-        overlay.hidden = NO;
-
-        // Dense grid for a fine-sand look. .102: cell shrunk 5.5pt -> 3.2pt
-        // (roughly 3x more grains than .101). Hard total cap keeps SpringBoard
-        // layer/animation creation bounded so this never turns into a stutter.
-        CGFloat fw = sourceFrameInWindow.size.width;
-        CGFloat fh = sourceFrameInWindow.size.height;
-        int cols = (int)lround(fw / 3.2);
-        int rows = (int)lround(fh / 3.2);
-        if (cols < 28) cols = 28; if (cols > 96) cols = 96;
-        if (rows < 20) rows = 20; if (rows > 76) rows = 76;
-        const int AXS_SAND_MAX = 6000;
-        if (cols * rows > AXS_SAND_MAX) {
-            CGFloat k = sqrtf((CGFloat)AXS_SAND_MAX / (CGFloat)(cols * rows));
-            cols = (int)lround((CGFloat)cols * k);
-            rows = (int)lround((CGFloat)rows * k);
-        }
-
-        CGFloat speedScale = axs_dm_speedScale();
-        const CGFloat total = 1.30 * speedScale;   // DustDuration default / speed
-        const CGFloat D = 110.0;      // DustDistance default
-        CGFloat tileW = fw / (CGFloat)cols;
-        CGFloat tileH = fh / (CGFloat)rows;
-        CGFloat ox = sourceFrameInWindow.origin.x;
-        CGFloat oy = sourceFrameInWindow.origin.y;
-
-        CALayer *root = [CALayer layer];
-        root.frame = overlay.bounds;
-        [overlay.layer addSublayer:root];
-
-        NSUInteger seed = axs_dm_seq + 1;
-        int made = 0;
-        CFTimeInterval now = CACurrentMediaTime();
-        CGFloat cw = (CGFloat)px / (CGFloat)cols;
-        CGFloat ch = (CGFloat)py / (CGFloat)rows;
-
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                // source-pixel crop (+1px overlap hides seams when scaled to fill)
-                CGFloat cxp = (CGFloat)c * cw;
-                CGFloat cyp = (CGFloat)r * ch;
-                CGFloat cwi = cw + 1.0, chi = ch + 1.0;
-                if (cxp + cwi > (CGFloat)px) cwi = (CGFloat)px - cxp;
-                if (cyp + chi > (CGFloat)py) chi = (CGFloat)py - cyp;
-                if (cwi <= 0 || chi <= 0) continue;
-                CGImageRef piece = CGImageCreateWithImageInRect(
-                    full, CGRectMake(cxp, cyp, cwi, chi));
-                if (piece == NULL) continue;
-
-                CGFloat ux = ((CGFloat)c + 0.5) / (CGFloat)cols; // 0 left -> 1 right
-                CGFloat uy = ((CGFloat)r + 0.5) / (CGFloat)rows; // 0 top  -> 1 bottom
-
-                float r1 = axs_dm_dustHash((CGFloat)c + (CGFloat)seed,
-                                           (CGFloat)r + (CGFloat)seed * 0.371);
-                float r2 = axs_dm_dustHash((CGFloat)c + (CGFloat)seed + 19.7,
-                                           (CGFloat)r + (CGFloat)seed * 0.371 + 19.7);
-                float r3 = axs_dm_dustHash((CGFloat)c + (CGFloat)seed + 72.3,
-                                           (CGFloat)r + (CGFloat)seed * 0.371 + 72.3);
-
-                CALayer *g = [CALayer layer];
-                g.contents = (__bridge id)piece;
-                g.contentsGravity = kCAGravityResize;
-                g.frame = CGRectMake(ox + (CGFloat)c * tileW,
-                                     oy + (CGFloat)r * tileH,
-                                     tileW + 0.6, tileH + 0.6);
-                g.masksToBounds = YES;
-                g.cornerRadius = 0.0;
-                [root addSublayer:g];
-                CGImageRelease(piece);
-                made++;
-
-                // bottom-left -> top-right front: 0 at bottom-left, 0.36 at top-right
-                CGFloat begin = (ux + 1.0 - uy) * 0.18 + r1 * 0.025;
-                CGFloat delay = begin * total;                  // 0 .. ~0.5s
-                CGFloat dur   = (0.56 + 0.035 * r2) * total;    // ~0.73 - 0.77s
-
-                // drift up-right; slight jitter, no gravity fall. .102: wider
-                // per-grain scatter so the field reads as loose fine sand.
-                CGFloat dx = (0.62 + 1.05 * r1) * D + (r2 - 0.5) * D * 0.80;
-                CGFloat dy = -(0.45 + 1.05 * r2) * D + (r1 - 0.5) * D * 0.35;
-                CGFloat endScale = 0.16 + 0.26 * r3;            // 0.16 .. 0.42
-                CGFloat endAngle = (r3 - 0.5) * 6.4;             // +-3.2 rad
-                CGFloat rad = MIN(tileW, tileH) * 0.5;
-
-                CATransform3D t1 = CATransform3DMakeScale(endScale, endScale, 1.0);
-                t1 = CATransform3DRotate(t1, endAngle, 0, 0, 1);
-
-                CABasicAnimation *ta = [CABasicAnimation animationWithKeyPath:@"transform"];
-                ta.fromValue = [NSValue valueWithCATransform3D:CATransform3DIdentity];
-                ta.toValue   = [NSValue valueWithCATransform3D:t1];
-
-                CABasicAnimation *pa = [CABasicAnimation animationWithKeyPath:@"position"];
-                CGPoint p0 = g.position;
-                pa.fromValue = [NSValue valueWithCGPoint:p0];
-                pa.toValue   = [NSValue valueWithCGPoint:CGPointMake(p0.x + dx, p0.y + dy)];
-
-                CAKeyframeAnimation *oa = [CAKeyframeAnimation animationWithKeyPath:@"opacity"];
-                oa.values = @[@1.0, @1.0, @0.0];
-                oa.keyTimes = @[@0.0, @(0.32 + 0.20 * r2), @1.0];
-
-                CABasicAnimation *ra = [CABasicAnimation animationWithKeyPath:@"cornerRadius"];
-                ra.fromValue = @0.0;
-                ra.toValue   = @(rad);
-
-                CAAnimationGroup *grp = [CAAnimationGroup animation];
-                grp.animations = @[ta, pa, oa, ra];
-                grp.duration = dur;
-                grp.beginTime = now + delay;
-                grp.fillMode = kCAFillModeForwards;
-                grp.removedOnCompletion = NO;
-                grp.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
-                [g addAnimation:grp forKey:@"sand"];
-            }
-        }
-        if (made == 0) {
-            axs_dm_log(@"emit: sand no grains, skip");
-            overlay.hidden = YES;
-            return NO;
-        }
-
-        if (axs_dm_activeOverlays == nil) axs_dm_activeOverlays = [NSMutableArray array];
-        [axs_dm_activeOverlays addObject:overlay];
-        axs_dm_overlayWindow = overlay;
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((1.8 * speedScale + 0.15) * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            @try {
-                [root removeFromSuperlayer];
-                overlay.hidden = YES;
-                [axs_dm_activeOverlays removeObject:overlay];
-                if (axs_dm_overlayWindow == overlay) axs_dm_overlayWindow = nil;
-            } @catch (NSException *ignored) {
-            }
-            axs_dm_log(@"emit: sand cleaned grains=%d grid=%dx%d", made, cols, rows);
-        });
-        axs_dm_log(@"emit: burst cells=%d style=%ld(%@) img=%lux%lu frame=%@ scene=%@",
-                   made, (long)style, styleName, (unsigned long)px, (unsigned long)py,
-                   NSStringFromCGRect(sourceFrameInWindow),
-                   overlay.windowScene ? @"set" : @"NIL");
-        return YES;
-    } @catch (NSException *e) {
-        axs_dm_log(@"emit: sand EXCEPTION %@", [e reason]);
-        return NO;
-    }
-}
-
-// Dice the snapshot into a grid of UIImageViews and fly them outward.
-// ROOT CAUSE FIX (beautify.98): on iOS 13+ a UIWindow created with only
-// initWithFrame: has no windowScene and therefore renders NOTHING even when
-// hidden=NO. That is why the .97 burst executed (logs proved it) but was
-// invisible. Using plain UIImageViews instead of CAEmitterLayer also removes
-// all the fragile emitter/texture parameter pitfalls.
+// --- dissolve effect (GPU) --------------------------------------------------
+// beautify.112: ONE GPU path for every style. Snapshot the card, hand it to
+// the unified Metal renderer (style + density select the motion model and the
+// grain grid), report success so the caller can hide the real card. There is
+// intentionally NO CPU fallback anymore: if Metal is unavailable the dissolve
+// simply does not play and the card closes natively.
 static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameInWindow) {
     @try {
         NSInteger style = axs_dm_style();
-        NSString *styleName = axs_dm_styleName(style);
         CGFloat speedScale = axs_dm_speedScale();
-        // ColorSand: prefer the GPU Metal engine (.104). If Metal is unavailable
-        // (old device / compile failure) fall back to the UIView sand field.
-        // Either way the original 8 grid-based styles below are untouched.
-        if (style == AXSDismissStyleColorSand) {
-            UIImage *sandShot = axs_dm_snapshot(sourceView);
-            CGFloat sandDuration = 1.30 * speedScale;
-            BOOL usedMetal = NO;
-            if (sandShot != nil && sandShot.CGImage != nil) {
-                usedMetal = axs_metalSandPlay(sandShot, sourceFrameInWindow, sandDuration);
-            }
-            if (!usedMetal) {
-                axs_dm_log(@"sand: metal unavailable, using UIView fallback");
-                return axs_dm_emitColorSand(sourceView, sourceFrameInWindow, style, styleName);
-            } else {
-                axs_dm_log(@"sand: metal engine active duration=%.2f", sandDuration);
-            }
-            return YES;
-        }
+        CGFloat density = axs_dm_densityScale();
         UIImage *shot = axs_dm_snapshot(sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: snapshot failed");
             return NO;
         }
-        CGImageRef full = shot.CGImage;
-        NSUInteger px = CGImageGetWidth(full);
-        NSUInteger py = CGImageGetHeight(full);
-        if (px == 0 || py == 0) {
-            axs_dm_log(@"emit: empty snapshot %lux%lu", (unsigned long)px, (unsigned long)py);
-            return NO;
+        CGFloat duration = axs_dm_styleBaseDuration(style) * speedScale;
+        BOOL played = axs_metalSandPlay(shot, sourceFrameInWindow, duration,
+                                        (uint32_t)style, density);
+        if (played) {
+            axs_dm_log(@"emit: gpu engine active style=%ld(%@) duration=%.2f density=%.2f",
+                       (long)style, axs_dm_styleName(style), duration, density);
+        } else {
+            axs_dm_log(@"emit: gpu unavailable, native close only");
         }
-
-        UIWindow *host = nil;
-        for (UIScene *scene in [[UIApplication sharedApplication] connectedScenes]) {
-            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
-                if (w.isKeyWindow) { host = w; break; }
-            }
-            if (host != nil) break;
-        }
-        if (host == nil) {
-            axs_dm_log(@"emit: no key window");
-            return NO;
-        }
-
-        UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
-        if ([overlay respondsToSelector:@selector(setWindowScene:)]) {
-            overlay.windowScene = host.windowScene;
-        }
-        overlay.windowLevel = UIWindowLevelAlert + 500;
-        overlay.backgroundColor = [UIColor clearColor];
-        overlay.userInteractionEnabled = NO;
-        overlay.hidden = NO;
-
-        int cols = 10, rows = 10;
-        axs_dm_gridForStyle(style, &cols, &rows);
-        CGFloat pieceW = sourceFrameInWindow.size.width / (CGFloat)cols;
-        CGFloat pieceH = sourceFrameInWindow.size.height / (CGFloat)rows;
-        CGFloat ctrX = CGRectGetMidX(sourceFrameInWindow);
-        CGFloat ctrY = CGRectGetMidY(sourceFrameInWindow);
-
-        NSMutableArray *pieces = [NSMutableArray arrayWithCapacity:cols * rows];
-        for (int r = 0; r < rows; r++) {
-            for (int c = 0; c < cols; c++) {
-                CGRect crop = CGRectMake((CGFloat)c * (CGFloat)px / (CGFloat)cols,
-                                         (CGFloat)r * (CGFloat)py / (CGFloat)rows,
-                                         (CGFloat)px / (CGFloat)cols,
-                                         (CGFloat)py / (CGFloat)rows);
-                CGImageRef piece = CGImageCreateWithImageInRect(full, crop);
-                if (piece == NULL) continue;
-                UIImage *texture = [UIImage imageWithCGImage:piece
-                                                       scale:shot.scale
-                                                 orientation:UIImageOrientationUp];
-                UIImageView *iv = [[UIImageView alloc] initWithImage:texture];
-                iv.frame = CGRectMake(sourceFrameInWindow.origin.x + (CGFloat)c * pieceW,
-                                      sourceFrameInWindow.origin.y + (CGFloat)r * pieceH,
-                                      pieceW, pieceH);
-                iv.tag = r * 1000 + c;
-                [overlay addSubview:iv];
-                [pieces addObject:iv];
-                CGImageRelease(piece);
-            }
-        }
-        int made = (int)pieces.count;
-        if (made == 0) {
-            axs_dm_log(@"emit: no pieces, skip");
-            overlay.hidden = YES;
-            return NO;
-        }
-
-        if (axs_dm_activeOverlays == nil) axs_dm_activeOverlays = [NSMutableArray array];
-        [axs_dm_activeOverlays addObject:overlay];
-        axs_dm_overlayWindow = overlay;
-
-        for (UIImageView *iv in pieces) {
-            NSInteger row = iv.tag / 1000;
-            CGFloat cx = iv.center.x, cy = iv.center.y;
-            CGFloat dx = 0, dy = 0, spin = 0, sc = 1, delay = 0, dur = 0.75;
-            UIViewAnimationOptions curve = UIViewAnimationOptionCurveEaseOut;
-
-            switch (style) {
-                case AXSDismissStyleGravity: {
-                    dx = axs_dm_randRange(-50, 50);
-                    dy = axs_dm_randRange(80, 220);
-                    spin = axs_dm_randRange(-0.9, 0.9);
-                    sc = axs_dm_randRange(0.35, 0.65);
-                    delay = axs_dm_randRange(0, 0.15);
-                    dur = 1.05; curve = UIViewAnimationOptionCurveEaseIn;
-                    break;
-                }
-                case AXSDismissStyleVortex: {
-                    CGFloat vx = ctrX - cx, vy = ctrY - cy;
-                    CGFloat len = hypotf(vx, vy); if (len < 1) len = 1;
-                    vx /= len; vy /= len;
-                    CGFloat pull = len + axs_dm_randRange(20, 80);
-                    CGFloat tang = axs_dm_randRange(90, 160);
-                    dx = vx * pull - vy * tang;
-                    dy = vy * pull + vx * tang;
-                    spin = axs_dm_randRange(-3.0, 3.0);
-                    sc = 0.0;
-                    delay = ((CGFloat)row / (CGFloat)rows) * 0.18;
-                    dur = 0.85;
-                    break;
-                }
-                case AXSDismissStyleShockwave: {
-                    CGFloat vx = cx - ctrX, vy = cy - ctrY;
-                    CGFloat len = hypotf(vx, vy); if (len < 1) len = 1;
-                    vx /= len; vy /= len;
-                    CGFloat dist = len + axs_dm_randRange(160, 280);
-                    dx = vx * dist; dy = vy * dist;
-                    spin = 0; sc = 0.2;
-                    delay = len / 320.0;
-                    dur = 0.7;
-                    break;
-                }
-                case AXSDismissStyleDust: {
-                    dx = axs_dm_randRange(-45, 45);
-                    dy = axs_dm_randRange(-170, -60);
-                    spin = axs_dm_randRange(-0.5, 0.5);
-                    sc = axs_dm_randRange(0.15, 0.4);
-                    delay = axs_dm_randRange(0, 0.3);
-                    dur = 1.25;
-                    break;
-                }
-                case AXSDismissStylePixelDissolve: {
-                    dx = 0; dy = 0; spin = 0; sc = 1;
-                    delay = axs_dm_randRange(0, 0.7);
-                    dur = 0.18;
-                    break;
-                }
-                case AXSDismissStyleBlinds: {
-                    dx = (row % 2 == 0) ? 16 : -16;
-                    dy = 0; spin = 0; sc = 1;
-                    delay = ((CGFloat)row / (CGFloat)(rows > 1 ? rows - 1 : 1)) * 0.6;
-                    dur = 0.25;
-                    break;
-                }
-                case AXSDismissStyleGlass: {
-                    CGFloat ang = axs_dm_randRange(0, 6.2831853);
-                    CGFloat dist = axs_dm_randRange(120, 300);
-                    dx = cosf(ang) * dist;
-                    dy = sinf(ang) * dist + 90;
-                    spin = axs_dm_randRange(-2.6, 2.6);
-                    sc = axs_dm_randRange(0.25, 0.5);
-                    delay = axs_dm_randRange(0, 0.08);
-                    dur = 0.95; curve = UIViewAnimationOptionCurveEaseIn;
-                    break;
-                }
-                default: {
-                    CGFloat ang = axs_dm_randRange(0, 6.2831853);
-                    CGFloat dist = axs_dm_randRange(100, 320);
-                    dx = cosf(ang) * dist;
-                    dy = sinf(ang) * dist - 40;
-                    spin = axs_dm_randRange(-1.0, 1.0);
-                    sc = 0.12;
-                    delay = axs_dm_randRange(0, 0.12);
-                    dur = 0.75;
-                    break;
-                }
-            }
-
-            // beautify.103: apply the global speed multiplier to every style.
-            dur *= speedScale;
-            delay *= speedScale;
-            [UIView animateWithDuration:dur delay:delay
-                                options:curve
-                             animations:^{
-                if (dx != 0 || dy != 0) {
-                    iv.center = CGPointMake(cx + dx, cy + dy);
-                }
-                iv.transform = CGAffineTransformConcat(
-                    CGAffineTransformMakeRotation(spin),
-                    CGAffineTransformMakeScale(sc, sc));
-                iv.alpha = 0.0;
-            } completion:nil];
-        }
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((1.5 * speedScale + 0.15) * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            @try {
-                for (UIView *v in overlay.subviews) [v removeFromSuperview];
-                overlay.hidden = YES;
-                [axs_dm_activeOverlays removeObject:overlay];
-                if (axs_dm_overlayWindow == overlay) axs_dm_overlayWindow = nil;
-            } @catch (NSException *ignored) {
-            }
-            axs_dm_log(@"emit: cleaned overlay cells=%d", made);
-        });
-        axs_dm_log(@"emit: burst cells=%d style=%ld(%@) img=%lux%lu frame=%@ scene=%@",
-                   made, (long)style, styleName, (unsigned long)px, (unsigned long)py,
-                   NSStringFromCGRect(sourceFrameInWindow),
-                   overlay.windowScene ? @"set" : @"NIL");
-        return YES;
+        return played;
     } @catch (NSException *e) {
         axs_dm_log(@"emit: EXCEPTION %@", [e reason]);
         return NO;
     }
 }
+
 
 static void axs_dm_trigger(NSString *tag) {
     unsigned long long seq = ++axs_dm_seq;
@@ -814,7 +410,7 @@ static void axs_dm_installAll(void) {
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.111, dismiss particles)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.112, dismiss particles)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
