@@ -1,6 +1,18 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.125
+版本：2.0.5+beautify.126
+
+beautify.126 变更（屏幕外快照方案 + 面板排序调整）：
+- .125 日志实锤：clamp hit 命中（CASpringAnimation transform）但用户仍看到原生
+  动画——hidden 快照在本机必空 → 每次走 1 帧闪现 → 闪现帧卡片完整可见、弹簧动画
+  恰在闪现期启动（clamp hit 恰出现在 flash 之后）。
+- 根治：屏幕外快照方案——卡片不 hidden，layer transform 平移到屏幕外
+  （CATransaction 禁动画，setHidden:/didMoveToWindow 同步路径 + 轮询每 tick 压制）；
+  原生动画在屏外照跑、completion 照常；截图时单 transaction 内瞬时清零 transform
+  → drawViewHierarchy → 恢复屏外（提交前 presentation 从未显示屏内状态）→
+  屏幕零变化、内容完整。闪现路径降级为兜底。hidden 方案彻底退役。
+- 面板排序（用户要求）：呼出聚合动画/速度/密度三项移到「消散粒子密度」之后，
+  消散组（开关→样式→速度→密度）与呼出组（开关→速度→密度）各自连续。
 
 beautify.125 变更（原生动画面归零 + 呼出独立速度/密度滑条）：
 - .124 日志：钳制命中与否无日志、且 becameVisible 异步 defer 前 1-2 帧卡片可见、
@@ -283,4 +295,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.125_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.126_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
