@@ -114,7 +114,9 @@ jobs:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
           set -euo pipefail
-          sh packaging/package_beautify.sh
+          # brew bin first: Theos also ships an ldid, but patch.sh requires the
+          # Procursus flavor (brew install ldid) for its re-signing step.
+          PATH="$(brew --prefix)/bin:$PATH" sh packaging/package_beautify.sh
 
       - name: Verify final beautify deb
         run: |
