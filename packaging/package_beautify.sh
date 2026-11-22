@@ -111,7 +111,7 @@ check "dylib has no UIView CPU emit path" sh -c "test \$(strings -a '$DYLIB_DIR/
 check "dylib has Metal cleanup log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal sand cleaned grains='"
 # beautify.104: GPU Metal fine-sand engine markers
 check "dylib has Metal shader compile log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal compiled OK pipeline ready'"
-check "dylib has Metal unified start log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal started style='"
+check "dylib has Metal unified start log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal started open='"
 # beautify.113: ARC-open assemble animation markers
 check "dylib has open assemble entry" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'OPEN assemble started'"
 check "dylib has open switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyOpenAnimEnabled'"
