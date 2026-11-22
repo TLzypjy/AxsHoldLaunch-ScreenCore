@@ -28,7 +28,7 @@ void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat dura
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
 BOOL axs_metalSetOverlayHidden(void *renderer, BOOL hidden);
 // private UIKit: captures the COMPOSITED screen (includes hosted content)
-extern UIImage *UICreateScreenImage(void);
+extern "C" UIImage *UICreateScreenImage(void);
 
 // ---------------------------------------------------------------------------
 // beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
