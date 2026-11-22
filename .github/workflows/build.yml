@@ -57,7 +57,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install dpkg xz file coreutils ldid-procursus
+          brew install dpkg xz file coreutils findutils gnu-sed ldid-procursus
           # patch.sh (roothide conversion) calls plain `realpath`; coreutils ships grealpath
           ln -sf "$(brew --prefix coreutils)/bin/grealpath" "$(brew --prefix)/bin/realpath"
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
