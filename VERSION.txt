@@ -1,6 +1,17 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.115
+版本：2.0.5+beautify.116
+
+beautify.116 变更（呼出聚合：手指起点 + 循环修复）：
+- 问题 1（循环）：聚合完成后我们恢复卡片 hidden=NO，触发自己的 open 检测
+  （距消失 1.05s > 0.4s 门限）→ 无限循环重播。修复：axs_open_selfRestore
+  标志在恢复前置位，becameVisible 检测到即跳过。
+- 问题 2（效果方向）：用户要的是「粒子从手指抬起位置飞到浮窗位置组成大浮窗」。
+  实现：hook UIWindow sendEvent:（UIWindow 自身声明、签名已知，类级 hook 安全）
+  记录最后一次 UITouchPhaseEnded 的手指位置；聚合时以该点为粒子源（2 秒内有效，
+  否则退化为卡片中心）。shader：粒子起点 = sourcePoint ± 8~44pt 随机圆盘，
+  mix(start,end,motionO) 飞向卡片格子位，飞行中从 0.18~0.45 倍长大、旋转收敛、
+  前 22% 快速渐显。uniform 增加 float2 sourcePoint。
 
 beautify.115 变更（修复 .114 shader 编译错误）：
 - .114 删重复声明后仍编译失败：openMode 分支内 "float inv = 1.0-motion;" 笔误，
@@ -184,4 +195,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.115_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.116_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
