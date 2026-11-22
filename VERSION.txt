@@ -1,6 +1,15 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.116
+版本：2.0.5+beautify.117
+
+beautify.117 变更（修复手指起点坐标错位）：
+- .116 日志证实循环已修复、手指坐标已捕获（OPEN source point 三条记录均为 ARC 真实
+  点击位置），但视频显示粒子满屏乱飞而非从手指点起飞。
+- 根因：MSL 的 float2 成员要求 8 字节对齐——openMode 之后声明 float2 sourcePoint
+  会被 MSL 自动 pad 到 offset 56，而 C 结构体里 sourcePoint[2] 在 offset 52，
+  两侧错位 4 字节 → shader 读到的手指坐标是 (y值, 越界垃圾) → 粒子源变成全屏随机点。
+- 修复：MSL 改为两个 float 成员（sourceX/sourceY，4 字节对齐无 padding），
+  与 C 结构体逐字段一致。
 
 beautify.116 变更（呼出聚合：手指起点 + 循环修复）：
 - 问题 1（循环）：聚合完成后我们恢复卡片 hidden=NO，触发自己的 open 检测
@@ -195,4 +204,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.116_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.117_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

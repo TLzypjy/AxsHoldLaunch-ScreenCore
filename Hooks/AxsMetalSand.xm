@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.116): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.117): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -76,7 +76,8 @@ struct DustUniforms {\n\
     float seed;\n\
     uint style;\n\
     uint openMode;\n\
-    float2 sourcePoint;\n\
+    float sourceX;\n\
+    float sourceY;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -108,7 +109,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float motionO = pow(progressO,1.12);\n\
         float angS = r*6.2831853;\n\
         float radS = 8.0 + 36.0*r4;\n\
-        float2 startP = u.sourcePoint + float2(cos(angS),sin(angS))*radS;\n\
+        float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
         float2 endP = u.origin + unit*u.cardSize;\n\
         float shrinkO = mix(mix(0.18,0.45,r3), 1.0, motionO);\n\
         float angleO = (r3-0.5)*4.8*(1.0-motionO);\n\
@@ -667,7 +668,7 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGPointMake(0, 0));
 }
 
-// beautify.116 open-assemble: grains fly FROM sourcePoint TO the card
+// beautify.117 open-assemble: grains fly FROM sourcePoint TO the card
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
