@@ -729,13 +729,6 @@ void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat dura
 
 // .133: hide/show the particle overlay while the composited screen is
 // captured (so the screen crop contains the card, not the particles)
-BOOL axs_metalSetOverlayHidden(void *renderer, BOOL hidden) {
-    if (renderer == NULL) return NO;
-    AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
-    r.overlay.hidden = hidden;
-    return YES;
-}
-
 // .131: swap the particle texture mid-flight (the caller captured the real
 // card while it was briefly visible under the dense cloud)
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
