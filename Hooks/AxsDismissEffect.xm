@@ -262,20 +262,21 @@ static NSMutableArray *axs_dm_activeOverlays = nil;
 // matching DustDuration/DustDistance defaults of the reference plugin.
 // Runs on the same windowScene-bound overlay as all styles (.98 visibility
 // fix). The 8 original styles are untouched.
-static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
+// .111: returns YES when the sand effect actually started playing.
+static BOOL axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
                                  NSInteger style, NSString *styleName) {
     @try {
         UIImage *shot = axs_dm_snapshot(sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: sand snapshot failed");
-            return;
+            return NO;
         }
         CGImageRef full = shot.CGImage;
         NSUInteger px = CGImageGetWidth(full);
         NSUInteger py = CGImageGetHeight(full);
         if (px == 0 || py == 0) {
             axs_dm_log(@"emit: sand empty image %lux%lu", (unsigned long)px, (unsigned long)py);
-            return;
+            return NO;
         }
 
         UIWindow *host = nil;
@@ -288,7 +289,7 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
         }
         if (host == nil) {
             axs_dm_log(@"emit: sand no key window");
-            return;
+            return NO;
         }
 
         UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
@@ -415,7 +416,7 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
         if (made == 0) {
             axs_dm_log(@"emit: sand no grains, skip");
             overlay.hidden = YES;
-            return;
+            return NO;
         }
 
         if (axs_dm_activeOverlays == nil) axs_dm_activeOverlays = [NSMutableArray array];
@@ -437,8 +438,10 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
                    made, (long)style, styleName, (unsigned long)px, (unsigned long)py,
                    NSStringFromCGRect(sourceFrameInWindow),
                    overlay.windowScene ? @"set" : @"NIL");
+        return YES;
     } @catch (NSException *e) {
         axs_dm_log(@"emit: sand EXCEPTION %@", [e reason]);
+        return NO;
     }
 }
 
@@ -448,7 +451,7 @@ static void axs_dm_emitColorSand(UIView *sourceView, CGRect sourceFrameInWindow,
 // hidden=NO. That is why the .97 burst executed (logs proved it) but was
 // invisible. Using plain UIImageViews instead of CAEmitterLayer also removes
 // all the fragile emitter/texture parameter pitfalls.
-static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameInWindow) {
+static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameInWindow) {
     @try {
         NSInteger style = axs_dm_style();
         NSString *styleName = axs_dm_styleName(style);
@@ -465,23 +468,23 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
             }
             if (!usedMetal) {
                 axs_dm_log(@"sand: metal unavailable, using UIView fallback");
-                axs_dm_emitColorSand(sourceView, sourceFrameInWindow, style, styleName);
+                return axs_dm_emitColorSand(sourceView, sourceFrameInWindow, style, styleName);
             } else {
                 axs_dm_log(@"sand: metal engine active duration=%.2f", sandDuration);
             }
-            return;
+            return YES;
         }
         UIImage *shot = axs_dm_snapshot(sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: snapshot failed");
-            return;
+            return NO;
         }
         CGImageRef full = shot.CGImage;
         NSUInteger px = CGImageGetWidth(full);
         NSUInteger py = CGImageGetHeight(full);
         if (px == 0 || py == 0) {
             axs_dm_log(@"emit: empty snapshot %lux%lu", (unsigned long)px, (unsigned long)py);
-            return;
+            return NO;
         }
 
         UIWindow *host = nil;
@@ -494,7 +497,7 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         }
         if (host == nil) {
             axs_dm_log(@"emit: no key window");
-            return;
+            return NO;
         }
 
         UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
@@ -664,8 +667,10 @@ static void axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
                    made, (long)style, styleName, (unsigned long)px, (unsigned long)py,
                    NSStringFromCGRect(sourceFrameInWindow),
                    overlay.windowScene ? @"set" : @"NIL");
+        return YES;
     } @catch (NSException *e) {
         axs_dm_log(@"emit: EXCEPTION %@", [e reason]);
+        return NO;
     }
 }
 
@@ -684,7 +689,23 @@ static void axs_dm_trigger(NSString *tag) {
     CGRect frame = [container convertRect:container.bounds toView:nil];
     axs_dm_log(@"#%llu %@ container=%@ frameInWindow=%@",
                seq, tag, NSStringFromClass(container.class), NSStringFromCGRect(frame));
-    axs_dm_emitParticlesFromView(container, frame);
+    BOOL played = axs_dm_emitParticlesFromView(container, frame);
+    if (played) {
+        // .111: hide the real card so ScreenCore's own close animation (card
+        // sliding/shrinking toward the bottom-right corner) does not double-
+        // expose behind the dissolving snapshot. The container is being closed
+        // anyway; hiding it does not interrupt the native animation or its
+        // completion handlers -- it just keeps them off-screen.
+        container.hidden = YES;
+        axs_dm_log(@"#%llu %@ card hidden behind dissolve", seq, tag);
+        // safety net: restore visibility once the dissolve is fully cleaned up,
+        // in case ScreenCore reuses this container view for a future session.
+        CGFloat sp = axs_dm_speedScale();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((1.9 * sp + 0.3) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            @try { container.hidden = NO; } @catch (NSException *ignored) { }
+        });
+    }
 }
 
 // --- replacements: original ALWAYS invoked, behaviour unchanged ------------

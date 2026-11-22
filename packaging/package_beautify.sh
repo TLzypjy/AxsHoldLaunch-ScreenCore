@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.110"
+VERSION="2.0.5+beautify.111"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -99,7 +99,7 @@ check "dylib has no sc_sessionDidBeginHosting selector" sh -c "test \$(strings -
 # beautify.97+: the dismiss-particle module hooks sc_closeSession: via
 # NSSelectorFromString (original behaviour untouched), so the old reverse
 # "no sc_closeSession selector" assertion is intentionally replaced.
-check "dylib has dismiss module load log (beautify.110)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
+check "dylib has dismiss module load log (beautify.111)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
 check "dylib has dismiss log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-dismiss-effect.log'"
 check "dylib has dismiss switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissAnimEnabled'"
 check "dylib has dismiss emit burst log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'emit: burst cells='"
@@ -109,7 +109,7 @@ check "dylib has ColorSand grains log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaun
 # beautify.104: GPU Metal fine-sand engine markers
 check "dylib has Metal shader compile log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal compiled OK pipeline ready'"
 check "dylib has Metal sand start log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal sand started grains='"
-# beautify.110: reference-plugin selector that actually exists on the device
+# beautify.111: reference-plugin selector that actually exists on the device
 check "dylib has Metal commandBuffer selector" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'commandBuffer'"
 # beautify.95: sc_* selectors are now probed for EXISTENCE only (NSSelectorFromString
 # + class_getInstanceMethod in axs_ring_probeNativeChainOnce), never hooked. Assert the

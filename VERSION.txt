@@ -1,6 +1,17 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.110
+版本：2.0.5+beautify.111
+
+beautify.111 变更（消散双重画面修复 + 速度滑块连续步进）：
+- 问题 1：消散时除粒子外，原卡片本体还在跑 ScreenCore 自己的关闭动画（向右下角收走），
+  形成双重画面（视频帧 t=6.00 证实）。
+  修正：axs_dm_emitColorSand / axs_dm_emitParticlesFromView 改为返回「特效是否真正启动」，
+  trigger 在特效成功启动后立刻隐藏原卡片（container.hidden=YES），原生关闭动画继续在
+  隐藏态跑完不受影响；消散清理完成后（1.9*speed+0.3s）恢复 hidden=NO 作保险，
+  防止容器被复用时残留隐藏态。
+- 问题 2：消散速度滑块只能 0.3/1.3/2.3/3.0 跳变——SCLabeledSliderCell 支持 step 键
+  （原生倾斜角度滑块即 step=0.5），我们漏配了，默认步进 1.0。
+  修正：splitBeautifyDismissSpeed 增加 step=0.1。
 
 beautify.110 变更（消散卡片上下颠倒修复：去掉纹理上传的双重翻转）：
 - 现象：.109 起 Metal 引擎真正生效，但消散时整张浮窗快照上下镜像（计算器 "0 . =" 行跑顶部、
@@ -121,4 +132,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.110_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.111_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
