@@ -1,6 +1,6 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.105
+版本：2.0.5+beautify.106
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
@@ -21,6 +21,13 @@ beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关�
   7 玻璃碎裂（5x6 大块、随机飞溅+重力+强旋转 EaseIn）
 - 日志 burst 行新增 style=N(name) 字段，便于确认选中的样式生效。
 - CI：build.yml / package_beautify.sh 版本升 .99，新增样式键与样式枚举的源码/dylib 断言。
+
+beautify.106 变更（根治消散卡：Metal 命令队列修复）：
+  - 根因：.104 把 newCommandBuffer 错当 MTLDevice 方法，用 objc_msgSend 强绕过编译错误，
+    真机运行时抛 unrecognized selector sent to AGXG15Device，Metal 每帧崩溃 → 一直回退 6000 层 UIView → 卡
+  - 修正：新增 MTLCommandQueue 单例，从 queue 取 command buffer（Metal 正确 API）
+  - 移除错误的 objc_msgSend 调用与 objc/message.h 依赖
+  - 效果：Metal 真正生效，14000 粒 GPU 一次 draw，主线程零负担，卡顿消失
 
 beautify.105 变更（修复 Metal 彩砂无效果）：
   - 根因：iOS 纹理默认 storageMode=Private，replaceRegion 上传静默失败导致纹理全透明
@@ -65,4 +72,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.105_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.106_iphoneos-arm64.deb（CI 交付）

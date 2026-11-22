@@ -15,7 +15,6 @@
 #import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
 #import <objc/runtime.h>
-#import <objc/message.h>
 
 // ---- logging (shares the dismiss log so one file tells the whole story) ----
 static NSString * const AXS_MSD_LOG_PATH = @"/var/mobile/Documents/sc-dismiss-effect.log";
@@ -131,8 +130,15 @@ typedef struct {
     float notificationSweep;
 } AXSMetalDustUniforms;
 
-// ---- cached device + pipeline (compiled once, reused for every dismissal) --
+// ---- cached device + queue + pipeline (compiled once, reused) --------------
 static id<MTLDevice> sMsdDevice = nil;
+// .106 ROOT CAUSE: newCommandBuffer is a MTLCommandQueue method, NOT an
+// MTLDevice method. .104 wrapped [device newCommandBuffer] in objc_msgSend to
+// dodge a compile error, but it crashed at runtime with "unrecognized selector
+// sent to AGXG15Device" -> Metal never drew -> always fell back to the slow
+// 6000-layer UIView path (the persisting stutter). Create a command queue once
+// and get command buffers from it, the correct Metal API usage.
+static id<MTLCommandQueue> sMsdQueue = nil;
 static id<MTLRenderPipelineState> sMsdPipeline = nil;
 static BOOL sMsdTried = NO;
 
@@ -143,6 +149,12 @@ static BOOL axs_msd_ensurePipeline(void) {
         sMsdDevice = MTLCreateSystemDefaultDevice();
         if (sMsdDevice == nil) {
             axs_msd_log(@"metal device unavailable");
+            return NO;
+        }
+        // .106: command buffers come from a queue, never from the device.
+        sMsdQueue = [sMsdDevice newCommandQueue];
+        if (sMsdQueue == nil) {
+            axs_msd_log(@"metal command queue unavailable");
             return NO;
         }
         NSError *err = nil;
@@ -299,10 +311,10 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
     rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
 
-    // objc_msgSend avoids a clang protocol-method lookup quirk on this SDK for
-    // newCommandBuffer; runtime behaviour is identical to the bracket form.
-    id<MTLCommandBuffer> cb = ((id<MTLCommandBuffer> (*)(id, SEL))objc_msgSend)(
-        sMsdDevice, @selector(newCommandBuffer));
+    // .106 FIX: newCommandBuffer belongs to MTLCommandQueue. Calling it on
+    // MTLDevice crashed every frame ("unrecognized selector sent to
+    // AGXG15Device") so Metal never rendered and always fell back to UIView.
+    id<MTLCommandBuffer> cb = [sMsdQueue newCommandBuffer];
     if (cb == nil) return NO;
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
     if (enc == nil) return NO;
