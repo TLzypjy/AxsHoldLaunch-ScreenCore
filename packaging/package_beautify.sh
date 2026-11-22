@@ -186,7 +186,7 @@ mkdir -p "$RH_PKG/DEBIAN"
 # "convert .deb" dialog; arm64e installs directly. Depends are untouched --
 # mobilesubstrate/preferenceloader are provided by the roothide bootstrap.
 cp "$PKG/DEBIAN/control" "$RH_PKG/DEBIAN/control"
-sed -i 's/^Architecture: iphoneos-arm64$/Architecture: iphoneos-arm64e/' "$RH_PKG/DEBIAN/control"
+sed 's/^Architecture: iphoneos-arm64$/Architecture: iphoneos-arm64e/' "$RH_PKG/DEBIAN/control" > "$RH_PKG/DEBIAN/control.tmp" && mv "$RH_PKG/DEBIAN/control.tmp" "$RH_PKG/DEBIAN/control"
 grep -q '^Architecture: iphoneos-arm64e$' "$RH_PKG/DEBIAN/control"
 # lift everything under var/jb/ up to the roothide package root
 ( cd "$PKG/var/jb" && tar cf - . ) | ( cd "$RH_PKG" && tar xf - )
