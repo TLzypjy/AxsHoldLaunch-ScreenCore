@@ -94,7 +94,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     // beautify.113 OPEN MODE: the dismiss-sand timeline played backwards.\n\
-    // Grains start scattered up-right at 24%-56% scale, invisible, then\n\
+    // Grains start scattered up-right at 24 to 56 percent scale, invisible, then\n\
     // converge onto the card frame and fade IN; at time=1 the full card is\n\
     // assembled and the caller swaps in the real view. Same BL->TR front so\n\
     // the assemble sweep mirrors the dissolve sweep.\n\
