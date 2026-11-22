@@ -307,7 +307,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.131: ARC-open assemble animation ------------------------------
+// ---- beautify.132: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -431,6 +431,48 @@ static UIImage *axs_open_getWhiteTexture(void) {
     return axs_open_whiteTexture;
 }
 
+// .132: afterScreenUpdates:YES variant -- forces a fresh render-server
+// commit; used as the fallback when the NO path returns a blank frame
+static UIImage *axs_dm_snapshotAfterUpdates(UIView *view) {
+    UIImage *img = nil;
+    @try {
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        UIGraphicsImageRenderer *renderer =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:view.bounds format:fmt];
+        img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [view drawViewHierarchyInRect:view.bounds afterScreenUpdates:YES];
+        }];
+    } @catch (NSException *ignored) {
+        img = nil;
+    }
+    return img;
+}
+
+// blank probe: samples the alpha channel on a sparse grid
+static BOOL axs_dm_imageIsBlank(UIImage *img) {
+    if (img == nil || img.CGImage == NULL) return YES;
+    CGImageRef cg = img.CGImage;
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    if (w == 0 || h == 0) return YES;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    size_t bpr = w * 4;
+    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
+    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
+                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(cs);
+    const uint8_t *px = (const uint8_t *)[data bytes];
+    size_t step = ((w * h) / 256) + 1;
+    BOOL anyOpaque = NO;
+    for (size_t i = 0; i < w * h; i += step) {
+        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
+    }
+    return !anyOpaque;
+}
+
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
     @try {
@@ -487,18 +529,28 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             if (c == nil) return;
             @try {
                 if (c.window == nil) return;
-                // briefly show the card under the dense particle cloud so the
-                // render server produces one real frame of it
+                // .132: show the card for 0.12s (~7 frames) under the dense
+                // particle cloud so the render server actually renders it --
+                // 0.06s was one frame and the snapshot came back blank (the
+                // swapped texture was transparent, grains vanished)
                 c.hidden = NO;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)),
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     UIView *c2 = weakCard2;
                     if (c2 == nil) return;
                     @try {
-                        UIImage *snap = axs_dm_snapshot(c2);   // visible -> real content
+                        UIImage *snap = axs_dm_snapshot(c2);            // NO path
+                        if (axs_dm_imageIsBlank(snap)) {
+                            snap = axs_dm_snapshotAfterUpdates(c2);     // YES fallback
+                        }
                         c2.hidden = YES;
-                        BOOL swapped = axs_metalReplaceTexture(renderer, snap);
-                        axs_dm_log(@"OPEN texture swap %@", swapped ? @"OK" : @"FAILED");
+                        BOOL swapped = NO;
+                        if (!axs_dm_imageIsBlank(snap)) {
+                            swapped = axs_metalReplaceTexture(renderer, snap);
+                        } else {
+                            axs_dm_log(@"OPEN swap snapshot blank, keeping white dots");
+                        }
+                        axs_dm_log(@"OPEN texture swap %@", swapped ? @"OK" : @"SKIPPED/FAILED");
                         // final reveal while the content-bearing grains settle
                         __weak UIView *weakCard3 = c2;
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
@@ -914,14 +966,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.131: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.132: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.131, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.132, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

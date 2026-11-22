@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.131): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.132): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -726,7 +726,7 @@ BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
     return [r replaceTextureWithImage:img];
 }
 
-// beautify.131 open-assemble: grains fly FROM sourcePoint TO the card
+// beautify.132 open-assemble: grains fly FROM sourcePoint TO the card
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,

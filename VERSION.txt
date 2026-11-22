@@ -1,6 +1,14 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.131
+版本：2.0.5+beautify.132
+
+beautify.132 变更（修复换纹理粒子消失）：
+- .131 视频实锤：换纹理后粒子直接消失（白点云聚成卡片形状长方形 → 消失 →
+  浮窗闪现）。根因：卡片只可见 0.06s（1 帧），render server 尚未渲染它的新帧，
+  afterScreenUpdates:NO 快照拿到的是"卡片仍隐藏"的旧帧 = 全透明 → 换进粒子的
+  纹理是空的 → 粒子变隐形。
+- 修复：可见帧 0.06 → 0.12s（约 7 帧，渲染服务器有充足时间出图）；截图阶梯
+  先 NO 后 YES；换纹理前加空白检测（空则保留白点云不换，日志 SKIPPED）。
 
 beautify.131 变更（浮窗由粒子组成：中途换纹理）：
 - .130 反馈：afterScreenUpdates:YES 也输出空白且其强制渲染服务器刷新造成整屏
@@ -346,4 +354,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.131_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.132_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
