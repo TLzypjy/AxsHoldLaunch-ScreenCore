@@ -525,7 +525,7 @@ jobs:
           grep -Fq "axs_metalSandPlay" Hooks/AxsDismissEffect.xm || { echo "Metal hookup in dismiss missing"; exit 1; }
           grep -Fq "Metal QuartzCore" Makefile || { echo "Metal framework not linked"; exit 1; }
           grep -Fq "metal compiled OK pipeline ready" "$EXTRACT/dylib34.strings" || { echo "Metal compile log not compiled into dylib"; exit 1; }
-          grep -Fq "metal started style=" "$EXTRACT/dylib34.strings" || { echo "Metal start log not compiled into dylib"; exit 1; }
+          grep -Fq "metal started open=" "$EXTRACT/dylib34.strings" || { echo "Metal start log not compiled into dylib"; exit 1; }
           # .105 visibility fix assertions
           grep -Fq "MTLStorageModeShared" Hooks/AxsMetalSand.xm || { echo "shared texture storage fix missing"; exit 1; }
           grep -Fq "drawableSize = CGSizeMake" Hooks/AxsMetalSand.xm || { echo "drawable size fix missing"; exit 1; }
