@@ -182,7 +182,8 @@ echo "=== packaged: $DEB ==="
 # A hand-flattened package missing these broke tweak init on device (Arc menu dead).
 # Running the same script the on-device Patcher runs guarantees identical output.
 RH_DEB="$OUT/com.susudear.screencore_${VERSION}_iphoneos-arm64e-roothide.deb"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# NOTE: the script cd'd into its own dir at the top, so cwd == packaging/
+SCRIPT_DIR="$(pwd)"
 bash "$SCRIPT_DIR/roothide/patch.sh" "$DEB" "$RH_DEB" AutoPatches
 test -f "$RH_DEB" || { echo "roothide conversion produced no deb"; exit 1; }
 echo "=== roothide dpkg-deb -I ==="
