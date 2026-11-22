@@ -410,50 +410,6 @@ static CGFloat axs_open_density(void) {
     return density;
 }
 
-// .130: afterScreenUpdates:YES snapshot -- commits a fresh render-server
-// round trip; unlike the afterScreenUpdates:NO path (blank on hidden views on
-// this device), this one has never been tried and can capture hidden views.
-static UIImage *axs_dm_snapshotAfterUpdates(UIView *view) {
-    UIImage *img = nil;
-    @try {
-        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.opaque = NO;
-        UIGraphicsImageRenderer *renderer =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:view.bounds format:fmt];
-        img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [view drawViewHierarchyInRect:view.bounds afterScreenUpdates:YES];
-        }];
-    } @catch (NSException *ignored) {
-        img = nil;
-    }
-    return img;
-}
-
-// blank probe: samples the alpha channel on a sparse grid (BGRA little-endian
-// premultiplied-first: alpha in byte 3)
-static BOOL axs_dm_imageIsBlank(UIImage *img) {
-    if (img == nil || img.CGImage == NULL) return YES;
-    CGImageRef cg = img.CGImage;
-    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
-    if (w == 0 || h == 0) return YES;
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    size_t bpr = w * 4;
-    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
-    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
-                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
-    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
-    CGContextRelease(ctx);
-    CGColorSpaceRelease(cs);
-    const uint8_t *px = (const uint8_t *)[data bytes];
-    size_t step = ((w * h) / 256) + 1;
-    BOOL anyOpaque = NO;
-    for (size_t i = 0; i < w * h; i += step) {
-        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
-    }
-    return !anyOpaque;
-}
-
 // .128: NO-TEXTURE assemble -- the grains are plain glowing dots (1x1 white
 // texture; every sample is white). The old snapshot-based texture was a dead
 // end on this device (hidden / renderInContext / offscreen snapshots all came
@@ -461,34 +417,6 @@ static BOOL axs_dm_imageIsBlank(UIImage *img) {
 // native animation. Particles converge into a bright cloud in the card shape,
 // then the real card appears beneath the cloud as it fades.
 static UIImage *axs_open_whiteTexture = nil;
-// .129: walk the card tree for the biggest UIImageView.image (the app
-// snapshot ScreenCore shows on open). Pure property reads -- no rendering.
-static UIImage *axs_open_findAppSnapshot(UIView *root) {
-    UIImage *best = nil;
-    CGFloat bestW = 0.0;
-    @try {
-        CGFloat targetW = root.bounds.size.width;
-        NSMutableArray *stack = [NSMutableArray arrayWithObject:root];
-        int guard = 0;
-        while (stack.count > 0 && guard < 200) {
-            guard++;
-            UIView *v = [stack lastObject];
-            [stack removeLastObject];
-            if (v == nil) continue;
-            if ([v isKindOfClass:[UIImageView class]]) {
-                UIImage *img = [(UIImageView *)v image];
-                if (img != nil && img.size.width > bestW && img.size.width >= targetW * 0.5) {
-                    best = img; bestW = img.size.width;
-                }
-            }
-            if (guard < 200) [stack addObjectsFromArray:v.subviews];
-        }
-    } @catch (NSException *ignored) {
-        return best;
-    }
-    return best;
-}
-
 static UIImage *axs_open_getWhiteTexture(void) {
     if (axs_open_whiteTexture == nil) {
         UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
