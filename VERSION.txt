@@ -1,7 +1,19 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.108
+版本：2.0.5+beautify.109
 
+beautify.109 变更（隐根包功能修复：改用官方 RootHide Patcher 转换）：
+- 现象：.108 手工隐根包安装后 ScreenCore 自身功能失效（右下角 Arc 菜单呼不出）。
+- 对照官方 roothide/RootHidePatcher patch.sh（b3e04a4aaa98，GPL-3）发现手工重排缺三件事：
+  a) Mach-O rpath 重写 /var/jb/X → @loader_path/.jbroot/X；b) ldid 重新签名；
+  c) AutoPatches 模式（即机内转换 App 的「Rootless 兼容层」开关）写入
+     <mach-o>.roothidepatch 标记 + Pre-Depends: rootless-compat，
+     由 bootstrap 的 Dynamic Patch Framework 在加载期做路径重映射。
+- 修正：官方 patch.sh 入库（packaging/roothide/patch.sh + roothide.entitlements，
+  仅 -Zzstd→-Zxz 以适配 CI 的 brew dpkg），打包脚本第 8 步直接调用它 AutoPatches 模式
+  产出隐根包，与用户机内转换成功的包完全同源；CI 依赖补 file/coreutils/realpath shim，
+  验证改为：无 /var/jb rpath、含 .jbroot rpath、有代码签名、.roothidepatch 存在、
+  Pre-Depends 含 rootless-compat。
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
      packaging/package_beautify.sh、基线 deb（packaging/base/）、GitHub Actions 工作流。
@@ -99,4 +111,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.108_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.109_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
