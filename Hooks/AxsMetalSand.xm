@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.130): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.131): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -339,6 +339,8 @@ static BOOL axs_msd_ensurePipeline(void) {
 
 // ---- retain active renderers so ARC does not collect them mid-animation ----
 static NSMutableArray *sMsdActiveRenderers = nil;
+// .131: the currently-running open-assemble renderer (for mid-flight texture swap)
+static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
 
 // ---- renderer: owns texture, overlay, display link; one instance per burst -
 @interface AXSMetalSandRenderer : NSObject
@@ -513,8 +515,8 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     @try {
         CFTimeInterval elapsed = CACurrentMediaTime() - self.start;
         CGFloat t = self.duration > 0 ? elapsed / self.duration : 1.0;
-        BOOL done = (t >= 1.0);
-        _u.time = done ? 1.0f : (float)t;   // direct ivar: ARC forbids struct-member via property
+        BOOL done = (t >= (self.u.openMode == 1u ? 1.45 : 1.0));
+        _u.time = done ? 1.0f : (float)MIN(t, 1.0);   // direct ivar: ARC forbids struct-member via property
         [self renderOnce];
         if (done) {
             if (self.u.openMode == 1u && !self.fadingOut) {
@@ -532,6 +534,25 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     } @catch (NSException *e) {
         axs_msd_log(@"metal tick EXCEPTION %@", [e reason]);
         [self cleanup];
+    }
+}
+
+// .131: swap the particle texture mid-flight -- the assemble starts with the
+// glowing-dot texture, then the real card snapshot (captured while the card
+// was briefly visible under the dense cloud) replaces it, so the converged
+// grains literally become fragments of the floating window.
+- (BOOL)replaceTextureWithImage:(UIImage *)img {
+    @try {
+        if (img == nil || img.CGImage == NULL) return NO;
+        id<MTLTexture> newTex = axs_msd_makeTexture(img.CGImage, self.device);
+        if (newTex == nil) return NO;
+        self.texture = newTex;
+        axs_msd_log(@"metal texture replaced (%lu x %lu)",
+                    (unsigned long)CGImageGetWidth(img.CGImage),
+                    (unsigned long)CGImageGetHeight(img.CGImage));
+        return YES;
+    } @catch (NSException *ignored) {
+        return NO;
     }
 }
 
@@ -648,6 +669,7 @@ static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat dur
         AXSMetalSandRenderer *renderer = [AXSMetalSandRenderer new];
         if (sMsdActiveRenderers == nil) sMsdActiveRenderers = [NSMutableArray array];
         [sMsdActiveRenderers addObject:renderer];
+        if (openMode == 1u) sMsdActiveOpenRenderer = renderer;
 
         float seed = (float)(arc4random_uniform(100000)) / 1000.0f;
         // .105: startWithTexture does a synchronous first-frame probe and
@@ -684,7 +706,24 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGPointMake(0, 0));
 }
 
-// beautify.130 open-assemble: grains fly FROM sourcePoint TO the card
+// .131: open assemble that returns the live renderer handle for the mid-flight
+// texture swap (NULL when Metal did not take over)
+void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                               CGFloat density, CGPoint sourcePoint) {
+    BOOL ok = axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
+                                  sourcePoint);
+    return ok ? (__bridge void *)sMsdActiveOpenRenderer : NULL;
+}
+
+// .131: swap the particle texture mid-flight (the caller captured the real
+// card while it was briefly visible under the dense cloud)
+BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
+    if (renderer == NULL || img == nil) return NO;
+    AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
+    return [r replaceTextureWithImage:img];
+}
+
+// beautify.131 open-assemble: grains fly FROM sourcePoint TO the card
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
