@@ -434,24 +434,6 @@ static UIImage *axs_open_getWhiteTexture(void) {
     return axs_open_whiteTexture;
 }
 
-// .132: afterScreenUpdates:YES variant -- forces a fresh render-server
-// commit; used as the fallback when the NO path returns a blank frame
-static UIImage *axs_dm_snapshotAfterUpdates(UIView *view) {
-    UIImage *img = nil;
-    @try {
-        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.opaque = NO;
-        UIGraphicsImageRenderer *renderer =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:view.bounds format:fmt];
-        img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [view drawViewHierarchyInRect:view.bounds afterScreenUpdates:YES];
-        }];
-    } @catch (NSException *ignored) {
-        img = nil;
-    }
-    return img;
-}
-
 // blank probe: samples the alpha channel on a sparse grid
 static BOOL axs_dm_imageIsBlank(UIImage *img) {
     if (img == nil || img.CGImage == NULL) return YES;
