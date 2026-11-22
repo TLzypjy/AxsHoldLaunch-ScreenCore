@@ -1,6 +1,16 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.121
+版本：2.0.5+beautify.122
+
+beautify.122 变更（按用户思路改为直接修改原生动画）：
+- 用户拍板：不做"拦截+盖层"，直接改原生动画本身。
+- 实现：hook CALayer addAnimation:forKey:（CALayer 自身声明、类级 hook 安全）——
+  呼出窗口期（3s）内，凡加到卡片 layer 树上的 CAAnimation 一律 duration=0.01s、
+  beginTime=now 再放行：原生动画照常执行、completion 照常触发（ScreenCore 状态机
+  无感知），只是瞬间完成、不可见。
+- 呼出即隐藏卡片（第 0 帧起不可见）；轮询布局就绪（hidden 下 layout 照常）；
+  先试隐藏态 drawViewHierarchy 截图 + alpha 空白探针；若空白（设备不支持）自动
+  回退 1 帧闪现截图再隐藏；聚合完成后恢复。上轮的 renderInContext 路径彻底移除。
 
 beautify.121 变更（回退立即隐藏，修复浮窗呼不出来）：
 - .120 实测两个失败：①renderInContext 对 hidden layer 输出全透明（blank 探针正确
@@ -241,4 +251,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.121_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.122_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
