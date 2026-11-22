@@ -1,6 +1,15 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.132
+版本：2.0.5+beautify.133
+
+beautify.133 变更（合成屏截图：拿到托管内容的真实像素）：
+- .132 日志：NO/YES 两条截图路径都空白——浮窗内容是跨进程托管渲染（App 内容
+  由其他进程渲染合成），本进程任何视图截图 API 都拿不到它的像素。渲染路线
+  对这种内容全部失效。
+- 最终方案：UICreateScreenImage()（UIKit 私有函数，越狱社区广泛使用）截取
+  合成后的整屏（包含托管内容）——粒子层隐藏 0.12s、卡片在真实位置可见 →
+  截合成屏 → 裁出卡片区域（= 浮窗的完整样子）→ 恢复粒子层 → 裁图换进粒子。
+  粒子直接变成浮窗内容碎片。
 
 beautify.132 变更（修复换纹理粒子消失）：
 - .131 视频实锤：换纹理后粒子直接消失（白点云聚成卡片形状长方形 → 消失 →
@@ -354,4 +363,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.132_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.133_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

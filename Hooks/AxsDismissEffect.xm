@@ -26,6 +26,9 @@ BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration
 void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGFloat density, CGPoint sourcePoint);
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
+BOOL axs_metalSetOverlayHidden(void *renderer, BOOL hidden);
+// private UIKit: captures the COMPOSITED screen (includes hosted content)
+extern UIImage *UICreateScreenImage(void);
 
 // ---------------------------------------------------------------------------
 // beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
@@ -307,7 +310,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.132: ARC-open assemble animation ------------------------------
+// ---- beautify.133: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -529,28 +532,39 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             if (c == nil) return;
             @try {
                 if (c.window == nil) return;
-                // .132: show the card for 0.12s (~7 frames) under the dense
-                // particle cloud so the render server actually renders it --
-                // 0.06s was one frame and the snapshot came back blank (the
-                // swapped texture was transparent, grains vanished)
+                // .133: the card content is HOSTED (rendered by another
+                // process) -- no local snapshot route can capture it. Instead:
+                // hide the particles, show the card at its real position for
+                // 0.12s, capture the COMPOSITED screen (UICreateScreenImage),
+                // crop the card's region, restore, swap.
                 c.hidden = NO;
+                axs_metalSetOverlayHidden(renderer, YES);
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     UIView *c2 = weakCard2;
                     if (c2 == nil) return;
                     @try {
-                        UIImage *snap = axs_dm_snapshot(c2);            // NO path
-                        if (axs_dm_imageIsBlank(snap)) {
-                            snap = axs_dm_snapshotAfterUpdates(c2);     // YES fallback
-                        }
+                        UIImage *screen = UICreateScreenImage();
                         c2.hidden = YES;
+                        axs_metalSetOverlayHidden(renderer, NO);
                         BOOL swapped = NO;
-                        if (!axs_dm_imageIsBlank(snap)) {
-                            swapped = axs_metalReplaceTexture(renderer, snap);
-                        } else {
-                            axs_dm_log(@"OPEN swap snapshot blank, keeping white dots");
+                        if (screen != nil && screen.CGImage != NULL) {
+                            CGFloat scale = screen.scale > 0 ? screen.scale : 1.0;
+                            CGRect frame2 = [c2 convertRect:c2.bounds toView:nil];
+                            CGRect crop = CGRectMake(frame2.origin.x * scale,
+                                                     frame2.origin.y * scale,
+                                                     frame2.size.width * scale,
+                                                     frame2.size.height * scale);
+                            CGImageRef cg = CGImageCreateWithImageInRect(screen.CGImage, crop);
+                            if (cg != NULL) {
+                                UIImage *tex = [UIImage imageWithCGImage:cg scale:scale orientation:UIImageOrientationUp];
+                                CGImageRelease(cg);
+                                if (!axs_dm_imageIsBlank(tex)) {
+                                    swapped = axs_metalReplaceTexture(renderer, tex);
+                                }
+                            }
                         }
-                        axs_dm_log(@"OPEN texture swap %@", swapped ? @"OK" : @"SKIPPED/FAILED");
+                        axs_dm_log(@"OPEN texture swap %@", swapped ? @"OK (screen crop)" : @"SKIPPED/FAILED");
                         // final reveal while the content-bearing grains settle
                         __weak UIView *weakCard3 = c2;
                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
@@ -966,14 +980,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.132: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.133: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.132, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.133, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

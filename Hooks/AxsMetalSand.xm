@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.132): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.133): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -538,6 +538,15 @@ static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
     }
 }
 
+// .133: hide/show the particle overlay while the composited screen is
+// captured (so the screen crop contains the card, not the particles)
+BOOL axs_metalSetOverlayHidden(void *renderer, BOOL hidden) {
+    if (renderer == NULL) return NO;
+    AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
+    r.overlay.hidden = hidden;
+    return YES;
+}
+
 // .131: swap the particle texture mid-flight -- the assemble starts with the
 // glowing-dot texture, then the real card snapshot (captured while the card
 // was briefly visible under the dense cloud) replaces it, so the converged
@@ -718,6 +727,15 @@ void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat dura
     return ok ? (__bridge void *)sMsdActiveOpenRenderer : NULL;
 }
 
+// .133: hide/show the particle overlay while the composited screen is
+// captured (so the screen crop contains the card, not the particles)
+BOOL axs_metalSetOverlayHidden(void *renderer, BOOL hidden) {
+    if (renderer == NULL) return NO;
+    AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
+    r.overlay.hidden = hidden;
+    return YES;
+}
+
 // .131: swap the particle texture mid-flight (the caller captured the real
 // card while it was briefly visible under the dense cloud)
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
@@ -726,7 +744,7 @@ BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
     return [r replaceTextureWithImage:img];
 }
 
-// beautify.132 open-assemble: grains fly FROM sourcePoint TO the card
+// beautify.133 open-assemble: grains fly FROM sourcePoint TO the card
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
