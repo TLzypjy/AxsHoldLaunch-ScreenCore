@@ -306,7 +306,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.134: ARC-open assemble animation ------------------------------
+// ---- beautify.135: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -414,6 +414,7 @@ static CGFloat axs_open_density(void) {
 // fragments, exactly like the reference video. Fallback: white.
 static UIImage *axs_open_bgTexture(UIView *card) {
     UIColor *col = nil;
+    CGFloat r1=0, g1=0, b1=0, a1=0;
     @try {
         CGColorRef bg = card.layer.backgroundColor;
         if (bg != NULL) {
@@ -427,10 +428,17 @@ static UIImage *axs_open_bgTexture(UIView *card) {
                 }
             }
         }
+        if (col != nil) {
+            // .135: a fully transparent (clear) background would make the
+            // grains invisible on any page -- fall back to dark gray
+            [col getRed:&r1 green:&g1 blue:&b1 alpha:&a1];
+            if (a1 < 0.05) col = nil;
+        }
     } @catch (NSException *ignored) {
         col = nil;
     }
-    if (col == nil) col = [UIColor colorWithWhite:0.92 alpha:0.95];
+    if (col == nil) col = [UIColor colorWithWhite:0.15 alpha:0.95];
+    axs_dm_log(@"OPEN grain color %.2f %.2f %.2f %.2f", r1, g1, b1, a1);
     UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
     fmt.opaque = NO;
     UIGraphicsImageRenderer *r =
@@ -526,6 +534,11 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 if (c.window == nil) return;
                 // reveal the real card beneath the dense cloud, wiping from
                 // the top-right corner toward the bottom-left
+                // .135: stop the in-flight suppression here -- ScreenCore's
+                // own hidden toggles (its swallowed animations still drive
+                // show/hide calls) must pass through now, or the card would
+                // be forced back to hidden mid-reveal and never summon
+                axs_open_assembleInFlight = NO;
                 c.hidden = NO;
                 axs_open_startWipeReveal(c, 0.45);
                 // the cloud keeps flying/fading for 0.45s, then Metal fades it
@@ -938,14 +951,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.134: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.135: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.134, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.135, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
