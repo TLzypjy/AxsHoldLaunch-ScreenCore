@@ -330,7 +330,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.126: ARC-open assemble animation ------------------------------
+// ---- beautify.127: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -714,19 +714,40 @@ static CFAbsoluteTime axs_open_touchBeganAt = 0;
 // completion handlers still fire (ScreenCore state machine untouched), it
 // just completes instantly and invisibly behind the particle assemble.
 static IMP axs_open_orig_addAnimation = NULL;
+// .127: REPLACE the native animation entirely. Per the user's direction the
+// native animation is no longer clamped-and-run -- it is swallowed (never
+// forwarded, zero execution) and its completion is fired manually, so
+// ScreenCore's state machine still receives "animation finished". The
+// particle assemble fully takes the native animation's place.
 static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString *key) {
     @try {
         if (anim != nil && CACurrentMediaTime() < axs_open_interceptUntil) {
-            // .124: match by the layer's delegate (view-backed layers have
-            // their view as delegate) so the clamp is armed before the card
-            // pointer even exists. Only the floating container's tree clamps.
+            // match by the layer's delegate (view-backed layers carry their
+            // view as delegate) so the replace is armed before the card
+            // pointer even exists. Only the floating container's tree is hit.
             id delegate = [(CALayer *)self delegate];
             if (delegate != nil
                 && strcmp(object_getClassName(delegate), "SCFloatingContainerView") == 0) {
-                anim.duration = 0.01;
-                anim.beginTime = CACurrentMediaTime();
-                axs_dm_log(@"OPEN clamp hit anim=%@ key=%@",
+                // fire the animation's own completion manually (finished=YES):
+                // UIView block animations attach their completion block to the
+                // CAAnimation's delegate, so this is exactly the notification
+                // UIKit would deliver when the animation finishes naturally.
+                id animDelegate = [anim delegate];
+                if (animDelegate != nil
+                    && [animDelegate respondsToSelector:@selector(animationDidStop:finished:)]) {
+                    __block id d = animDelegate;
+                    __block CAAnimation *a = anim;
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        @try {
+                            ((void (*)(id, SEL, CAAnimation *, BOOL))objc_msgSend)(
+                                d, @selector(animationDidStop:finished:), a, YES);
+                        } @catch (NSException *ignored) { }
+                        d = nil; a = nil;
+                    });
+                }
+                axs_dm_log(@"OPEN native animation replaced anim=%@ key=%@",
                            NSStringFromClass([anim class]), key ?: @"nil");
+                return;   // swallowed -- the native animation never executes
             }
         }
     } @catch (NSException *ignored) { }
@@ -946,14 +967,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.126: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.127: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.126, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.127, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

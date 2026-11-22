@@ -1,6 +1,14 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.126
+版本：2.0.5+beautify.127
+
+beautify.127 变更（原生动画彻底替换：吞掉 + 手动补发 completion）：
+- 按用户确认的方向执行：addAnimation hook 对卡片树上的原生动画不再钳制时长
+  放行，而是直接吞掉（不转发，零执行）——原生动画面真正归零。
+- ScreenCore 依赖的动画 completion 手动补发：CAAnimation 的 delegate（UIView
+  块动画把完成块挂在动画 delegate 上）收到 animationDidStop:finished:YES，
+  状态机照常收尾，呼出流程不受影响。
+- 卡片屏外不可见（.126 transform 方案）+ 粒子聚合完整取代原生动画。
 
 beautify.126 变更（屏幕外快照方案 + 面板排序调整）：
 - .125 日志实锤：clamp hit 命中（CASpringAnimation transform）但用户仍看到原生
@@ -295,4 +303,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.126_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.127_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
