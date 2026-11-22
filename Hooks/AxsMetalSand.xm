@@ -542,6 +542,8 @@ static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
 // glowing-dot texture, then the real card snapshot (captured while the card
 // was briefly visible under the dense cloud) replaces it, so the converged
 // grains literally become fragments of the floating window.
+static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
+
 - (BOOL)replaceTextureWithImage:(UIImage *)img {
     @try {
         if (img == nil || img.CGImage == NULL) return NO;
