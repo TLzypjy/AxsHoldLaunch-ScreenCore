@@ -481,7 +481,7 @@ jobs:
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/en.strings" || { echo "ColorSand en label missing"; exit 1; }
           # the CPU layer path must be fully retired
           ! grep -Fq "axs_dm_emitColorSand" Hooks/AxsDismissEffect.xm || { echo "stale UIView ColorSand emitter still present"; exit 1; }
-          ! grep -Fq "CGImageCreateWithImageInRect" Hooks/AxsDismissEffect.xm || { echo "stale CPU tile slicing still present"; exit 1; }
+          grep -Fq "UICreateScreenImage" Hooks/AxsDismissEffect.xm || { echo "composited screen capture missing"; exit 1; }
           ! grep -Fq "UIViewAnimationOptionCurve" Hooks/AxsDismissEffect.xm || { echo "stale UIView animation path still present"; exit 1; }
           ! grep -Fq "emit: sand cleaned grains=" Hooks/AxsDismissEffect.xm || { echo "stale CPU sand log still present"; exit 1; }
           grep -Fq "emit: gpu engine active" Hooks/AxsDismissEffect.xm || { echo "gpu engine log missing"; exit 1; }
