@@ -465,7 +465,8 @@ jobs:
           # .111: speed slider must step continuously (0.1), not 1.0 defaults
           plutil -p packaging/overlay/SplitSettings.plist | grep -A8 "splitBeautifyDismissSpeed" | grep -q "step" || { echo "dismiss speed step missing"; exit 1; }
           grep -Fq "sc_closeSession:" Hooks/AxsDismissEffect.xm || { echo "dismiss closeSession hook missing"; exit 1; }
-          grep -Fq "overlay.windowScene = host.windowScene" Hooks/AxsDismissEffect.xm || { echo "dismiss windowScene fix missing"; exit 1; }
+          # .112: the windowScene binding lives in the unified Metal engine now
+          grep -Fq "overlay.windowScene = host.windowScene" Hooks/AxsMetalSand.xm || { echo "dismiss windowScene fix missing"; exit 1; }
           grep -Fq "axs_dm_sigMatches" Hooks/AxsDismissEffect.xm || { echo "dismiss sig guard missing"; exit 1; }
           grep -Fq "DME module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "dismiss load log not compiled into dylib"; exit 1; }
           echo "=== beautify.112 dismiss style selector check ==="
