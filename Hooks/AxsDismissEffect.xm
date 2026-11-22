@@ -22,6 +22,10 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                        uint32_t style, CGFloat density);
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint);
+// .131: open assemble returning the live renderer handle + mid-flight texture swap
+void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                               CGFloat density, CGPoint sourcePoint);
+BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
 
 // ---------------------------------------------------------------------------
 // beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
