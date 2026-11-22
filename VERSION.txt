@@ -1,6 +1,16 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.118
+版本：2.0.5+beautify.119
+
+beautify.119 变更（呼出源改为 ARC 图标位置 + 隐藏提前到 1 帧）：
+- .118 视频证实：粒子确实从手指最后抬起位置涌出了，但那是 ARC 菜单项的点击位置
+  （菜单弹在屏幕中部）——用户期望的起点是长按的 ARC 图标位置。
+- 修复：sendEvent 增加 began 位置跟踪；touch ended 时若持续时长 ≥0.15s 且位移
+  <30pt（即长按 ARC 图标的手势），记录 arcIconPos。聚合起点优先级：
+  arc 图标位置（4s 内）→ 最后抬起点（2s 内）→ 卡片中心；日志标注来源
+  （arc-icon / last-lift / fallback-card-center）。
+- 隐藏延迟 0.05s → 0.02s（约 1 帧）：卡片内容是 App 快照图、第一帧即完整，
+  无需等待加载，原生动画面基本不可见。
 
 beautify.118 变更（呼出聚合两段式 + 原生动画闪现压缩）：
 - 用户反馈（注：实测包为 .116，其坐标错位 bug 已在 .117 修复）：
@@ -212,4 +222,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.118_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.119_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

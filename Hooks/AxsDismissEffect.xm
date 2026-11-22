@@ -303,7 +303,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.118: ARC-open assemble animation ------------------------------
+// ---- beautify.119: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -323,6 +323,11 @@ static BOOL axs_open_selfRestore = NO;
 // .116: last finger-lift position (ARC menu tap), tracked via UIWindow sendEvent
 static CGPoint axs_open_lastTouchUp = {-1, -1};
 static CFAbsoluteTime axs_open_lastTouchUpAt = 0;
+// .119: position of the LONG-PRESS that summoned the ARC menu (the icon the
+// finger was held down on). Users expect grains to fly from THERE, not from
+// the menu item they tap afterwards (which sits mid-screen).
+static CGPoint axs_open_arcIconPos = {-1, -1};
+static CFAbsoluteTime axs_open_arcIconPosAt = 0;
 static IMP axs_open_orig_setHidden = NULL;   // NULL = not installed; (IMP)1 = class_addMethod super-forward
 static IMP axs_open_orig_didMove = NULL;
 
@@ -378,18 +383,26 @@ static void axs_open_becameVisible(UIView *v) {
         UIView *card = v;
         CGFloat density = axs_dm_densityScale();
         CGFloat duration = 0.85;
-        // .116: particles originate at the finger-lift point (ARC menu tap).
-        // If no recent touch, fall back to the card center.
+        // .119: particles originate at the ARC icon the finger long-pressed
+        // (not the menu item tapped afterwards -- that sits mid-screen).
+        // Fallback chain: arc icon (4s) -> last lift (2s) -> card center.
+        CFAbsoluteTime nowT = CACurrentMediaTime();
         CGPoint sourcePoint = CGPointMake(CGRectGetMidX([card convertRect:card.bounds toView:nil]),
                                           CGRectGetMidY([card convertRect:card.bounds toView:nil]));
-        if (CACurrentMediaTime() - axs_open_lastTouchUpAt <= 2.0
+        NSString *sourceKind = @"fallback-card-center";
+        if (nowT - axs_open_arcIconPosAt <= 4.0
+            && axs_open_arcIconPos.x >= 0 && axs_open_arcIconPos.y >= 0) {
+            sourcePoint = axs_open_arcIconPos;
+            sourceKind = @"arc-icon";
+        } else if (nowT - axs_open_lastTouchUpAt <= 2.0
             && axs_open_lastTouchUp.x >= 0 && axs_open_lastTouchUp.y >= 0) {
             sourcePoint = axs_open_lastTouchUp;
+            sourceKind = @"last-lift";
         }
-        axs_dm_log(@"OPEN source point %@", NSStringFromCGPoint(sourcePoint));
-        // .118: hide in 0.05s (~3 frames) so the native present animation
-        // barely flashes before the assemble takes over
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+        axs_dm_log(@"OPEN source point %@ (%@)", NSStringFromCGPoint(sourcePoint), sourceKind);
+        // .119: hide in 0.02s (~1 frame) -- the card content is the app
+        // snapshot image, complete on the first frame, so no load wait needed
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.02 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 if (card.window == nil) return;
@@ -399,8 +412,8 @@ static void axs_open_becameVisible(UIView *v) {
                 card.hidden = YES;   // hide the native card behind the assemble
                 BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density, sourcePoint);
                 if (ok) {
-                    axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f source=%@",
-                               duration, density, NSStringFromCGPoint(sourcePoint));
+                    axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f source=%@ (%@)",
+                               duration, density, NSStringFromCGPoint(sourcePoint), sourceKind);
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
                                    dispatch_get_main_queue(), ^{
                         @try {
@@ -470,6 +483,8 @@ static void axs_open_installOne(NSString *selName, const char *types,
 // .116: track the last finger-lift point anywhere in SpringBoard. UIWindow
 // declares sendEvent: itself, so a class-level MSHook here is safe (no
 // inherited-method pitfall). Purely passive: forward, then record.
+static CGPoint axs_open_touchBeganPos = {-1, -1};
+static CFAbsoluteTime axs_open_touchBeganAt = 0;
 static IMP axs_open_orig_sendEvent = NULL;
 static void axs_open_sendEvent(id self, SEL _cmd, UIEvent *event) {
     if (axs_open_orig_sendEvent != NULL) {
@@ -478,12 +493,26 @@ static void axs_open_sendEvent(id self, SEL _cmd, UIEvent *event) {
     @try {
         if (event == nil || [event type] != UIEventTypeTouches) return;
         UITouch *t = [event allTouches].anyObject;
-        if (t == nil || [t phase] != UITouchPhaseEnded) return;
+        if (t == nil) return;
         UIView *touchView = [t view];
         UIWindow *win = touchView.window ?: (UIWindow *)self;
         CGPoint loc = [t locationInView:win];
-        axs_open_lastTouchUp = loc;
-        axs_open_lastTouchUpAt = CACurrentMediaTime();
+        if ([t phase] == UITouchPhaseBegan) {
+            axs_open_touchBeganPos = loc;
+            axs_open_touchBeganAt = CACurrentMediaTime();
+        } else if ([t phase] == UITouchPhaseEnded) {
+            axs_open_lastTouchUp = loc;
+            axs_open_lastTouchUpAt = CACurrentMediaTime();
+            // a long press (>=0.15s hold, matches the ARC trigger duration
+            // setting) on one spot = the finger was held on the ARC icon.
+            CGFloat held = CACurrentMediaTime() - axs_open_touchBeganAt;
+            CGFloat moved = hypotf((float)(loc.x - axs_open_touchBeganPos.x),
+                                   (float)(loc.y - axs_open_touchBeganPos.y));
+            if (held >= 0.15 && moved < 30.0) {
+                axs_open_arcIconPos = axs_open_touchBeganPos;
+                axs_open_arcIconPosAt = CACurrentMediaTime();
+            }
+        }
     } @catch (NSException *ignored) { }
 }
 
@@ -643,14 +672,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.118: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.119: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.118, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.119, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
