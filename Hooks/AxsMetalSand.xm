@@ -339,8 +339,6 @@ static BOOL axs_msd_ensurePipeline(void) {
 
 // ---- retain active renderers so ARC does not collect them mid-animation ----
 static NSMutableArray *sMsdActiveRenderers = nil;
-// .131: the currently-running open-assemble renderer (for mid-flight texture swap)
-static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
 
 // ---- renderer: owns texture, overlay, display link; one instance per burst -
 @interface AXSMetalSandRenderer : NSObject
@@ -365,6 +363,9 @@ static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
                openMode:(uint32_t)openMode
              sourcePoint:(CGPoint)sourcePoint;
 @end
+
+// .131: the currently-running open-assemble renderer (mid-flight texture swap)
+static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
 
 @implementation AXSMetalSandRenderer
 
@@ -544,7 +545,7 @@ static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
 - (BOOL)replaceTextureWithImage:(UIImage *)img {
     @try {
         if (img == nil || img.CGImage == NULL) return NO;
-        id<MTLTexture> newTex = axs_msd_makeTexture(img.CGImage, self.device);
+        id<MTLTexture> newTex = axs_msd_makeTexture(img.CGImage, sMsdDevice);
         if (newTex == nil) return NO;
         self.texture = newTex;
         axs_msd_log(@"metal texture replaced (%lu x %lu)",
