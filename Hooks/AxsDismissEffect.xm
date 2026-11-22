@@ -271,6 +271,33 @@ static UIImage *axs_dm_snapshot(UIView *view) {
     return img;
 }
 
+// .122: blank-image probe (a hidden-state drawViewHierarchy snapshot may yield
+// fully transparent pixels; caller falls back to a 1-frame flash snapshot in
+// that case). Samples the alpha channel on a sparse grid.
+static BOOL axs_dm_imageIsBlank(UIImage *img) {
+    if (img == nil || img.CGImage == NULL) return YES;
+    CGImageRef cg = img.CGImage;
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    if (w == 0 || h == 0) return YES;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    size_t bpr = w * 4;
+    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
+    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
+                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(cs);
+    const uint8_t *px = (const uint8_t *)[data bytes];
+    // BGRA little-endian premultiplied-first: alpha lives in byte 3
+    size_t step = ((w * h) / 256) + 1;
+    BOOL anyOpaque = NO;
+    for (size_t i = 0; i < w * h; i += step) {
+        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
+    }
+    return !anyOpaque;
+}
+
 // --- dissolve effect (GPU) --------------------------------------------------
 // beautify.112: ONE GPU path for every style. Snapshot the card, hand it to
 // the unified Metal renderer (style + density select the motion model and the
@@ -353,6 +380,10 @@ static void axs_open_markGone(UIView *v) {
     objc_setAssociatedObject(v, &axs_open_goneKey, @(CACurrentMediaTime()),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
+
+// .122: animation-modification window state (declared before first use)
+static CFAbsoluteTime axs_open_interceptUntil = 0;
+static UIView *axs_open_interceptCard = nil;
 
 static void axs_open_becameVisible(UIView *v) {
     @try {
@@ -544,8 +575,6 @@ static CFAbsoluteTime axs_open_touchBeganAt = 0;
 // 0.01s and is then forwarded unchanged. The animation still runs and its
 // completion handlers still fire (ScreenCore state machine untouched), it
 // just completes instantly and invisibly behind the particle assemble.
-static CFAbsoluteTime axs_open_interceptUntil = 0;
-static UIView *axs_open_interceptCard = nil;
 static IMP axs_open_orig_addAnimation = NULL;
 static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString *key) {
     @try {
