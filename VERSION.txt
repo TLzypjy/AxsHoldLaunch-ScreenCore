@@ -22,6 +22,14 @@ beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关�
 - 日志 burst 行新增 style=N(name) 字段，便于确认选中的样式生效。
 - CI：build.yml / package_beautify.sh 版本升 .99，新增样式键与样式枚举的源码/dylib 断言。
 
+beautify.107 变更（新增多巴胺隐根 roothide 出包）：
+  - 打包脚本在 rootless 包之外再产出 roothide 隐藏根变体，文件名带 -roothide
+  - roothide 布局 = 去掉 var/jb/ 前缀，文件直接在 Library/、usr/ 下（与 RootHide Patcher 结果一致）
+  - 包内 6 个 Mach-O 已全部双 rpath 兼容（/var/jb + @loader_path/.jbroot），dylib 也链接了 libroot.dylib，故二进制零改动，只是重排 deb 路径
+  - control 依赖不变（mobilesubstrate/preferenceloader/altlist 由 roothide bootstrap 提供）
+  - CI 同时验证并上传 rootless + roothide 两个 deb，roothide dylib 与 rootless 逐字节一致
+  - 以后桌面交付 roothide 隐根包，安装无需再手动转换
+
 beautify.107 变更（真正根治消散卡：Metal selector 修正）：
   - .106 日志证实 Metal 仍每次抛 unrecognized selector sent to
     AGXG15FamilyCommandQueue，说明 command buffer 的 selector 名字也是错的

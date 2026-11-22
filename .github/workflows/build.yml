@@ -117,8 +117,9 @@ jobs:
       - name: Verify final beautify deb
         run: |
           set -euo pipefail
-          DEB=$(find ./packaging/out -name "*.deb" | head -n 1)
+          DEB=$(find ./packaging/out -name "*.deb" ! -name "*roothide*" | head -n 1)
           test -n "$DEB"
+          echo "=== rootless deb: $DEB ==="
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
@@ -507,6 +508,24 @@ jobs:
           grep -Fq "sMsdQueue, cbSel" Hooks/AxsMetalSand.xm || { echo "command buffer must be sent to queue, not device"; exit 1; }
           grep -Fq "metal queue exposes no command buffer selector" "$EXTRACT/dylib34.strings" || { echo "safe selector fallback log not compiled into dylib"; exit 1; }
           ! grep -Fq "sMsdDevice, @selector(newCommandBuffer)" Hooks/AxsMetalSand.xm || { echo "stale device newCommandBuffer call still present"; exit 1; }
+          echo "=== roothide (hidden-root) variant verification ==="
+          RH_DEB=$(find ./packaging/out -name "*roothide*.deb" | head -n 1)
+          test -n "$RH_DEB" || { echo "roothide deb missing"; exit 1; }
+          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.107"
+          RH_EXTRACT="$(mktemp -d)"
+          dpkg-deb -x "$RH_DEB" "$RH_EXTRACT"
+          # layout must be flattened: files directly under Library/usr, NO var/jb
+          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib" || { echo "roothide dylib missing"; exit 1; }
+          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.plist" || { echo "roothide filter plist missing"; exit 1; }
+          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/ScreenCore.dylib" || { echo "roothide ScreenCore dylib missing"; exit 1; }
+          test -f "$RH_EXTRACT/Library/PreferenceBundles/ScreenCorePrefs.bundle/SplitSettings.plist" || { echo "roothide panel plist missing"; exit 1; }
+          test ! -e "$RH_EXTRACT/var/jb" || { echo "roothide still has var/jb prefix"; exit 1; }
+          # binary must be byte-identical to the rootless one (no patch needed)
+          cmp -s "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib" \
+                 "$EXTRACT/var/jb/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib" \
+                 || { echo "roothide dylib differs from rootless"; exit 1; }
+          echo "roothide verify ok: $RH_DEB"
+          rm -rf "$RH_EXTRACT"
           echo "final verify ok"
           rm -rf "$EXTRACT"
 

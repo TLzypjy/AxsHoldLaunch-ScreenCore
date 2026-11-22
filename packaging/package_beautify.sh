@@ -160,7 +160,7 @@ check "dylib has CORNER_CLIP log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dy
 check "dylib has ZORDER log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'ring tilt ZORDER'"
 check "dylib has plugin corner mask name" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'AxsTiltCornerMask'"
 
-# 7) package + verify
+# 7) package rootless (+ roothide hidden-root variant)
 DEB="$OUT/com.susudear.screencore_${VERSION}_iphoneos-arm64.deb"
 dpkg-deb --root-owner-group -b "$PKG" "$DEB"
 echo "=== dpkg-deb -I ==="
@@ -168,4 +168,32 @@ dpkg-deb -I "$DEB"
 echo "=== dpkg-deb -c ==="
 dpkg-deb -c "$DEB"
 echo "=== packaged: $DEB ==="
+
+# 8) roothide (多巴胺隐根) variant.
+# Every Mach-O in this package already carries BOTH rpath sets:
+#   /var/jb/Library/Frameworks  +  @loader_path/.jbroot/Library/Frameworks
+#   /var/jb/usr/lib             +  @loader_path/.jbroot/usr/lib
+# and AxsHoldLaunch.dylib is linked against libroot.dylib. So a roothide build
+# needs NO binary patching -- only the deb filesystem layout changes: files go
+# at the archive root (Library/..., usr/...) instead of under var/jb/. This is
+# exactly what the on-device RootHide Patcher produces.
+RH_PKG="$OUT/rh-pkg"
+rm -rf "$RH_PKG"
+mkdir -p "$RH_PKG/DEBIAN"
+# control: identical metadata (Depends on mobilesubstrate preferenceloader
+# altlist is satisfied by the roothide bootstrap's own repos).
+cp "$PKG/DEBIAN/control" "$RH_PKG/DEBIAN/control"
+# lift everything under var/jb/ up to the roothide package root
+( cd "$PKG/var/jb" && tar cf - . ) | ( cd "$RH_PKG" && tar xf - )
+# sanity: the dylibs + prefs bundle must have made the move intact
+test -f "$RH_PKG/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib"
+test -f "$RH_PKG/Library/PreferenceBundles/ScreenCorePrefs.bundle/SplitSettings.plist"
+test ! -e "$RH_PKG/var/jb"
+RH_DEB="$OUT/com.susudear.screencore_${VERSION}_iphoneos-arm64-roothide.deb"
+dpkg-deb --root-owner-group -b "$RH_PKG" "$RH_DEB"
+echo "=== roothide dpkg-deb -I ==="
+dpkg-deb -I "$RH_DEB"
+echo "=== roothide dpkg-deb -c ==="
+dpkg-deb -c "$RH_DEB"
+echo "=== packaged roothide: $RH_DEB ==="
 ls -la "$OUT"
