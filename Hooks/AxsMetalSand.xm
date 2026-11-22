@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.114): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.115): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -105,7 +105,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float spanO  = 0.56 + 0.035*r2;\n\
         float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
         float motionO = pow(progressO,1.12);\n\
-        float inv = 1.0-motion;\n\
+        float inv = 1.0-motionO;\n\
         float dxO = (0.62 + 1.05*r)*u.distance*inv + (r2-0.5)*u.distance*0.40*inv;\n\
         float dyO = -(0.45 + 1.05*r2)*u.distance*inv + sin(inv*7.0+r3*6.283)*u.distance*0.13*inv;\n\
         float shrinkO = mix(1.0, mix(0.24,0.56,r3), inv);\n\
@@ -657,7 +657,7 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
     return axs_metalPlayCommon(shot, frameInWindow, duration, style, density, 0);
 }
 
-// beautify.114 open-assemble: reverse sand, openMode=1
+// beautify.115 open-assemble: reverse sand, openMode=1
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1);

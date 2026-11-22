@@ -1,6 +1,11 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.114
+版本：2.0.5+beautify.115
+
+beautify.115 变更（修复 .114 shader 编译错误）：
+- .114 删重复声明后仍编译失败：openMode 分支内 "float inv = 1.0-motion;" 笔误，
+  分支内变量名是 motionO。改为 1.0-motionO。失败原因由 .114 新加的
+  sMsdFailReason 持久化日志直接暴露（诊断机制首次立功）。
 
 beautify.114 变更（修复 .113 全部动画失效）：
 - 根因：.113 往 shader 加 openMode 分支时，Edit 误把 cell/grid/unit/corner/r/r2/r3/r4
@@ -179,4 +184,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.114_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.115_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
