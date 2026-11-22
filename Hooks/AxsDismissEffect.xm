@@ -271,33 +271,6 @@ static UIImage *axs_dm_snapshot(UIView *view) {
     return img;
 }
 
-// .122: blank-image probe (a hidden-state drawViewHierarchy snapshot may yield
-// fully transparent pixels; caller falls back to a 1-frame flash snapshot in
-// that case). Samples the alpha channel on a sparse grid.
-static BOOL axs_dm_imageIsBlank(UIImage *img) {
-    if (img == nil || img.CGImage == NULL) return YES;
-    CGImageRef cg = img.CGImage;
-    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
-    if (w == 0 || h == 0) return YES;
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    size_t bpr = w * 4;
-    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
-    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
-                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
-    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
-    CGContextRelease(ctx);
-    CGColorSpaceRelease(cs);
-    const uint8_t *px = (const uint8_t *)[data bytes];
-    // BGRA little-endian premultiplied-first: alpha lives in byte 3
-    size_t step = ((w * h) / 256) + 1;
-    BOOL anyOpaque = NO;
-    for (size_t i = 0; i < w * h; i += step) {
-        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
-    }
-    return !anyOpaque;
-}
-
 // --- dissolve effect (GPU) --------------------------------------------------
 // beautify.112: ONE GPU path for every style. Snapshot the card, hand it to
 // the unified Metal renderer (style + density select the motion model and the
