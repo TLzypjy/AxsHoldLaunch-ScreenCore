@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.133): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.134): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -103,7 +103,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
-        float beginO = (unit.x + 1.0-unit.y)*0.18 + r*0.025;\n\
+        float beginO = ((1.0-unit.x) + unit.y)*0.18 + r*0.025;\n\
         float spanO  = 0.56 + 0.035*r2;\n\
         float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
         float leave = smoothstep(0.0,0.28,progressO);\n\
@@ -540,34 +540,10 @@ static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
 
 // .133: hide/show the particle overlay while the composited screen is
 // captured (so the screen crop contains the card, not the particles)
-BOOL axs_metalSetOverlayHidden(void *renderer, BOOL hidden) {
-    if (renderer == NULL) return NO;
-    AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
-    r.overlay.hidden = hidden;
-    return YES;
-}
-
 // .131: swap the particle texture mid-flight -- the assemble starts with the
 // glowing-dot texture, then the real card snapshot (captured while the card
 // was briefly visible under the dense cloud) replaces it, so the converged
 // grains literally become fragments of the floating window.
-static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
-
-- (BOOL)replaceTextureWithImage:(UIImage *)img {
-    @try {
-        if (img == nil || img.CGImage == NULL) return NO;
-        id<MTLTexture> newTex = axs_msd_makeTexture(img.CGImage, sMsdDevice);
-        if (newTex == nil) return NO;
-        self.texture = newTex;
-        axs_msd_log(@"metal texture replaced (%lu x %lu)",
-                    (unsigned long)CGImageGetWidth(img.CGImage),
-                    (unsigned long)CGImageGetHeight(img.CGImage));
-        return YES;
-    } @catch (NSException *ignored) {
-        return NO;
-    }
-}
-
 - (void)cleanup {
     @try {
         [self.link invalidate];
@@ -718,26 +694,11 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGPointMake(0, 0));
 }
 
-// .131: open assemble that returns the live renderer handle for the mid-flight
-// texture swap (NULL when Metal did not take over)
-void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
-                               CGFloat density, CGPoint sourcePoint) {
-    BOOL ok = axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
-                                  sourcePoint);
-    return ok ? (__bridge void *)sMsdActiveOpenRenderer : NULL;
-}
-
 // .133: hide/show the particle overlay while the composited screen is
 // captured (so the screen crop contains the card, not the particles)
 // .131: swap the particle texture mid-flight (the caller captured the real
 // card while it was briefly visible under the dense cloud)
-BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
-    if (renderer == NULL || img == nil) return NO;
-    AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
-    return [r replaceTextureWithImage:img];
-}
-
-// beautify.133 open-assemble: grains fly FROM sourcePoint TO the card
+// beautify.134 open-assemble: grains fly FROM sourcePoint TO the card
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,

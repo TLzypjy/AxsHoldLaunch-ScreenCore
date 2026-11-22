@@ -22,13 +22,9 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                        uint32_t style, CGFloat density);
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint);
-// .131: open assemble returning the live renderer handle + mid-flight texture swap
+// .131: open assemble returning the live renderer handle (used by the wipe flow)
 void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGFloat density, CGPoint sourcePoint);
-BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
-BOOL axs_metalSetOverlayHidden(void *renderer, BOOL hidden);
-// private UIKit: captures the COMPOSITED screen (includes hosted content)
-extern "C" UIImage *UICreateScreenImage(void);
 
 // ---------------------------------------------------------------------------
 // beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
@@ -310,7 +306,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.133: ARC-open assemble animation ------------------------------
+// ---- beautify.134: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -413,50 +409,63 @@ static CGFloat axs_open_density(void) {
     return density;
 }
 
-// .128: NO-TEXTURE assemble -- the grains are plain glowing dots (1x1 white
-// texture; every sample is white). The old snapshot-based texture was a dead
-// end on this device (hidden / renderInContext / offscreen snapshots all came
-// back blank or wrong), and the 1-frame flash it required looked like the
-// native animation. Particles converge into a bright cloud in the card shape,
-// then the real card appears beneath the cloud as it fades.
-static UIImage *axs_open_whiteTexture = nil;
-static UIImage *axs_open_getWhiteTexture(void) {
-    if (axs_open_whiteTexture == nil) {
-        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.opaque = NO;
-        UIGraphicsImageRenderer *r =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, 1, 1) format:fmt];
-        axs_open_whiteTexture = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            CGContextSetFillColorWithColor(ctx.CGContext, [UIColor colorWithWhite:1.0 alpha:0.95].CGColor);
-            UIRectFill(CGRectMake(0, 0, 1, 1));
-        }];
+// .134: particle color = the card's background color (pure data read from
+// the layer -- no rendering involved). The calculator is dark -> dark
+// fragments, exactly like the reference video. Fallback: white.
+static UIImage *axs_open_bgTexture(UIView *card) {
+    UIColor *col = nil;
+    @try {
+        CGColorRef bg = card.layer.backgroundColor;
+        if (bg != NULL) {
+            col = [UIColor colorWithCGColor:bg];
+        } else {
+            // try the first subview's background
+            for (UIView *sv in card.subviews) {
+                if (sv.layer.backgroundColor != NULL) {
+                    col = [UIColor colorWithCGColor:sv.layer.backgroundColor];
+                    break;
+                }
+            }
+        }
+    } @catch (NSException *ignored) {
+        col = nil;
     }
-    return axs_open_whiteTexture;
+    if (col == nil) col = [UIColor colorWithWhite:0.92 alpha:0.95];
+    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+    fmt.opaque = NO;
+    UIGraphicsImageRenderer *r =
+        [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, 1, 1) format:fmt];
+    UIImage *tex = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        CGContextSetFillColorWithColor(ctx.CGContext, col.CGColor);
+        CGContextFillRect(ctx.CGContext, CGRectMake(0, 0, 1, 1));
+    }];
+    return tex;
 }
 
-// blank probe: samples the alpha channel on a sparse grid
-static BOOL axs_dm_imageIsBlank(UIImage *img) {
-    if (img == nil || img.CGImage == NULL) return YES;
-    CGImageRef cg = img.CGImage;
-    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
-    if (w == 0 || h == 0) return YES;
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    size_t bpr = w * 4;
-    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
-    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
-                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
-    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
-    CGContextRelease(ctx);
-    CGColorSpaceRelease(cs);
-    const uint8_t *px = (const uint8_t *)[data bytes];
-    size_t step = ((w * h) / 256) + 1;
-    BOOL anyOpaque = NO;
-    for (size_t i = 0; i < w * h; i += step) {
-        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
-    }
-    return !anyOpaque;
+// .134: right-top -> left-bottom wipe reveal. The real card is shown beneath
+// the particle cloud with a mask that expands from the top-right corner --
+// grains arrive there first, so the wipe keeps in sync with the convergence
+// and the window appears to be composed grain by grain.
+static void axs_open_startWipeReveal(UIView *card, CGFloat dur) {
+    @try {
+        CGSize sz = card.bounds.size;
+        if (sz.width < 1 || sz.height < 1) return;
+        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(sz.width, 0, 0, 0)];
+        mv.backgroundColor = [UIColor blackColor];
+        mv.opaque = YES;
+        card.layer.mask = mv.layer;
+        [UIView animateWithDuration:dur animations:^{
+            mv.frame = CGRectMake(0, 0, sz.width, sz.height);
+        }];
+    } @catch (NSException *ignored) { }
 }
+
+static void axs_open_endWipeReveal(UIView *card) {
+    @try {
+        card.layer.mask = nil;
+    } @catch (NSException *ignored) { }
+}
+
 
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
@@ -487,12 +496,13 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .131: start with glowing white dots, then capture the real card and
-        // swap the texture mid-flight so the converged grains literally become
-        // fragments of the floating window.
-        UIImage *dots = axs_open_getWhiteTexture();
+        // .134: particles in the card's own background color fly in and
+        // converge; the real card is revealed beneath the cloud with a
+        // right-top -> left-bottom wipe that matches the convergence order,
+        // so the window appears to be composed grain by grain.
+        UIImage *dots = axs_open_bgTexture(card);
         if (dots == nil) {
-            axs_dm_log(@"OPEN white texture failed, native card restored");
+            axs_dm_log(@"OPEN bg texture failed, native card restored");
             axs_open_assembleInFlight = NO;
             card.hidden = NO;
             return;
@@ -508,61 +518,27 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                    duration, density, (long)polls,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
         __weak UIView *weakCard2 = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration - 0.12) * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration - 0.10) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;
             if (c == nil) return;
             @try {
                 if (c.window == nil) return;
-                // .133: the card content is HOSTED (rendered by another
-                // process) -- no local snapshot route can capture it. Instead:
-                // hide the particles, show the card at its real position for
-                // 0.12s, capture the COMPOSITED screen (UICreateScreenImage),
-                // crop the card's region, restore, swap.
+                // reveal the real card beneath the dense cloud, wiping from
+                // the top-right corner toward the bottom-left
                 c.hidden = NO;
-                axs_metalSetOverlayHidden(renderer, YES);
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
+                axs_open_startWipeReveal(c, 0.45);
+                // the cloud keeps flying/fading for 0.45s, then Metal fades it
+                __weak UIView *weakCard3 = c;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
-                    UIView *c2 = weakCard2;
-                    if (c2 == nil) return;
+                    UIView *c3 = weakCard3;
+                    if (c3 == nil) return;
                     @try {
-                        UIImage *screen = UICreateScreenImage();
-                        c2.hidden = YES;
-                        axs_metalSetOverlayHidden(renderer, NO);
-                        BOOL swapped = NO;
-                        if (screen != nil && screen.CGImage != NULL) {
-                            CGFloat scale = screen.scale > 0 ? screen.scale : 1.0;
-                            CGRect frame2 = [c2 convertRect:c2.bounds toView:nil];
-                            CGRect crop = CGRectMake(frame2.origin.x * scale,
-                                                     frame2.origin.y * scale,
-                                                     frame2.size.width * scale,
-                                                     frame2.size.height * scale);
-                            CGImageRef cg = CGImageCreateWithImageInRect(screen.CGImage, crop);
-                            if (cg != NULL) {
-                                UIImage *tex = [UIImage imageWithCGImage:cg scale:scale orientation:UIImageOrientationUp];
-                                CGImageRelease(cg);
-                                if (!axs_dm_imageIsBlank(tex)) {
-                                    swapped = axs_metalReplaceTexture(renderer, tex);
-                                }
-                            }
-                        }
-                        axs_dm_log(@"OPEN texture swap %@", swapped ? @"OK (screen crop)" : @"SKIPPED/FAILED");
-                        // final reveal while the content-bearing grains settle
-                        __weak UIView *weakCard3 = c2;
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)),
-                                       dispatch_get_main_queue(), ^{
-                            UIView *c3 = weakCard3;
-                            if (c3 == nil) return;
-                            @try {
-                                axs_open_selfRestore = YES;
-                                axs_open_assembleInFlight = NO;
-                                c3.hidden = NO;
-                            } @catch (NSException *ignored) { }
-                        });
-                    } @catch (NSException *ignored) {
+                        axs_open_endWipeReveal(c3);
+                        axs_open_selfRestore = YES;
                         axs_open_assembleInFlight = NO;
-                        c2.hidden = NO;
-                    }
+                    } @catch (NSException *ignored) { }
                 });
             } @catch (NSException *ignored) {
                 axs_open_assembleInFlight = NO;
@@ -962,14 +938,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.133: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.134: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.133, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.134, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
