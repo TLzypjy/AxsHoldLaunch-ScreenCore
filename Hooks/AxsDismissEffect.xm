@@ -221,6 +221,38 @@ static NSString *axs_dm_styleName(NSInteger style) {
     }
 }
 
+static UIView *axs_dm_findContainerView(void) {
+    UIView *found = nil;
+    @try {
+        UIApplication *app = [UIApplication sharedApplication];
+        for (UIScene *scene in app.connectedScenes) {
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *win in ((UIWindowScene *)scene).windows) {
+                NSMutableArray *stack = [NSMutableArray arrayWithObject:win];
+                int guard = 0;
+                while (stack.count > 0 && guard < 600 && found == nil) {
+                    UIView *v = [stack lastObject];
+                    [stack removeLastObject];
+                    guard++;
+                    if (v == nil) continue;
+                    NSString *cn = NSStringFromClass(v.class);
+                    if ([cn isEqualToString:@"SCFloatingContainerView"]
+                        && v.window != nil && !v.hidden && v.frame.size.width > 40) {
+                        found = v;
+                        break;
+                    }
+                    [stack addObjectsFromArray:v.subviews];
+                }
+                if (found != nil) break;
+            }
+            if (found != nil) break;
+        }
+    } @catch (NSException *ignored) {
+        found = nil;
+    }
+    return found;
+}
+
 static UIImage *axs_dm_snapshot(UIView *view) {
     UIImage *img = nil;
     @try {
