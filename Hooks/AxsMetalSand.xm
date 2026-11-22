@@ -55,6 +55,13 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
+// OPEN MODE (openMode=1, beautify.113): the dismiss-sand timeline played
+// backwards -- grains start scattered up-right at reduced scale, invisible,
+// then converge onto the card frame and fade IN; at time=1 the full card is
+// assembled and the caller swaps in the real view. NOTE: no // comments are
+// allowed INSIDE the string below -- the Logos preprocessor strips // to EOL
+// (including the trailing line-continuation backslash) and would break the
+// multiline literal.
 static NSString * const AXS_MSD_SHADER = @"\
 #include <metal_stdlib>\n\
 using namespace metal;\n\
@@ -93,11 +100,6 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r2 = dustHash(noiseCell + 19.7);\n\
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
-    // beautify.113 OPEN MODE: the dismiss-sand timeline played backwards.\n\
-    // Grains start scattered up-right at 24 to 56 percent scale, invisible, then\n\
-    // converge onto the card frame and fade IN; at time=1 the full card is\n\
-    // assembled and the caller swaps in the real view. Same BL->TR front so\n\
-    // the assemble sweep mirrors the dissolve sweep.\n\
     if (u.openMode == 1u) {\n\
         float beginO = (unit.x + 1.0-unit.y)*0.18 + r*0.025;\n\
         float spanO  = 0.56 + 0.035*r2;\n\
