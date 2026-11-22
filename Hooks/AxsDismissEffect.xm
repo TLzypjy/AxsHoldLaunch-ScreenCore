@@ -507,8 +507,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        void *renderer = axs_metalAssemblePlayRet(dots, frame, duration, density, sourcePoint);
-        if (renderer == NULL) {
+        BOOL assembleStarted = axs_metalAssemblePlay(dots, frame, duration, density, sourcePoint);
+        if (!assembleStarted) {
             axs_open_assembleInFlight = NO;
             card.hidden = NO;
             axs_dm_log(@"OPEN assemble unavailable, native card restored");
