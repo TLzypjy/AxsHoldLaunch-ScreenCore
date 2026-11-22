@@ -1,6 +1,16 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.122
+版本：2.0.5+beautify.123
+
+beautify.123 变更（修复 .122 安全模式崩溃）：
+- .122 实测 SIGSEGV 进安全模式。ips 崩溃栈：ScreenCore → UIWindow _setHidden:forced:
+  → addSubview → _didMoveFromWindow → 我们的 hook（同步调 becameVisible）→
+  dispatch_after → _Block_copy → _Block_object_assign 崩——在 UIKit 窗口装配栈内
+  block 拷贝强引用视图捕获 + __block 递归 block，捕获指针不稳定。
+- 修复：①setHidden:/didMoveToWindow hook 只做弱引用 dispatch_async 延迟，
+  整个流程移出 UIKit 内部栈；②轮询改为静态步进函数 axs_open_pollStep（弱捕获
+  调度、无 __block 递归、无强捕获逃逸 block）。
+- addAnimation 时长钳制 hook（用户要求的"直接修改原生动画"）保留。
 
 beautify.122 变更（按用户思路改为直接修改原生动画）：
 - 用户拍板：不做"拦截+盖层"，直接改原生动画本身。
@@ -251,4 +261,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.122_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.123_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

@@ -330,7 +330,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.122: ARC-open assemble animation ------------------------------
+// ---- beautify.123: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -385,24 +385,119 @@ static void axs_open_markGone(UIView *v) {
 static CFAbsoluteTime axs_open_interceptUntil = 0;
 static UIView *axs_open_interceptCard = nil;
 
-static void axs_open_becameVisible(UIView *v) {
+static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
+                              CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
+    @try {
+        if (card.window == nil) {
+            axs_dm_log(@"OPEN poll aborted, card left window");
+            return;
+        }
+        CGRect frame = [card convertRect:card.bounds toView:nil];
+        CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
+        BOOL settled = (frame.size.width > 40.0 && frame.size.width < screenW * 0.85);
+        if (!settled && polls < 15) {
+            __weak UIView *weakCard = card;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                UIView *c = weakCard;
+                if (c == nil) return;
+                axs_open_pollStep(c, polls + 1, duration, density, sourcePoint, sourceKind);
+            });
+            return;
+        }
+        if (!settled) {
+            axs_dm_log(@"OPEN frame never settled, native card restored");
+            card.hidden = NO;
+            return;
+        }
+        // try the hidden snapshot first; blank probe decides
+        UIImage *shot = axs_dm_snapshot(card);
+        if (!axs_dm_imageIsBlank(shot)) {
+            axs_dm_log(@"OPEN hidden snapshot OK");
+            BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density, sourcePoint);
+            if (ok) {
+                axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
+                           duration, density, (long)polls,
+                           NSStringFromCGPoint(sourcePoint), sourceKind);
+                __weak UIView *weakCard2 = card;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    UIView *c = weakCard2;
+                    if (c == nil) return;
+                    @try {
+                        axs_open_selfRestore = YES;
+                        c.hidden = NO;
+                    } @catch (NSException *ignored) { }
+                });
+            } else {
+                card.hidden = NO;
+                axs_dm_log(@"OPEN assemble unavailable, native card restored");
+            }
+            return;
+        }
+        // hidden snapshot is blank on this device -> 1-frame flash:
+        // unhide, let the render server produce one frame, snapshot, rehide
+        axs_dm_log(@"OPEN hidden snapshot blank, 1-frame flash fallback");
+        card.hidden = NO;
+        __weak UIView *weakCard3 = card;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *c = weakCard3;
+            if (c == nil) return;
+            @try {
+                if (c.window == nil) return;
+                CGRect frame2 = [c convertRect:c.bounds toView:nil];
+                UIImage *shot2 = axs_dm_snapshot(c);
+                c.hidden = YES;
+                if (axs_dm_imageIsBlank(shot2)) {
+                    axs_dm_log(@"OPEN flash snapshot blank too, native card restored");
+                    c.hidden = NO;
+                    return;
+                }
+                BOOL ok = axs_metalAssemblePlay(shot2, frame2, duration, density, sourcePoint);
+                if (ok) {
+                    axs_dm_log(@"OPEN assemble started (flash) duration=%.2f density=%.2f source=%@ (%@)",
+                               duration, density, NSStringFromCGPoint(sourcePoint), sourceKind);
+                    __weak UIView *weakCard4 = c;
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), ^{
+                        UIView *c4 = weakCard4;
+                        if (c4 == nil) return;
+                        @try {
+                            axs_open_selfRestore = YES;
+                            c4.hidden = NO;
+                        } @catch (NSException *ignored) { }
+                    });
+                } else {
+                    c.hidden = NO;
+                    axs_dm_log(@"OPEN assemble unavailable, native card restored");
+                }
+            } @catch (NSException *ignored) {
+                c.hidden = NO;
+            }
+        });
+    } @catch (NSException *ignored) {
+        card.hidden = NO;
+    }
+}
+
     @try {
         if (axs_open_selfRestore) {
-            axs_open_selfRestore = NO;   // our own assemble finished -> not an open
+            axs_open_selfRestore = NO;
             axs_dm_log(@"OPEN candidate skipped (self restore)");
             return;
         }
         if (v.window == nil) return;
         if (v.bounds.size.width < 40 || v.bounds.size.height < 40) return;
-        CFAbsoluteTime now = CACurrentMediaTime();
-        if (now - axs_open_lastDismissHide < 3.0) {
+        CFAbsoluteTime nowT = CACurrentMediaTime();
+        if (nowT - axs_open_lastDismissHide < 3.0) {
             axs_dm_log(@"OPEN candidate skipped (dismiss restore)");
             return;
         }
         NSNumber *gone = objc_getAssociatedObject(v, &axs_open_goneKey);
         CGFloat goneAt = gone ? [gone doubleValue] : -1e9;
-        if (now - goneAt < 0.4) {
-            axs_dm_log(@"OPEN candidate skipped (quick toggle %.2fs)", now - goneAt);
+        if (nowT - goneAt < 0.4) {
+            axs_dm_log(@"OPEN candidate skipped (quick toggle %.2fs)", nowT - goneAt);
             return;
         }
         if (!axs_open_enabled()) {
@@ -412,15 +507,10 @@ static void axs_open_becameVisible(UIView *v) {
         axs_dm_log(@"OPEN candidate accepted frame=%@",
                    NSStringFromCGRect([v convertRect:v.bounds toView:nil]));
         UIView *card = v;
-        // .122: arm the animation-modification window for this open
         axs_open_interceptCard = card;
         axs_open_interceptUntil = CACurrentMediaTime() + 3.0;
         CGFloat density = axs_dm_densityScale();
         CGFloat duration = 0.85;
-        // .119: particles originate at the ARC icon the finger long-pressed
-        // (not the menu item tapped afterwards -- that sits mid-screen).
-        // Fallback chain: arc icon (4s) -> last lift (2s) -> card center.
-        CFAbsoluteTime nowT = CACurrentMediaTime();
         CGPoint sourcePoint = CGPointMake(CGRectGetMidX([card convertRect:card.bounds toView:nil]),
                                           CGRectGetMidY([card convertRect:card.bounds toView:nil]));
         NSString *sourceKind = @"fallback-card-center";
@@ -438,79 +528,11 @@ static void axs_open_becameVisible(UIView *v) {
         // NOT intercepted -- it still runs and its completions still fire, but
         // the addAnimation hook clamps its duration to 0.01s so it finishes
         // instantly behind our particles (see axs_open_addAnimation).
+        // .123: the whole flow runs OUTSIDE the UIKit window-setup stack and
+        // the poll uses weak captures only (see axs_open_pollStep) -- no
+        // block-copy of strong view captures anywhere.
         card.hidden = YES;
-        __block int polls = 0;
-        __block void (^pollBlock)(void) = NULL;
-        __block void (^beginAssemble)(UIImage *, CGRect) = NULL;
-        beginAssemble = ^(UIImage *shot, CGRect frame) {
-            BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density, sourcePoint);
-            if (ok) {
-                axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%d source=%@ (%@)",
-                           duration, density, polls,
-                           NSStringFromCGPoint(sourcePoint), sourceKind);
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    @try {
-                        axs_open_selfRestore = YES;
-                        card.hidden = NO;
-                    } @catch (NSException *ignored) { }
-                });
-            } else {
-                card.hidden = NO;
-                axs_dm_log(@"OPEN assemble unavailable, native card restored");
-            }
-        };
-        pollBlock = ^{
-            @try {
-                polls++;
-                if (card.window == nil) { pollBlock = NULL; return; }
-                CGRect frame = [card convertRect:card.bounds toView:nil];
-                CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
-                BOOL settled = (frame.size.width > 40.0 && frame.size.width < screenW * 0.85);
-                if (!settled && polls < 15) {
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
-                                   dispatch_get_main_queue(), pollBlock);
-                    return;
-                }
-                pollBlock = NULL;
-                if (!settled) {
-                    axs_dm_log(@"OPEN frame never settled, native card restored");
-                    card.hidden = NO;
-                    return;
-                }
-                // try the hidden snapshot first; blank probe decides
-                UIImage *shot = axs_dm_snapshot(card);
-                if (!axs_dm_imageIsBlank(shot)) {
-                    axs_dm_log(@"OPEN hidden snapshot OK");
-                    beginAssemble(shot, frame);
-                    return;
-                }
-                // hidden snapshot is blank on this device -> 1-frame flash:
-                // unhide, let the render server produce one frame, snapshot, rehide
-                axs_dm_log(@"OPEN hidden snapshot blank, 1-frame flash fallback");
-                card.hidden = NO;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    @try {
-                        if (card.window == nil) return;
-                        CGRect frame2 = [card convertRect:card.bounds toView:nil];
-                        UIImage *shot2 = axs_dm_snapshot(card);
-                        card.hidden = YES;
-                        if (axs_dm_imageIsBlank(shot2)) {
-                            axs_dm_log(@"OPEN flash snapshot blank too, native card restored");
-                            card.hidden = NO;
-                            return;
-                        }
-                        beginAssemble(shot2, frame2);
-                    } @catch (NSException *ignored) {
-                        card.hidden = NO;
-                    }
-                });
-            } @catch (NSException *ignored) {
-                card.hidden = NO;
-            }
-        };
-        pollBlock();
+        axs_open_pollStep(card, 0, duration, density, sourcePoint, sourceKind);
     } @catch (NSException *ignored) { }
 }
 
@@ -798,14 +820,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.122: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.123: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.122, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.123, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
