@@ -304,6 +304,8 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
 }
 
 // ---- beautify.113: ARC-open assemble animation ------------------------------
+static NSMutableSet *axs_dm_hooked = nil;
+
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
 // later). There is no known-signature "open" selector on the manager, so we
 // detect opens via SCFloatingContainerView visibility transitions instead:
@@ -509,7 +511,6 @@ static void axs_dm_closeAll(id self, SEL _cmd) {
 }
 
 // --- installer --------------------------------------------------------------
-static NSMutableSet *axs_dm_hooked = nil;
 
 static Class axs_dm_firstClassDeclaring(SEL sel) {
     Class found = Nil;
