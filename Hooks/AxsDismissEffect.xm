@@ -447,7 +447,7 @@ static UIImage *axs_open_getWhiteTexture(void) {
         UIGraphicsImageRenderer *r =
             [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, 1, 1) format:fmt];
         axs_open_whiteTexture = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [ctx setFillColor:[UIColor colorWithWhite:1.0 alpha:0.95]];
+            CGContextSetFillColorWithColor(ctx.CGContext, [UIColor colorWithWhite:1.0 alpha:0.95].CGColor);
             UIRectFill(CGRectMake(0, 0, 1, 1));
         }];
     }
