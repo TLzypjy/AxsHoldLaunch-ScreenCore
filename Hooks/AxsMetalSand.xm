@@ -68,6 +68,7 @@ struct DustUniforms {\n\
     float distance;\n\
     float seed;\n\
     uint style;\n\
+    uint openMode;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -83,6 +84,43 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
                               constant DustUniforms& u [[buffer(0)]]) {\n\
     const float2 corners[6] = {float2(0,0),float2(1,0),float2(0,1),\n\
                               float2(1,0),float2(1,1),float2(0,1)};\n\
+    float2 cell = float2(instanceID % u.columns, instanceID / u.columns);\n\
+    float2 grid = float2(u.columns, u.rows);\n\
+    float2 unit = (cell+0.5)/grid;\n\
+    float2 corner = corners[vertexID];\n\
+    float2 noiseCell = cell + float2(u.seed, u.seed*0.371);\n\
+    float r = dustHash(noiseCell);\n\
+    float r2 = dustHash(noiseCell + 19.7);\n\
+    float r3 = dustHash(noiseCell + 72.3);\n\
+    float r4 = dustHash(noiseCell + 43.7);\n\
+    // beautify.113 OPEN MODE: the dismiss-sand timeline played backwards.\n\
+    // Grains start scattered up-right at 24%-56% scale, invisible, then\n\
+    // converge onto the card frame and fade IN; at time=1 the full card is\n\
+    // assembled and the caller swaps in the real view. Same BL->TR front so\n\
+    // the assemble sweep mirrors the dissolve sweep.\n\
+    if (u.openMode == 1u) {\n\
+        float beginO = (unit.x + 1.0-unit.y)*0.18 + r*0.025;\n\
+        float spanO  = 0.56 + 0.035*r2;\n\
+        float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
+        float motionO = pow(progressO,1.12);\n\
+        float inv = 1.0-motion;\n\
+        float dxO = (0.62 + 1.05*r)*u.distance*inv + (r2-0.5)*u.distance*0.40*inv;\n\
+        float dyO = -(0.45 + 1.05*r2)*u.distance*inv + sin(inv*7.0+r3*6.283)*u.distance*0.13*inv;\n\
+        float shrinkO = mix(1.0, mix(0.24,0.56,r3), inv);\n\
+        float angleO = (r3-0.5)*4.8*inv;\n\
+        float2 tileSizeO = u.cardSize/grid;\n\
+        float2 deltaO = (corner-0.5)*tileSizeO*shrinkO;\n\
+        float cO=cos(angleO),sO=sin(angleO);\n\
+        deltaO=float2(cO*deltaO.x-sO*deltaO.y,sO*deltaO.x+cO*deltaO.y);\n\
+        float2 pO = u.origin + unit*u.cardSize + deltaO + float2(dxO,dyO);\n\
+        DustVertex outO;\n\
+        outO.position=float4(2.0*pO.x/u.viewport.x-1.0,1.0-2.0*pO.y/u.viewport.y,0,1);\n\
+        outO.uv=(cell+corner)/grid;\n\
+        outO.local=corner;\n\
+        outO.fade=motionO;\n\
+        outO.breakage=1.0;\n\
+        return outO;\n\
+    }\n\
     float2 cell = float2(instanceID % u.columns, instanceID / u.columns);\n\
     float2 grid = float2(u.columns, u.rows);\n\
     float2 unit = (cell+0.5)/grid;\n\
@@ -201,7 +239,7 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], texture2d<float> imag
     return color*(in.fade*shape);\n\
 }\n";
 
-// C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 52 bytes.
+// C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 56 bytes.
 typedef struct {
     float viewport[2];
     float origin[2];
@@ -212,6 +250,7 @@ typedef struct {
     float distance;
     float seed;
     uint32_t style;
+    uint32_t openMode;
 } AXSMetalDustUniforms;
 
 // ---- cached device + queue + pipeline (compiled once, reused) --------------
@@ -313,7 +352,8 @@ static NSMutableArray *sMsdActiveRenderers = nil;
                    view:(AXSMetalSandView *)view
                    seed:(float)seed
                   style:(uint32_t)style
-                density:(CGFloat)density;
+                density:(CGFloat)density
+               openMode:(uint32_t)openMode;
 @end
 
 @implementation AXSMetalSandRenderer
@@ -326,7 +366,8 @@ static NSMutableArray *sMsdActiveRenderers = nil;
                    view:(AXSMetalSandView *)view
                    seed:(float)seed
                   style:(uint32_t)style
-                density:(CGFloat)density {
+                density:(CGFloat)density
+               openMode:(uint32_t)openMode {
     self.texture = tex;
     self.duration = dur;
     self.overlay = win;
@@ -343,12 +384,13 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     u.distance = 110.0f;     // DustDistance default (sand drift distance)
     u.seed = seed;
     u.style = style;
+    u.openMode = openMode;
     // Grid = per-style base resolution scaled by the density slider.
-    // Style 8 (sand) keeps the reference plugin's particle-count model
-    // (14000 * density distributed by card aspect); the 8 grid styles scale
-    // their characteristic base grids (Glass stays chunky 5x6, Dust 14x14...).
+    // Style 8 (sand) and open mode use the reference plugin's particle-count
+    // model (14000 * density distributed by card aspect); the 8 grid styles
+    // scale their characteristic base grids (Glass stays chunky 5x6, Dust 14x14...).
     uint32_t cols, rows;
-    if (style == 8u) {
+    if (style == 8u || openMode == 1u) {
         int particles = (int)lround(14000.0 * density);
         if (particles < 200) particles = 200;
         if (particles > 40000) particles = 40000;
@@ -526,9 +568,10 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
     return tex;
 }
 
-// ---- public entry point: returns YES if Metal took over the effect --------
-BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
-                       uint32_t style, CGFloat density) {
+// ---- public entry points: return YES if Metal took over the effect --------
+// common core shared by dismiss (openMode=0) and open-assemble (openMode=1)
+static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                                uint32_t style, CGFloat density, uint32_t openMode) {
     @try {
         if (!axs_msd_ensurePipeline()) {
             axs_msd_log(@"metal unavailable -> no dissolve effect");
@@ -586,7 +629,7 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
         // really rendered.
         BOOL started = [renderer startWithTexture:tex frame:frameInWindow viewport:overlay.bounds.size
                                           duration:duration overlay:overlay view:view seed:seed
-                                            style:style density:density];
+                                            style:style density:density openMode:openMode];
         if (!started) {
             [sMsdActiveRenderers removeObject:renderer];
             overlay.hidden = YES;
@@ -594,8 +637,8 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
             return NO;
         }
 
-        axs_msd_log(@"metal started style=%u grains=%d dur=%.2f density=%.2f img=%lux%lu frame=%@ scene=%@",
-                    style, renderer.grainCount, duration, density,
+        axs_msd_log(@"metal started open=%u style=%u grains=%d dur=%.2f density=%.2f img=%lux%lu frame=%@ scene=%@",
+                    openMode, style, renderer.grainCount, duration, density,
                     (unsigned long)CGImageGetWidth(shot.CGImage),
                     (unsigned long)CGImageGetHeight(shot.CGImage),
                     NSStringFromCGRect(frameInWindow),
@@ -605,4 +648,16 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
         axs_msd_log(@"metal sand EXCEPTION %@", [e reason]);
         return NO;
     }
+}
+
+// dismiss (dissolve): style selects the motion model, openMode=0
+BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                       uint32_t style, CGFloat density) {
+    return axs_metalPlayCommon(shot, frameInWindow, duration, style, density, 0);
+}
+
+// beautify.113 open-assemble: reverse sand, openMode=1
+BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                           CGFloat density) {
+    return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1);
 }

@@ -1,6 +1,21 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.112
+版本：2.0.5+beautify.113
+
+beautify.113 变更（ARC 呼出聚合动画 + 独立开关）：
+- 需求（用户决策）：先做 B 方案粒子反向聚合，生效范围仅 ARC 菜单呼出（全屏转浮窗后续再做），独立开关。
+- Metal：DustUniforms 增加 openMode 字段；nlDustVertex 顶部 openMode==1 分支——
+  消散彩砂时间线倒放：粒子从右上散布态（缩至 24%~56%、隐身）向卡片框架收拢、渐显，
+  聚合完成后由调用方显示真卡片；公共入口重构为 axs_metalPlayCommon，
+  对外 axs_metalSandPlay（消散）+ axs_metalAssemblePlay（呼出聚合）两个包装。
+- 呼出探测：无已知签名的 open selector，改用 SCFloatingContainerView 可见性变迁检测——
+  hook setHidden: / didMoveToWindow（子类安全模式：自身声明则子类级 MSHook，
+  仅继承则 class_addMethod + msgSendSuper 转发，绝不污染 UIView 全局）。
+  判定 = 消失 ≥0.4s 后重新可见且窗口非空、尺寸 >40pt；消散自身的恢复显示用
+  axs_open_lastDismissHide 3 秒窗口抑制；快速切换（<0.4s，dock 往返）忽略。
+- 流程：呼出 → 0.12s 后（首帧布局落定）截图 → 隐藏真卡片 → 聚合 0.85s×密度 → 恢复真卡片。
+- 独立开关 splitBeautifyOpenAnimEnabled（默认开），面板「呼出聚合动画 / Open Assemble Animation」
+  带 info 说明，插在消散动画开关之后。
 
 beautify.112 变更（全部样式统一 GPU 引擎 + 粒子密度滑块）：
 - 用户决策：新增密度滑块后，CPU 路径靠上限防卡顿是倒设计 → 8 种 UIView 网格样式
@@ -155,4 +170,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.112_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.113_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

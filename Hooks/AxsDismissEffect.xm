@@ -20,6 +20,8 @@ void MSHookMessageEx(Class cls, SEL sel, IMP replacement, IMP *result);
 // when the GPU engine took over; NO means caller should fall back to UIView.
 BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                        uint32_t style, CGFloat density);
+BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                           CGFloat density);
 
 // ---------------------------------------------------------------------------
 // beautify.101 - 9th style: ColorSand, rebuilt as a faithful UIView port of
@@ -301,6 +303,149 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
+// ---- beautify.113: ARC-open assemble animation ------------------------------
+// Scope (user decision): only ARC-menu opens for now (fullscreen->floating
+// later). There is no known-signature "open" selector on the manager, so we
+// detect opens via SCFloatingContainerView visibility transitions instead:
+//   * setHidden:NO / didMoveToWindow(on-window) after being gone >= 0.4s
+//   * suppressed for 3s after our own dismiss (which hides + restores the card)
+// SIGNATURE SAFETY: setHidden:/didMoveToWindow are UIView-inherited. Hooking
+// them blindly via MSHookMessageEx would patch UIView itself (global). So:
+//   - if the subclass declares the method -> hook at subclass level (safe)
+//   - otherwise -> class_addMethod an override that forwards with msgSendSuper
+static char axs_open_goneKey;
+static CFAbsoluteTime axs_open_lastDismissHide = -1e9;
+static IMP axs_open_orig_setHidden = NULL;   // NULL = not installed; (IMP)1 = class_addMethod super-forward
+static IMP axs_open_orig_didMove = NULL;
+
+static BOOL axs_open_enabled(void) {
+    BOOL on = YES;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return YES;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyOpenAnimEnabled", @YES);
+            if ([value isKindOfClass:[NSNumber class]]) on = [value boolValue];
+        }
+    } @catch (NSException *ignored) {
+        on = YES;
+    }
+    return on;
+}
+
+static void axs_open_markGone(UIView *v) {
+    objc_setAssociatedObject(v, &axs_open_goneKey, @(CACurrentMediaTime()),
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void axs_open_becameVisible(UIView *v) {
+    @try {
+        if (v.window == nil) return;
+        if (v.bounds.size.width < 40 || v.bounds.size.height < 40) return;
+        CFAbsoluteTime now = CACurrentMediaTime();
+        if (now - axs_open_lastDismissHide < 3.0) {
+            axs_dm_log(@"OPEN candidate skipped (dismiss restore)");
+            return;
+        }
+        NSNumber *gone = objc_getAssociatedObject(v, &axs_open_goneKey);
+        CGFloat goneAt = gone ? [gone doubleValue] : -1e9;
+        if (now - goneAt < 0.4) {
+            axs_dm_log(@"OPEN candidate skipped (quick toggle %.2fs)", now - goneAt);
+            return;
+        }
+        if (!axs_open_enabled()) {
+            axs_dm_log(@"OPEN candidate ignored (switch off)");
+            return;
+        }
+        axs_dm_log(@"OPEN candidate accepted frame=%@",
+                   NSStringFromCGRect([v convertRect:v.bounds toView:nil]));
+        UIView *card = v;
+        CGFloat density = axs_dm_densityScale();
+        CGFloat duration = 0.85;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            @try {
+                if (card.window == nil) return;
+                CGRect frame = [card convertRect:card.bounds toView:nil];
+                UIImage *shot = axs_dm_snapshot(card);
+                if (shot == nil || shot.CGImage == nil) return;
+                card.hidden = YES;   // hide the native card behind the assemble
+                BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density);
+                if (ok) {
+                    axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f", duration, density);
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), ^{
+                        @try { card.hidden = NO; } @catch (NSException *ignored) { }
+                    });
+                } else {
+                    card.hidden = NO;
+                    axs_dm_log(@"OPEN assemble unavailable, native card restored");
+                }
+            } @catch (NSException *ignored) { }
+        });
+    } @catch (NSException *ignored) { }
+}
+
+static void axs_open_setHidden(id self, SEL _cmd, BOOL hidden) {
+    if (axs_open_orig_setHidden == (IMP)1) {
+        struct objc_super sup = { (id)self, class_getSuperclass(object_getClass(self)) };
+        ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&sup, _cmd, hidden);
+    } else if (axs_open_orig_setHidden != NULL) {
+        ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(self, _cmd, hidden);
+    }
+    UIView *v = (UIView *)self;
+    if (hidden) axs_open_markGone(v);
+    else axs_open_becameVisible(v);
+}
+
+static void axs_open_didMoveToWindow(id self, SEL _cmd) {
+    if (axs_open_orig_didMove == (IMP)1) {
+        struct objc_super sup = { (id)self, class_getSuperclass(object_getClass(self)) };
+        ((void (*)(struct objc_super *, SEL))objc_msgSendSuper)(&sup, _cmd);
+    } else if (axs_open_orig_didMove != NULL) {
+        ((void (*)(id, SEL))axs_open_orig_didMove)(self, _cmd);
+    }
+    UIView *v = (UIView *)self;
+    if (v.window == nil) axs_open_markGone(v);
+    else axs_open_becameVisible(v);
+}
+
+// subclass-safe install: hook the method at SCFloatingContainerView level only
+static void axs_open_installOne(NSString *selName, const char *types,
+                                IMP newImp, IMP *origOut, NSString *tag) {
+    if ([axs_dm_hooked containsObject:tag]) return;
+    Class cls = objc_getClass("SCFloatingContainerView");
+    if (cls == Nil) return;   // class not loaded yet -> retried by installAll
+    SEL sel = NSSelectorFromString(selName);
+    Method own = NULL;
+    unsigned int mc = 0;
+    Method *ms = class_copyMethodList(cls, &mc);
+    for (unsigned int i = 0; i < mc; i++) {
+        if (method_getName(ms[i]) == sel) { own = ms[i]; break; }
+    }
+    free(ms);
+    if (own != NULL) {
+        axs_dm_log(@"OPEN INSTALL %@ on SCFloatingContainerView (declared, enc=%s)",
+                   selName, method_getTypeEncoding(own) ? method_getTypeEncoding(own) : "?");
+        MSHookMessageEx(cls, sel, newImp, origOut);
+    } else {
+        if (!class_addMethod(cls, sel, newImp, types)) return;   // race: retry next pass
+        *origOut = (IMP)1;   // marker: replacement must forward via msgSendSuper
+        axs_dm_log(@"OPEN INSTALL %@ added override on SCFloatingContainerView (super-forward)", selName);
+    }
+    [axs_dm_hooked addObject:tag];
+}
+
+static void axs_open_installAll(void) {
+    axs_open_installOne(@"setHidden:", "v20@0:8B16",
+                        (IMP)axs_open_setHidden, &axs_open_orig_setHidden, @"OPEN:setHidden:");
+    axs_open_installOne(@"didMoveToWindow", "v16@0:8",
+                        (IMP)axs_open_didMoveToWindow, &axs_open_orig_didMove, @"OPEN:didMove");
+}
+
 
 static void axs_dm_trigger(NSString *tag) {
     unsigned long long seq = ++axs_dm_seq;
@@ -325,6 +470,7 @@ static void axs_dm_trigger(NSString *tag) {
         // anyway; hiding it does not interrupt the native animation or its
         // completion handlers -- it just keeps them off-screen.
         container.hidden = YES;
+        axs_open_lastDismissHide = CACurrentMediaTime();   // suppress the open hook on our own restore
         axs_dm_log(@"#%llu %@ card hidden behind dissolve", seq, tag);
         // safety net: restore visibility once the dissolve is fully cleaned up,
         // in case ScreenCore reuses this container view for a future session.
@@ -437,12 +583,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
+    // beautify.113: ARC-open assemble hooks (class may load later -> retried)
+    axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.112, dismiss particles)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.113, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
