@@ -1,6 +1,6 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.106
+版本：2.0.5+beautify.107
 
 内容：全部 .xm/.h/.m、Makefile、AxsHoldLaunchBuild.mk、build.sh、AxsHoldLaunch.plist、control、
      Hooks/、Headers/、Sources/、Preferences 面板 plist/strings（packaging/overlay/）、
@@ -22,12 +22,21 @@ beautify.99 变更（消散动画扩展为 8 种样式，共用一个总开关�
 - 日志 burst 行新增 style=N(name) 字段，便于确认选中的样式生效。
 - CI：build.yml / package_beautify.sh 版本升 .99，新增样式键与样式枚举的源码/dylib 断言。
 
+beautify.107 变更（真正根治消散卡：Metal selector 修正）：
+  - .106 日志证实 Metal 仍每次抛 unrecognized selector sent to
+    AGXG15FamilyCommandQueue，说明 command buffer 的 selector 名字也是错的
+  - 核对参考插件 dylib：commandBuffer 出现 2 次，newCommandBuffer 出现 0 次，
+    真机可用的是 queue 的 commandBuffer（不是 newCommandBuffer）
+  - 改为运行时探测：优先 commandBuffer，其次 newCommandBuffer，都没有则干净回退，
+    不再抛异常；Metal 真正生效后不再创建 6000 层 UIView（卡顿消失）
+  - CI/打包脚本同步断言 commandBuffer selector 与运行时探测日志
+
 beautify.106 变更（根治消散卡：Metal 命令队列修复）：
   - 根因：.104 把 newCommandBuffer 错当 MTLDevice 方法，用 objc_msgSend 强绕过编译错误，
     真机运行时抛 unrecognized selector sent to AGXG15Device，Metal 每帧崩溃 → 一直回退 6000 层 UIView → 卡
   - 修正：新增 MTLCommandQueue 单例，从 queue 取 command buffer（Metal 正确 API）
-  - 移除错误的 objc_msgSend 调用与 objc/message.h 依赖
-  - 效果：Metal 真正生效，14000 粒 GPU 一次 draw，主线程零负担，卡顿消失
+  - 保留 objc_msgSend（SDK 头文件无法静态解析该 selector），但接收者改为正确的 queue
+  - 效果预期：Metal 生效，14000 粒 GPU 一次 draw，主线程零负担（.107 再修 selector 名字）
 
 beautify.105 变更（修复 Metal 彩砂无效果）：
   - 根因：iOS 纹理默认 storageMode=Private，replaceRegion 上传静默失败导致纹理全透明
@@ -72,4 +81,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.106_iphoneos-arm64.deb（CI 交付）
+构建产物：com.susudear.screencore_2.0.5+beautify.107_iphoneos-arm64.deb（CI 交付）

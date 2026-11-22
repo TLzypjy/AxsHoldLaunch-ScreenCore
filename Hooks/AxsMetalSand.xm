@@ -139,6 +139,12 @@ static id<MTLDevice> sMsdDevice = nil;
 // sent to AGXG15Device" -> Metal never drew -> always fell back to the slow
 // 6000-layer UIView path (the persisting stutter). Create a command queue once
 // and get command buffers from it, the correct Metal API usage.
+// .107 ROOT CAUSE: the queue itself does NOT implement `newCommandBuffer` on
+// this device (log: "unrecognized selector sent to AGXG15FamilyCommandQueue").
+// The reference plugin whose sand matched the video uses `commandBuffer` on
+// the queue -- its dylib contains "commandBuffer" (x2) and NEVER
+// "newCommandBuffer" (x0). Switch to that selector with a runtime probe so a
+// missing selector returns NO cleanly instead of throwing into UIView fallback.
 static id<MTLCommandQueue> sMsdQueue = nil;
 static id<MTLRenderPipelineState> sMsdPipeline = nil;
 static BOOL sMsdTried = NO;
@@ -312,14 +318,23 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
     rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
 
-    // .106 FIX: newCommandBuffer belongs to MTLCommandQueue, NOT MTLDevice.
-    // .104 called it on the device -> "unrecognized selector sent to
-    // AGXG15Device" crash every frame -> Metal never rendered -> slow UIView
-    // fallback (the stutter). objc_msgSend is needed because this SDK's clang
-    // cannot resolve the selector on the protocol-typed queue at compile time;
-    // the receiver is now the CORRECT object (sMsdQueue), so runtime works.
-    id<MTLCommandBuffer> cb = ((id<MTLCommandBuffer> (*)(id, SEL))objc_msgSend)(
-        sMsdQueue, @selector(newCommandBuffer));
+    // .107 FIX: the correct selector on MTLCommandQueue here is `commandBuffer`
+    // (confirmed from the reference plugin dylib: commandBuffer x2,
+    // newCommandBuffer x0). .106 sent `newCommandBuffer` to the queue and still
+    // crashed with "unrecognized selector sent to AGXG15FamilyCommandQueue",
+    // so Metal never drew and every close built 6000 UIView layers -> stutter.
+    // Probe at runtime, prefer commandBuffer, keep newCommandBuffer as a
+    // fallback for devices/SDKs that expose it; never throw into SpringBoard.
+    SEL cbSel = @selector(commandBuffer);
+    if (![sMsdQueue respondsToSelector:cbSel]) {
+        cbSel = @selector(newCommandBuffer);
+    }
+    if (![sMsdQueue respondsToSelector:cbSel]) {
+        axs_msd_log(@"metal queue exposes no command buffer selector");
+        return NO;
+    }
+    id<MTLCommandBuffer> cb =
+        ((id<MTLCommandBuffer> (*)(id, SEL))objc_msgSend)(sMsdQueue, cbSel);
     if (cb == nil) return NO;
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
     if (enc == nil) return NO;
