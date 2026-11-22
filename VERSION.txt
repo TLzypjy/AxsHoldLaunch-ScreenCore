@@ -1,6 +1,17 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.128
+版本：2.0.5+beautify.129
+
+beautify.129 变更（浮窗由粒子组成：app 快照纹理 + 无闪现时序）：
+- .128 反馈：粒子聚成白色长方形亮点云后浮窗"闪现"——用户要的是浮窗由粒子
+  一点点组成。
+- 实现 ①：纹理直接从卡片视图树提取——ScreenCore 打开浮窗时用 App 快照图做
+  封面（UIImageView.image），纯数据属性读取、无需渲染管线（hidden 状态下完全
+  可行），粒子带着浮窗自己的样子聚合 = 浮窗由粒子一点点组成。找不到时退化为
+  白色亮点云。
+- 实现 ②：卡片恢复提前到聚合结束前 0.10s——此刻粒子云最密且盖在卡片位置
+  （overlay window 在卡片之上），卡片出现被云遮住；Metal 聚合完成后 overlay
+  0.18s alpha 淡出（原为瞬间消失）露出真卡片——无闪现、无跳变。
 
 beautify.128 变更（无纹理聚合：彻底摆脱截图链路）：
 - .127 视频实锤：粒子带的快照纹理在本机不可靠（黑网格半透明覆盖卡片区域），
@@ -314,4 +325,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.128_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.129_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

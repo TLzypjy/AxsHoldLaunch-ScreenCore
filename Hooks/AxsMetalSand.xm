@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.128): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.129): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -350,6 +350,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
 @property (nonatomic, assign) CGFloat duration;
 @property (nonatomic, assign) AXSMetalDustUniforms u;
 @property (nonatomic, assign) int grainCount;
+@property (nonatomic, assign) BOOL fadingOut;
 - (BOOL)startWithTexture:(id<MTLTexture>)tex
                   frame:(CGRect)frame
                viewport:(CGSize)viewport
@@ -515,7 +516,19 @@ static NSMutableArray *sMsdActiveRenderers = nil;
         BOOL done = (t >= 1.0);
         _u.time = done ? 1.0f : (float)t;   // direct ivar: ARC forbids struct-member via property
         [self renderOnce];
-        if (done) [self cleanup];
+        if (done) {
+            if (self.u.openMode == 1u && !self.fadingOut) {
+                // .129: open assemble -- fade the converged particle cloud out
+                // over 0.18s so the real card appearing beneath it is masked
+                self.fadingOut = YES;
+                self.link.paused = YES;   // freeze the last frame while fading
+                UIView *ov = self.overlay;
+                [UIView animateWithDuration:0.18 animations:^{ ov.alpha = 0.0; }
+                                 completion:^{ [self cleanup]; }];
+                return;
+            }
+            [self cleanup];
+        }
     } @catch (NSException *e) {
         axs_msd_log(@"metal tick EXCEPTION %@", [e reason]);
         [self cleanup];
@@ -619,6 +632,7 @@ static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat dur
         overlay.windowLevel = UIWindowLevelAlert + 500;
         overlay.backgroundColor = [UIColor clearColor];
         overlay.userInteractionEnabled = NO;
+        overlay.alpha = 1.0;
         overlay.hidden = NO;
 
         AXSMetalSandView *view = [[AXSMetalSandView alloc] initWithFrame:overlay.bounds];
@@ -670,7 +684,7 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGPointMake(0, 0));
 }
 
-// beautify.128 open-assemble: grains fly FROM sourcePoint TO the card
+// beautify.129 open-assemble: grains fly FROM sourcePoint TO the card
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,

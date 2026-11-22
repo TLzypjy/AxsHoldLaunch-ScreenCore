@@ -303,7 +303,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.128: ARC-open assemble animation ------------------------------
+// ---- beautify.129: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -413,6 +413,34 @@ static CGFloat axs_open_density(void) {
 // native animation. Particles converge into a bright cloud in the card shape,
 // then the real card appears beneath the cloud as it fades.
 static UIImage *axs_open_whiteTexture = nil;
+// .129: walk the card tree for the biggest UIImageView.image (the app
+// snapshot ScreenCore shows on open). Pure property reads -- no rendering.
+static UIImage *axs_open_findAppSnapshot(UIView *root) {
+    UIImage *best = nil;
+    CGFloat bestW = 0.0;
+    @try {
+        CGFloat targetW = root.bounds.size.width;
+        NSMutableArray *stack = [NSMutableArray arrayWithObject:root];
+        int guard = 0;
+        while (stack.count > 0 && guard < 200) {
+            guard++;
+            UIView *v = [stack lastObject];
+            [stack removeLastObject];
+            if (v == nil) continue;
+            if ([v isKindOfClass:[UIImageView class]]) {
+                UIImage *img = [(UIImageView *)v image];
+                if (img != nil && img.size.width > bestW && img.size.width >= targetW * 0.5) {
+                    best = img; bestW = img.size.width;
+                }
+            }
+            if (guard < 200) [stack addObjectsFromArray:v.subviews];
+        }
+    } @catch (NSException *ignored) {
+        return best;
+    }
+    return best;
+}
+
 static UIImage *axs_open_getWhiteTexture(void) {
     if (axs_open_whiteTexture == nil) {
         UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
@@ -453,21 +481,32 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .128: no snapshot at all -- assemble with the glowing-dot texture
-        UIImage *shot = axs_open_getWhiteTexture();
+        // .129: texture = the app-snapshot image already living in the card's
+        // view tree (ScreenCore shows the app snapshot on open). Reading a
+        // UIImageView.image is pure data -- no render pipeline involved, works
+        // perfectly while the card is hidden. Fallback: glowing white dots.
+        UIImage *shot = axs_open_findAppSnapshot(card);
+        NSString *texKind = shot ? @"app-snapshot" : @"white-dots";
+        if (shot == nil) shot = axs_open_getWhiteTexture();
         if (shot == nil) {
             axs_dm_log(@"OPEN white texture failed, native card restored");
             axs_open_assembleInFlight = NO;
             card.hidden = NO;
             return;
         }
+        axs_dm_log(@"OPEN texture=%@ size=%@", texKind,
+                   NSStringFromCGSize(shot.size));
         BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density, sourcePoint);
         if (ok) {
-            axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
-                       duration, density, (long)polls,
+            axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
+                       duration, density, (long)polls, texKind,
                        NSStringFromCGPoint(sourcePoint), sourceKind);
+            // .129: restore the card EARLY -- 0.10s before the assemble ends,
+            // while the converged particle cloud is densest and still covers
+            // the card position (the overlay window is above the card). The
+            // cloud then fades out revealing the card: no pop, no blink.
             __weak UIView *weakCard2 = card;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration - 0.10) * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
                 UIView *c = weakCard2;
                 if (c == nil) return;
@@ -875,14 +914,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.128: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.129: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.128, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.129, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
