@@ -184,7 +184,7 @@ Derootifier() {
 
     find "$TEMPDIR_NEW" -name ".DS_Store" -delete
     dpkg-deb -Zxz -b "$TEMPDIR_NEW" "$OUTPUT_PATH"
-    chown 501:501 "$OUTPUT_PATH"
+    chown 501:501 "$OUTPUT_PATH" 2>/dev/null || true
 
     ### Real script end
 
@@ -357,7 +357,7 @@ done
     
 if [ ! -z "$3" ]; then
     cp "$TEMPDIR_NEW"/DEBIAN/*.roothidepatch "$TEMPDIR_NEW"/var/mobile/Library/pkgmirror/DEBIAN.$DEB_PACKAGE/ >/dev/null 2>&1 || true
-    chown -R 501:501 "$TEMPDIR_NEW"/var/mobile/Library/pkgmirror/
+    chown -R 501:501 "$TEMPDIR_NEW"/var/mobile/Library/pkgmirror/ 2>/dev/null || true
     chmod -R 0755 "$TEMPDIR_NEW"/var/mobile/Library/pkgmirror/
 fi
 
@@ -384,7 +384,7 @@ fi
 
 find "$TEMPDIR_NEW" -name ".DS_Store" -delete
 dpkg-deb -Zxz -b "$TEMPDIR_NEW" "$OUTPUT_PATH"
-chown 501:501 "$OUTPUT_PATH"
+chown 501:501 "$OUTPUT_PATH" 2>/dev/null || true
 
 ### Real script end
 
