@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.117): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.118): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -106,23 +106,25 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float beginO = (unit.x + 1.0-unit.y)*0.18 + r*0.025;\n\
         float spanO  = 0.56 + 0.035*r2;\n\
         float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
-        float motionO = pow(progressO,1.12);\n\
+        float leave = smoothstep(0.0,0.28,progressO);\n\
+        float flyE = smoothstep(0.30,1.0,progressO);\n\
+        float flyM = pow(flyE,1.12);\n\
         float angS = r*6.2831853;\n\
-        float radS = 8.0 + 36.0*r4;\n\
+        float radS = (6.0 + 30.0*r4)*leave;\n\
         float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
         float2 endP = u.origin + unit*u.cardSize;\n\
-        float shrinkO = mix(mix(0.18,0.45,r3), 1.0, motionO);\n\
-        float angleO = (r3-0.5)*4.8*(1.0-motionO);\n\
+        float shrinkO = mix(mix(0.15,0.40,r3), 1.0, flyM);\n\
+        float angleO = (r3-0.5)*4.8*(1.0-flyM);\n\
         float2 tileSizeO = u.cardSize/grid;\n\
         float2 deltaO = (corner-0.5)*tileSizeO*shrinkO;\n\
         float cO=cos(angleO),sO=sin(angleO);\n\
         deltaO=float2(cO*deltaO.x-sO*deltaO.y,sO*deltaO.x+cO*deltaO.y);\n\
-        float2 pO = mix(startP, endP, motionO) + deltaO;\n\
+        float2 pO = mix(startP, endP, flyM) + deltaO;\n\
         DustVertex outO;\n\
         outO.position=float4(2.0*pO.x/u.viewport.x-1.0,1.0-2.0*pO.y/u.viewport.y,0,1);\n\
         outO.uv=(cell+corner)/grid;\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.22,progressO);\n\
+        outO.fade=smoothstep(0.0,0.10,progressO);\n\
         outO.breakage=1.0;\n\
         return outO;\n\
     }\n\
@@ -668,7 +670,7 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGPointMake(0, 0));
 }
 
-// beautify.117 open-assemble: grains fly FROM sourcePoint TO the card
+// beautify.118 open-assemble: grains fly FROM sourcePoint TO the card
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,

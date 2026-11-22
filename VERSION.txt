@@ -1,6 +1,14 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.117
+版本：2.0.5+beautify.118
+
+beautify.118 变更（呼出聚合两段式 + 原生动画闪现压缩）：
+- 用户反馈（注：实测包为 .116，其坐标错位 bug 已在 .117 修复）：
+  ①「原生动画也会显示」——卡片本体在聚合前 0.12s 截图等待期先闪现原生呼出动画。
+    修复：隐藏提前到 0.05s（约 3 帧），闪现大幅缩短。
+  ②「起点感知弱」——粒子一出现就开始飞行，0.6s 飞完 600pt，看不出从手指位置涌出。
+    修复：两段式聚合——前 30% 粒子在手指点涌出盘旋（半径 6~36pt 随 leave 扩大、
+    小颗粒态），后 70% 飞向卡片聚合长大旋转；渐显提前到前 10%。
 
 beautify.117 变更（修复手指起点坐标错位）：
 - .116 日志证实循环已修复、手指坐标已捕获（OPEN source point 三条记录均为 ARC 真实
@@ -204,4 +212,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.117_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.118_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
