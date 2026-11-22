@@ -481,6 +481,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
     }
 }
 
+static void axs_open_becameVisible(UIView *v) {
     @try {
         if (axs_open_selfRestore) {
             axs_open_selfRestore = NO;
