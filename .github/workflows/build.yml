@@ -502,8 +502,8 @@ jobs:
           # .106 command queue fix assertions
           grep -Fq "id<MTLCommandQueue> sMsdQueue" Hooks/AxsMetalSand.xm || { echo "MTLCommandQueue singleton missing"; exit 1; }
           grep -Fq "sMsdQueue = [sMsdDevice newCommandQueue]" Hooks/AxsMetalSand.xm || { echo "command queue creation missing"; exit 1; }
-          grep -Fq "cb = [sMsdQueue newCommandBuffer]" Hooks/AxsMetalSand.xm || { echo "command buffer from queue missing"; exit 1; }
-          ! grep -Fq "@selector(newCommandBuffer)" Hooks/AxsMetalSand.xm || { echo "stale device objc_msgSend newCommandBuffer still present"; exit 1; }
+          grep -Fq "sMsdQueue, @selector(newCommandBuffer)" Hooks/AxsMetalSand.xm || { echo "command buffer must be sent to queue, not device"; exit 1; }
+          ! grep -Fq "sMsdDevice, @selector(newCommandBuffer)" Hooks/AxsMetalSand.xm || { echo "stale device newCommandBuffer call still present"; exit 1; }
           echo "final verify ok"
           rm -rf "$EXTRACT"
 

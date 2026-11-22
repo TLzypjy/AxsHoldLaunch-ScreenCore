@@ -15,6 +15,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 // ---- logging (shares the dismiss log so one file tells the whole story) ----
 static NSString * const AXS_MSD_LOG_PATH = @"/var/mobile/Documents/sc-dismiss-effect.log";
@@ -311,10 +312,14 @@ static NSMutableArray *sMsdActiveRenderers = nil;
     rpd.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 0);
     rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
 
-    // .106 FIX: newCommandBuffer belongs to MTLCommandQueue. Calling it on
-    // MTLDevice crashed every frame ("unrecognized selector sent to
-    // AGXG15Device") so Metal never rendered and always fell back to UIView.
-    id<MTLCommandBuffer> cb = [sMsdQueue newCommandBuffer];
+    // .106 FIX: newCommandBuffer belongs to MTLCommandQueue, NOT MTLDevice.
+    // .104 called it on the device -> "unrecognized selector sent to
+    // AGXG15Device" crash every frame -> Metal never rendered -> slow UIView
+    // fallback (the stutter). objc_msgSend is needed because this SDK's clang
+    // cannot resolve the selector on the protocol-typed queue at compile time;
+    // the receiver is now the CORRECT object (sMsdQueue), so runtime works.
+    id<MTLCommandBuffer> cb = ((id<MTLCommandBuffer> (*)(id, SEL))objc_msgSend)(
+        sMsdQueue, @selector(newCommandBuffer));
     if (cb == nil) return NO;
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
     if (enc == nil) return NO;
