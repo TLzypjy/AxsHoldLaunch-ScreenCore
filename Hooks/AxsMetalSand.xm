@@ -578,7 +578,8 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
 // ---- public entry points: return YES if Metal took over the effect --------
 // common core shared by dismiss (openMode=0) and open-assemble (openMode=1)
 static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat duration,
-                                uint32_t style, CGFloat density, uint32_t openMode) {
+                                uint32_t style, CGFloat density, uint32_t openMode,
+                                CGPoint sourcePoint) {
     @try {
         if (!axs_msd_ensurePipeline()) {
             axs_msd_log(@"metal unavailable -> no dissolve effect (%@)",
