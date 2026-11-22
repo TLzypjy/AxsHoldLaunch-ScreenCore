@@ -1,6 +1,15 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.113
+版本：2.0.5+beautify.114
+
+beautify.114 变更（修复 .113 全部动画失效）：
+- 根因：.113 往 shader 加 openMode 分支时，Edit 误把 cell/grid/unit/corner/r/r2/r3/r4
+  九行声明复制了一份在分支后面——MSL 同一作用域不允许同名重复声明，运行时
+  newLibraryWithSource 编译失败，管线建立失败（sMsdTried 缓存），消散+呼出全部
+  静默失效（详细原因日志被 512KB 轮转吃掉，只余 "metal unavailable"）。
+- 修复 1：删除重复声明，openMode 分支保持在 r4 声明后（变量全部就位）。
+- 修复 2：ensurePipeline 失败原因持久化到 sMsdFailReason，后续每次
+  "metal unavailable -> no dissolve effect (%@)" 都带具体原因，不再怕日志轮转。
 
 beautify.113 变更（ARC 呼出聚合动画 + 独立开关）：
 - 需求（用户决策）：先做 B 方案粒子反向聚合，生效范围仅 ARC 菜单呼出（全屏转浮窗后续再做），独立开关。
@@ -170,4 +179,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.113_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.114_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

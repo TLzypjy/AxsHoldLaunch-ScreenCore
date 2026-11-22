@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.113): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.114): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -123,15 +123,6 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.breakage=1.0;\n\
         return outO;\n\
     }\n\
-    float2 cell = float2(instanceID % u.columns, instanceID / u.columns);\n\
-    float2 grid = float2(u.columns, u.rows);\n\
-    float2 unit = (cell+0.5)/grid;\n\
-    float2 corner = corners[vertexID];\n\
-    float2 noiseCell = cell + float2(u.seed, u.seed*0.371);\n\
-    float r = dustHash(noiseCell);\n\
-    float r2 = dustHash(noiseCell + 19.7);\n\
-    float r3 = dustHash(noiseCell + 72.3);\n\
-    float r4 = dustHash(noiseCell + 43.7);\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
     float len = length(rel); if (len < 1.0) len = 1.0;\n\
     float2 dirOut = rel/len;\n\
@@ -273,26 +264,31 @@ static id<MTLCommandQueue> sMsdQueue = nil;
 static id<MTLRenderPipelineState> sMsdPipeline = nil;
 static BOOL sMsdTried = NO;
 
+static NSString *sMsdFailReason = nil;   // .114: survives log rotation
 static BOOL axs_msd_ensurePipeline(void) {
     if (sMsdTried) return (sMsdPipeline != nil);
     sMsdTried = YES;
+    sMsdFailReason = nil;
     @try {
         sMsdDevice = MTLCreateSystemDefaultDevice();
         if (sMsdDevice == nil) {
-            axs_msd_log(@"metal device unavailable");
+            sMsdFailReason = @"metal device unavailable";
+            axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
         // .106: command buffers come from a queue, never from the device.
         sMsdQueue = [sMsdDevice newCommandQueue];
         if (sMsdQueue == nil) {
-            axs_msd_log(@"metal command queue unavailable");
+            sMsdFailReason = @"metal command queue unavailable";
+            axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
         NSError *err = nil;
         id<MTLLibrary> lib = [sMsdDevice newLibraryWithSource:AXS_MSD_SHADER
                                                       options:nil error:&err];
         if (lib == nil) {
-            axs_msd_log(@"metal shader compile FAILED: %@", [err localizedDescription]);
+            sMsdFailReason = [NSString stringWithFormat:@"shader compile FAILED: %@", [err localizedDescription]];
+            axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
         id<MTLFunction> vf = [lib newFunctionWithName:@"nlDustVertex"];
@@ -315,13 +311,15 @@ static BOOL axs_msd_ensurePipeline(void) {
         NSError *pe = nil;
         sMsdPipeline = [sMsdDevice newRenderPipelineStateWithDescriptor:pd error:&pe];
         if (sMsdPipeline == nil) {
-            axs_msd_log(@"metal pipeline FAILED: %@", [pe localizedDescription]);
+            sMsdFailReason = [NSString stringWithFormat:@"pipeline FAILED: %@", [pe localizedDescription]];
+            axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
         axs_msd_log(@"metal compiled OK pipeline ready");
         return YES;
     } @catch (NSException *e) {
-        axs_msd_log(@"metal ensurePipeline EXCEPTION %@", [e reason]);
+        sMsdFailReason = [NSString stringWithFormat:@"ensurePipeline EXCEPTION %@", [e reason]];
+        axs_msd_log(@"%@", sMsdFailReason);
         return NO;
     }
 }
@@ -576,7 +574,8 @@ static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat dur
                                 uint32_t style, CGFloat density, uint32_t openMode) {
     @try {
         if (!axs_msd_ensurePipeline()) {
-            axs_msd_log(@"metal unavailable -> no dissolve effect");
+            axs_msd_log(@"metal unavailable -> no dissolve effect (%@)",
+                        sMsdFailReason ? sMsdFailReason : @"unknown");
             return NO;
         }
         if (shot == nil || shot.CGImage == nil) {
@@ -658,7 +657,7 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
     return axs_metalPlayCommon(shot, frameInWindow, duration, style, density, 0);
 }
 
-// beautify.113 open-assemble: reverse sand, openMode=1
+// beautify.114 open-assemble: reverse sand, openMode=1
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1);
