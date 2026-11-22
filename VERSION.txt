@@ -1,6 +1,16 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.109
+版本：2.0.5+beautify.110
+
+beautify.110 变更（消散卡片上下颠倒修复：去掉纹理上传的双重翻转）：
+- 现象：.109 起 Metal 引擎真正生效，但消散时整张浮窗快照上下镜像（计算器 "0 . =" 行跑顶部、
+  AC/+−/%/÷ 跑底部，数字垂直翻转）。
+- 根因：axs_msd_makeTexture 里 .104 时代遗留的 TranslateCTM+ScaleCTM(1,-1) 手动翻转是多余的。
+  原生 CGBitmapContext 坐标系 y 向上、内存第 0 行即缓冲区顶部，快照 CGImage 栅格自顶向下，
+  直接绘制就已经是「纹理行 0 = 图片顶部」，与 shader 的 uv.y 映射（行 0 = 卡片顶部）一致；
+  再叠加翻转反而翻反。UIView 回退路径不走这段，故直到 .109 Metal 生效才暴露。
+- 修正：删除该翻转，直接 CGContextDrawImage；日志模块版本串从遗留的 beautify.97 更新为 .110；
+  CI 断言禁止 TranslateCTM/ScaleCTM(1,-1) 回归。
 
 beautify.109 变更（隐根包功能修复：改用官方 RootHide Patcher 转换）：
 - 现象：.108 手工隐根包安装后 ScreenCore 自身功能失效（右下角 Arc 菜单呼不出）。
@@ -111,4 +121,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.109_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.110_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

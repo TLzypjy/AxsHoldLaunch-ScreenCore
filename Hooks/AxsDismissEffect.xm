@@ -793,7 +793,7 @@ static void axs_dm_installAll(void) {
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.97, dismiss particles)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.110, dismiss particles)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

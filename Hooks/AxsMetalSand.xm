@@ -392,10 +392,14 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
     CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
                                              kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
     if (ctx == NULL) { CGColorSpaceRelease(cs); return nil; }
-    // CoreGraphics origin is bottom-left; flip so texture row 0 = image top,
-    // matching the shader's uv.y = row/grid (row 0 = card top).
-    CGContextTranslateCTM(ctx, 0, (CGFloat)h);
-    CGContextScaleCTM(ctx, 1, -1);
+    // .110 FIX (upside-down card): a raw CGBitmapContext has a y-up coordinate
+    // space whose memory row 0 IS the buffer top, and the snapshot CGImage's
+    // raster is top-down -- so a plain draw already lands image top at texture
+    // row 0, which is exactly what the shader expects (uv.y=0 -> image top).
+    // The .104-era extra TranslateCTM/ScaleCTM(1,-1) flip double-flipped the
+    // card: the Metal path rendered the whole window mirrored vertically
+    // (calculator upside down in the sand). The UIView fallback never used
+    // this path, so the bug only surfaced once Metal started working in .109.
     CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
     CGContextRelease(ctx);
     CGColorSpaceRelease(cs);
