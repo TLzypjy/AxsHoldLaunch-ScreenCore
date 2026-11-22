@@ -330,7 +330,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.124: ARC-open assemble animation ------------------------------
+// ---- beautify.125: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -383,6 +383,55 @@ static void axs_open_markGone(UIView *v) {
 
 // .122: animation-modification window state (declared before first use)
 static CFAbsoluteTime axs_open_interceptUntil = 0;
+// .125: true while the particle assemble owns the card (hidden from frame 0)
+static BOOL axs_open_assembleInFlight = NO;
+
+// .125: independent open-effect controls (like the dismiss has)
+static CGFloat axs_open_speedScale(void) {
+    CGFloat speed = 1.0;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return 1.0;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyOpenSpeed", @1.0);
+            if ([value isKindOfClass:[NSNumber class]]) {
+                speed = [value floatValue];
+                if (speed < 0.3) speed = 0.3;
+                if (speed > 3.0) speed = 3.0;
+            }
+        }
+    } @catch (NSException *ignored) {
+        speed = 1.0;
+    }
+    if (speed <= 0.0 || speed != speed) speed = 1.0;
+    return speed;
+}
+
+static CGFloat axs_open_density(void) {
+    CGFloat density = 1.0;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return 1.0;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyOpenDensity", @1.0);
+            if ([value isKindOfClass:[NSNumber class]]) {
+                density = [value floatValue];
+                if (density < 0.5) density = 0.5;
+                if (density > 3.0) density = 3.0;
+            }
+        }
+    } @catch (NSException *ignored) {
+        density = 1.0;
+    }
+    if (density <= 0.0 || density != density) density = 1.0;
+    return density;
+}
 
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
@@ -406,6 +455,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         }
         if (!settled) {
             axs_dm_log(@"OPEN frame never settled, native card restored");
+            axs_open_assembleInFlight = NO;
             card.hidden = NO;
             return;
         }
@@ -425,6 +475,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                     if (c == nil) return;
                     @try {
                         axs_open_selfRestore = YES;
+                        axs_open_assembleInFlight = NO;
                         c.hidden = NO;
                     } @catch (NSException *ignored) { }
                 });
@@ -450,6 +501,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 c.hidden = YES;
                 if (axs_dm_imageIsBlank(shot2)) {
                     axs_dm_log(@"OPEN flash snapshot blank too, native card restored");
+                    axs_open_assembleInFlight = NO;
                     c.hidden = NO;
                     return;
                 }
@@ -471,11 +523,14 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                     c.hidden = NO;
                     axs_dm_log(@"OPEN assemble unavailable, native card restored");
                 }
+                if (axs_open_assembleInFlight) axs_open_assembleInFlight = NO;
             } @catch (NSException *ignored) {
+                axs_open_assembleInFlight = NO;
                 c.hidden = NO;
             }
         });
     } @catch (NSException *ignored) {
+        axs_open_assembleInFlight = NO;
         card.hidden = NO;
     }
 }
@@ -504,8 +559,8 @@ static void axs_open_becameVisible(UIView *v) {
                    NSStringFromCGRect([v convertRect:v.bounds toView:nil]));
         UIView *card = v;
         axs_open_interceptUntil = CACurrentMediaTime() + 3.0;
-        CGFloat density = axs_dm_densityScale();
-        CGFloat duration = 0.85;
+        CGFloat density = axs_open_density();
+        CGFloat duration = 0.85 / axs_open_speedScale();
         CGPoint sourcePoint = CGPointMake(CGRectGetMidX([card convertRect:card.bounds toView:nil]),
                                           CGRectGetMidY([card convertRect:card.bounds toView:nil]));
         NSString *sourceKind = @"fallback-card-center";
@@ -527,6 +582,7 @@ static void axs_open_becameVisible(UIView *v) {
         // the poll uses weak captures only (see axs_open_pollStep) -- no
         // block-copy of strong view captures anywhere.
         card.hidden = YES;
+        axs_open_assembleInFlight = YES;
         axs_open_pollStep(card, 0, duration, density, sourcePoint, sourceKind);
     } @catch (NSException *ignored) { }
 }
@@ -539,8 +595,27 @@ static void axs_open_setHidden(id self, SEL _cmd, BOOL hidden) {
         ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(self, _cmd, hidden);
     }
     UIView *v = (UIView *)self;
-    if (hidden) axs_open_markGone(v);
-    else axs_open_becameVisible(v);
+    if (hidden) {
+        axs_open_markGone(v);
+        return;
+    }
+    // .125: if the native present just made the card visible while our
+    // particle assemble is in flight (the assemble hides it at frame 0),
+    // snap it back to hidden synchronously -- one property call, no blocks,
+    // safe inside the UIKit stack (proven by .119). This removes every
+    // visible native-animation frame; the async flow continues below.
+    if (axs_open_assembleInFlight && !axs_open_selfRestore
+        && axs_open_enabled()) {
+        axs_open_markGone(v);
+        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(self, _cmd, YES);
+        } else if (axs_open_orig_setHidden == (IMP)1) {
+            struct objc_super sup = { (id)self, class_getSuperclass(object_getClass(self)) };
+            ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&sup, _cmd, YES);
+        }
+        return;
+    }
+    axs_open_becameVisible(v);
 }
 
 static void axs_open_didMoveToWindow(id self, SEL _cmd) {
@@ -604,6 +679,8 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
                 && strcmp(object_getClassName(delegate), "SCFloatingContainerView") == 0) {
                 anim.duration = 0.01;
                 anim.beginTime = CACurrentMediaTime();
+                axs_dm_log(@"OPEN clamp hit anim=%@ key=%@",
+                           NSStringFromClass([anim class]), key ?: @"nil");
             }
         }
     } @catch (NSException *ignored) { }
@@ -823,14 +900,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.124: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.125: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.124, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.125, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
