@@ -542,7 +542,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         if (made == 0) {
             axs_dm_log(@"emit: no pieces, skip");
             overlay.hidden = YES;
-            return;
+            return NO;
         }
 
         if (axs_dm_activeOverlays == nil) axs_dm_activeOverlays = [NSMutableArray array];
