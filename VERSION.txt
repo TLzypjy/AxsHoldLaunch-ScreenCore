@@ -1,6 +1,15 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.120
+版本：2.0.5+beautify.121
+
+beautify.121 变更（回退立即隐藏，修复浮窗呼不出来）：
+- .120 实测两个失败：①renderInContext 对 hidden layer 输出全透明（blank 探针正确
+  触发 1 帧回退，但回退截图后仍拿不到有效图，聚合未启动）；②present 动画期间
+  长时间 hidden 干扰 ScreenCore 显示状态，浮窗根本呼不出来。
+- 回退：去掉立即隐藏和 renderInContext 路径，改为「轮询布局就绪 → 同一 tick
+  截图+隐藏 → 聚合」。原生动画面在布局就绪前可见约 0.06~0.15s——这是不 hook
+  ScreenCore 内部 present 动画的前提下的最小闪现（用户如坚持完全消除需另行评估）。
+- 呼出稳定性恢复优先于闪现消除。
 
 beautify.120 变更（原生动画面归零 + 快照内容正确）：
 - .119 视频实锤：聚合粒子带的是整个设置页内容（开关变成绿色粒子球）——
@@ -232,4 +241,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.120_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.121_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

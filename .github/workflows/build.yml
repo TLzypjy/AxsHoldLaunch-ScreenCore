@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.120 (rootless)
+name: Build ScreenCore beautify.121 (rootless)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.120
+    name: Build rootless beautify.121
     runs-on: macos-15
 
     steps:
@@ -29,7 +29,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.120"
+          VERSION="2.0.5+beautify.121"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -109,7 +109,7 @@ jobs:
           find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
           ls -la ./repack
 
-      - name: Package 2.0.5+beautify.120 (dpkg-deb)
+      - name: Package 2.0.5+beautify.121 (dpkg-deb)
         env:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
@@ -127,7 +127,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.120"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.121"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
@@ -456,7 +456,7 @@ jobs:
           grep -Fq "sc_promoteFrontmostFloatingSceneToFullscreen" Hooks/AxsFullscreenProbe.xm || { echo "probe promoteFrontmost hook missing"; exit 1; }
           grep -Fq "axs_fs_argsAreObjects" Hooks/AxsFullscreenProbe.xm || { echo "probe args-safety guard missing"; exit 1; }
           grep -Fq "FSP module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "probe load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.120 dismiss particle module check ==="
+          echo "=== beautify.121 dismiss particle module check ==="
           grep -Fq "splitBeautifyDismissAnimEnabled" Hooks/AxsDismissEffect.xm || { echo "dismiss switch key missing"; exit 1; }
           grep -Fq "DME module loaded in SpringBoard" Hooks/AxsDismissEffect.xm || { echo "dismiss load log missing"; exit 1; }
           # .111: hide the real card while the dissolve plays (no double image)
@@ -469,12 +469,12 @@ jobs:
           grep -Fq "overlay.windowScene = host.windowScene" Hooks/AxsMetalSand.xm || { echo "dismiss windowScene fix missing"; exit 1; }
           grep -Fq "axs_dm_sigMatches" Hooks/AxsDismissEffect.xm || { echo "dismiss sig guard missing"; exit 1; }
           grep -Fq "DME module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "dismiss load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.120 dismiss style selector check ==="
+          echo "=== beautify.121 dismiss style selector check ==="
           grep -Fq "splitBeautifyDismissStyle" Hooks/AxsDismissEffect.xm || { echo "dismiss style key missing"; exit 1; }
           grep -Fq "AXSDismissStyleGlass" Hooks/AxsDismissEffect.xm || { echo "dismiss style enum missing"; exit 1; }
           grep -Fq "style=%ld(%@)" Hooks/AxsDismissEffect.xm || { echo "dismiss style log missing"; exit 1; }
           grep -Fq "splitBeautifyDismissStyle" "$EXTRACT/dylib34.strings" || { echo "dismiss style key not compiled into dylib"; exit 1; }
-          echo "=== beautify.120 unified GPU engine (no CPU path) + density slider check ==="
+          echo "=== beautify.121 unified GPU engine (no CPU path) + density slider check ==="
           grep -Fq "AXSDismissStyleColorSand" Hooks/AxsDismissEffect.xm || { echo "ColorSand enum missing"; exit 1; }
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/plist.strings" || { echo "ColorSand panel option missing"; exit 1; }
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/zh.strings" || { echo "ColorSand zh label missing"; exit 1; }
@@ -487,7 +487,7 @@ jobs:
           grep -Fq "emit: gpu engine active" Hooks/AxsDismissEffect.xm || { echo "gpu engine log missing"; exit 1; }
           grep -Fq "axs_dm_styleBaseDuration" Hooks/AxsDismissEffect.xm || { echo "per-style base duration table missing"; exit 1; }
           grep -Fq "axs_metalSandPlay(shot, sourceFrameInWindow, duration," Hooks/AxsDismissEffect.xm || { echo "Metal call with style+density missing"; exit 1; }
-          echo "=== beautify.120 dismiss speed + density control check ==="
+          echo "=== beautify.121 dismiss speed + density control check ==="
           grep -Fq "static CGFloat axs_dm_speedScale" Hooks/AxsDismissEffect.xm || { echo "speed scale fn missing"; exit 1; }
           grep -Fq "splitBeautifyDismissSpeed" Hooks/AxsDismissEffect.xm || { echo "speed key missing in source"; exit 1; }
           grep -Fq "axs_dm_styleBaseDuration(style) * speedScale" Hooks/AxsDismissEffect.xm || { echo "style speed scaling missing"; exit 1; }
@@ -502,7 +502,7 @@ jobs:
           grep -Fq "DISMISS_DENSITY" "$EXTRACT/zh.strings" || { echo "density zh label missing"; exit 1; }
           grep -Fq "DISMISS_DENSITY" "$EXTRACT/en.strings" || { echo "density en label missing"; exit 1; }
           grep -Fq "splitBeautifyDismissDensity" "$EXTRACT/dylib34.strings" || { echo "density key not compiled into dylib"; exit 1; }
-          echo "=== beautify.120 ARC-open assemble animation check ==="
+          echo "=== beautify.121 ARC-open assemble animation check ==="
           grep -Fq "openMode" Hooks/AxsMetalSand.xm || { echo "shader openMode branch missing"; exit 1; }
           grep -Fq "axs_metalAssemblePlay" Hooks/AxsMetalSand.xm || { echo "assemble entry missing in Metal"; exit 1; }
           grep -Fq "axs_metalAssemblePlay" Hooks/AxsDismissEffect.xm || { echo "assemble call missing in dismiss"; exit 1; }
@@ -514,14 +514,14 @@ jobs:
           grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/zh.strings" || { echo "open zh label missing"; exit 1; }
           grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/en.strings" || { echo "open en label missing"; exit 1; }
           grep -Fq "splitBeautifyOpenAnimEnabled" "$EXTRACT/dylib34.strings" || { echo "open switch key not compiled into dylib"; exit 1; }
-          echo "=== beautify.120 finger-source assemble + loop fix check ==="
+          echo "=== beautify.121 finger-source assemble + loop fix check ==="
           grep -Fq "sourcePoint" Hooks/AxsMetalSand.xm || { echo "shader sourcePoint missing"; exit 1; }
           grep -Fq "axs_open_sendEvent" Hooks/AxsDismissEffect.xm || { echo "finger-lift tracking missing"; exit 1; }
           grep -Fq "UITouchPhaseEnded" Hooks/AxsDismissEffect.xm || { echo "touch-ended filter missing"; exit 1; }
           grep -Fq "axs_open_selfRestore" Hooks/AxsDismissEffect.xm || { echo "self-restore loop guard missing"; exit 1; }
           grep -Fq "sendEvent:" Hooks/AxsDismissEffect.xm || { echo "sendEvent hook missing"; exit 1; }
 
-          echo "=== beautify.120 GPU Metal sand engine check ==="
+          echo "=== beautify.121 GPU Metal sand engine check ==="
           test -f Hooks/AxsMetalSand.xm || { echo "Metal engine source missing"; exit 1; }
           grep -Fq "nlDustVertex" Hooks/AxsMetalSand.xm || { echo "Metal shader vertex fn missing"; exit 1; }
           grep -Fq "nlDustFragment" Hooks/AxsMetalSand.xm || { echo "Metal shader fragment fn missing"; exit 1; }
@@ -552,7 +552,7 @@ jobs:
           echo "=== roothide (hidden-root) variant verification ==="
           RH_DEB=$(find ./packaging/out -name "*roothide*.deb" | head -n 1)
           test -n "$RH_DEB" || { echo "roothide deb missing"; exit 1; }
-          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.120"
+          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.121"
           # roothide bootstrap marker: Sileo installs arm64e directly, but pops
           # the "convert .deb" dialog for plain iphoneos-arm64 (rootless) debs.
           dpkg-deb -f "$RH_DEB" Architecture | grep -qx "iphoneos-arm64e" || { echo "roothide deb must be Architecture iphoneos-arm64e"; exit 1; }
