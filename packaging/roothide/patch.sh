@@ -26,7 +26,9 @@ fi
 
 LOG "TMPDIR=$TMPDIR"
 
-if [ $(whoami) != "root" ]; then
+# CI deviation from upstream: allow non-root on macOS runners (the root check
+# exists for on-device iOS execution; GitHub macOS runners run as user "runner").
+if [ "$(sw_vers -productName)" != "macOS" ] && [ $(whoami) != "root" ]; then
     $ECHO "Please run as root user (sudo)."
     exit 1;
 fi
