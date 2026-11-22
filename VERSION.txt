@@ -1,6 +1,17 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.127
+版本：2.0.5+beautify.128
+
+beautify.128 变更（无纹理聚合：彻底摆脱截图链路）：
+- .127 视频实锤：粒子带的快照纹理在本机不可靠（黑网格半透明覆盖卡片区域），
+  且 1 帧闪现仍是"原生动画面"的感知来源——截图路线三连败
+  （hidden/renderInContext/屏幕外变换全部输出空白或错误内容）。
+- 战略转向：无纹理聚合——粒子改为纯色发光小圆点（1x1 白色纹理，shader 零改动，
+  uv 采样恒白），从手指位置涌出、飞向卡片位置聚合成卡片形状的亮点云，
+  聚合完成时真卡片在粒子云下方出现、粒子云延迟淡出遮住过渡。
+- 整条截图链路删除：轮询只读 bounds（不截图）、闪现路径删除、屏幕外变换删除；
+  呼出期间卡片 hidden=YES（原生动画面零），恢复即显示。
+- 面板排序（.126）保持：消散组（开关→样式→速度→密度）+ 呼出组（开关→速度→密度）。
 
 beautify.127 变更（原生动画彻底替换：吞掉 + 手动补发 completion）：
 - 按用户确认的方向执行：addAnimation hook 对卡片树上的原生动画不再钳制时长
@@ -303,4 +314,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.127_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.128_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

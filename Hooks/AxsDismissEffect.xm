@@ -330,7 +330,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.127: ARC-open assemble animation ------------------------------
+// ---- beautify.128: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -433,51 +433,25 @@ static CGFloat axs_open_density(void) {
     return density;
 }
 
-// .126: offscreen placement -- the card is NOT hidden; its layer transform
-// translates it far off-screen. The native present animation runs and its
-// completions fire, but nothing is ever visible. drawViewHierarchy renders
-// the layer content regardless of the transform, so we can snapshot while
-// offscreen (lessons: hidden views snapshot blank; renderInContext corrupts
-// an in-flight present).
-static void axs_open_pushOffscreen(UIView *card) {
-    @try {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        card.layer.transform = CATransform3DMakeTranslation(-2200.0f, -2200.0f, 0.0f);
-        [CATransaction commit];
-    } @catch (NSException *ignored) { }
-}
-
-// restore = back onscreen, visible, transform identity (one disabled-actions
-// transaction so nothing in-between is ever rendered)
-static void axs_open_restoreOnscreen(UIView *card) {
-    @try {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        card.layer.transform = CATransform3DIdentity;
-        card.hidden = NO;
-        [CATransaction commit];
-    } @catch (NSException *ignored) { }
-}
-
-// .126: snapshot with the transform momentarily cleared inside one
-// disabled-actions transaction -- the model flips onscreen and back before
-// the transaction commits, so the screen never shows the card, yet the
-// snapshot contains the fully laid-out content.
-static UIImage *axs_open_snapshotOffscreen(UIView *card) {
-    UIImage *shot = nil;
-    @try {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
-        CATransform3D saved = card.layer.transform;
-        card.layer.transform = CATransform3DIdentity;
-        shot = axs_dm_snapshot(card);
-        card.layer.transform = saved;
-        [CATransaction commit];
-    } @catch (NSException *ignored) {
-        shot = nil;
+// .128: NO-TEXTURE assemble -- the grains are plain glowing dots (1x1 white
+// texture; every sample is white). The old snapshot-based texture was a dead
+// end on this device (hidden / renderInContext / offscreen snapshots all came
+// back blank or wrong), and the 1-frame flash it required looked like the
+// native animation. Particles converge into a bright cloud in the card shape,
+// then the real card appears beneath the cloud as it fades.
+static UIImage *axs_open_whiteTexture = nil;
+static UIImage *axs_open_getWhiteTexture(void) {
+    if (axs_open_whiteTexture == nil) {
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        UIGraphicsImageRenderer *r =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, 1, 1) format:fmt];
+        axs_open_whiteTexture = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [ctx setFillColor:[UIColor colorWithWhite:1.0 alpha:0.95]];
+            UIRectFill(CGRectMake(0, 0, 1, 1));
+        }];
     }
-    return shot;
+    return axs_open_whiteTexture;
 }
 
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
@@ -503,86 +477,42 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         if (!settled) {
             axs_dm_log(@"OPEN frame never settled, native card restored");
             axs_open_assembleInFlight = NO;
-            axs_open_restoreOnscreen(card);
+            card.hidden = NO;
             return;
         }
-        // .126: offscreen snapshot (transform cleared inside one disabled
-        // transaction -- the screen never shows the card)
-        UIImage *shot = axs_open_snapshotOffscreen(card);
-        if (!axs_dm_imageIsBlank(shot)) {
-            axs_dm_log(@"OPEN offscreen snapshot OK");
-            BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density, sourcePoint);
-            if (ok) {
-                axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
-                           duration, density, (long)polls,
-                           NSStringFromCGPoint(sourcePoint), sourceKind);
-                __weak UIView *weakCard2 = card;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    UIView *c = weakCard2;
-                    if (c == nil) return;
-                    @try {
-                        axs_open_selfRestore = YES;
-                        axs_open_assembleInFlight = NO;
-                        axs_open_restoreOnscreen(c);
-                    } @catch (NSException *ignored) { }
-                });
-            } else {
-                axs_open_assembleInFlight = NO;
-                axs_open_restoreOnscreen(card);
-                axs_dm_log(@"OPEN assemble unavailable, native card restored");
-            }
+        // .128: no snapshot at all -- assemble with the glowing-dot texture
+        UIImage *shot = axs_open_getWhiteTexture();
+        if (shot == nil) {
+            axs_dm_log(@"OPEN white texture failed, native card restored");
+            axs_open_assembleInFlight = NO;
+            card.hidden = NO;
             return;
         }
-        // .126 fallback: a true 1-frame flash (offscreen snapshot blank means
-        // the device cannot snapshot an offscreen view either)
-        axs_dm_log(@"OPEN offscreen snapshot blank, 1-frame flash fallback");
-        __weak UIView *weakCard3 = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            UIView *c = weakCard3;
-            if (c == nil) return;
-            @try {
-                if (c.window == nil) return;
-                CGRect frame2 = [c convertRect:c.bounds toView:nil];
-                axs_open_restoreOnscreen(c);   // onscreen for one frame
-                UIImage *shot2 = axs_dm_snapshot(c);
-                axs_open_pushOffscreen(c);
-                if (axs_dm_imageIsBlank(shot2)) {
-                    axs_dm_log(@"OPEN flash snapshot blank too, native card restored");
+        BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density, sourcePoint);
+        if (ok) {
+            axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
+                       duration, density, (long)polls,
+                       NSStringFromCGPoint(sourcePoint), sourceKind);
+            __weak UIView *weakCard2 = card;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                UIView *c = weakCard2;
+                if (c == nil) return;
+                @try {
+                    axs_open_selfRestore = YES;
                     axs_open_assembleInFlight = NO;
-                    axs_open_restoreOnscreen(c);
-                    return;
-                }
-                BOOL ok = axs_metalAssemblePlay(shot2, frame2, duration, density, sourcePoint);
-                if (ok) {
-                    axs_dm_log(@"OPEN assemble started (flash) duration=%.2f density=%.2f source=%@ (%@)",
-                               duration, density, NSStringFromCGPoint(sourcePoint), sourceKind);
-                    __weak UIView *weakCard4 = c;
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
-                                   dispatch_get_main_queue(), ^{
-                        UIView *c4 = weakCard4;
-                        if (c4 == nil) return;
-                        @try {
-                            axs_open_selfRestore = YES;
-                            axs_open_assembleInFlight = NO;
-                            axs_open_restoreOnscreen(c4);
-                        } @catch (NSException *ignored) { }
-                    });
-                } else {
-                    axs_open_assembleInFlight = NO;
-                    axs_open_restoreOnscreen(c);
-                    axs_dm_log(@"OPEN assemble unavailable, native card restored");
-                }
-            } @catch (NSException *ignored) {
-                axs_open_assembleInFlight = NO;
-                UIView *c2 = weakCard3;
-                if (c2 != nil) axs_open_restoreOnscreen(c2);
-            }
-        });
+                    c.hidden = NO;
+                } @catch (NSException *ignored) { }
+            });
+        } else {
+            axs_open_assembleInFlight = NO;
+            card.hidden = NO;
+            axs_dm_log(@"OPEN assemble unavailable, native card restored");
+        }
+        return;
     } @catch (NSException *ignored) {
         axs_open_assembleInFlight = NO;
-        axs_open_restoreOnscreen(card);
+        card.hidden = NO;
     }
 }
 
@@ -632,7 +562,7 @@ static void axs_open_becameVisible(UIView *v) {
         // .123: the whole flow runs OUTSIDE the UIKit window-setup stack and
         // the poll uses weak captures only (see axs_open_pollStep) -- no
         // block-copy of strong view captures anywhere.
-        axs_open_pushOffscreen(card);
+        card.hidden = YES;
         axs_open_assembleInFlight = YES;
         axs_open_pollStep(card, 0, duration, density, sourcePoint, sourceKind);
     } @catch (NSException *ignored) { }
@@ -658,7 +588,12 @@ static void axs_open_setHidden(id self, SEL _cmd, BOOL hidden) {
     if (axs_open_assembleInFlight && !axs_open_selfRestore
         && axs_open_enabled()) {
         axs_open_markGone(v);
-        axs_open_pushOffscreen(v);   // keep it offscreen (never hidden)
+        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(self, _cmd, YES);
+        } else if (axs_open_orig_setHidden == (IMP)1) {
+            struct objc_super sup = { (id)self, class_getSuperclass(object_getClass(self)) };
+            ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&sup, _cmd, YES);
+        }
         return;
     }
     axs_open_becameVisible(v);
@@ -967,14 +902,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.127: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.128: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.127, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.128, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
