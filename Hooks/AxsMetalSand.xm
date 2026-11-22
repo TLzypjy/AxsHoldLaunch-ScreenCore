@@ -524,7 +524,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
                 self.link.paused = YES;   // freeze the last frame while fading
                 UIView *ov = self.overlay;
                 [UIView animateWithDuration:0.18 animations:^{ ov.alpha = 0.0; }
-                                 completion:^{ [self cleanup]; }];
+                                 completion:^(BOOL finished){ [self cleanup]; }];
                 return;
             }
             [self cleanup];
