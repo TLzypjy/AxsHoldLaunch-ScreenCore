@@ -271,6 +271,52 @@ static UIImage *axs_dm_snapshot(UIView *view) {
     return img;
 }
 
+// .120: layer-based snapshot -- unlike drawViewHierarchyInRect, renderInContext
+// can capture a view whose hidden=YES (we hide the card immediately at open to
+// kill the native present animation, and layout keeps running while hidden).
+static UIImage *axs_dm_snapshotLayer(UIView *view) {
+    UIImage *img = nil;
+    @try {
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        UIGraphicsImageRenderer *renderer =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:view.bounds format:fmt];
+        img = [renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [view.layer renderInContext:ctx.CGContext];
+        }];
+    } @catch (NSException *ignored) {
+        img = nil;
+    }
+    return img;
+}
+
+// .120: blank-image probe (renderInContext on a hidden layer may yield fully
+// transparent pixels on some iOS builds; caller falls back to a 1-frame flash
+// snapshot in that case). Samples the alpha channel on a sparse grid.
+static BOOL axs_dm_imageIsBlank(UIImage *img) {
+    if (img == nil || img.CGImage == NULL) return YES;
+    CGImageRef cg = img.CGImage;
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    if (w == 0 || h == 0) return YES;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    size_t bpr = w * 4;
+    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
+    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
+                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(cs);
+    const uint8_t *px = (const uint8_t *)[data bytes];
+    // BGRA little-endian premultiplied-first: alpha lives in byte 3
+    size_t step = ((w * h) / 256) + 1;
+    BOOL anyOpaque = NO;
+    for (size_t i = 0; i < w * h; i += step) {
+        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
+    }
+    return !anyOpaque;
+}
+
 // --- dissolve effect (GPU) --------------------------------------------------
 // beautify.112: ONE GPU path for every style. Snapshot the card, hand it to
 // the unified Metal renderer (style + density select the motion model and the
@@ -303,7 +349,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.119: ARC-open assemble animation ------------------------------
+// ---- beautify.120: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -400,20 +446,52 @@ static void axs_open_becameVisible(UIView *v) {
             sourceKind = @"last-lift";
         }
         axs_dm_log(@"OPEN source point %@ (%@)", NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .119: hide in 0.02s (~1 frame) -- the card content is the app
-        // snapshot image, complete on the first frame, so no load wait needed
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.02 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
+        // .120: hide the card IMMEDIATELY (native present animation: zero
+        // frames visible). Layout keeps running while hidden. Poll until the
+        // container frame settles to the real card size (at presentation start
+        // it is still fullscreen -- snapshotting then captured the whole page,
+        // which looked like the native animation replaying as grains), then
+        // snapshot via renderInContext (works on hidden views). If that yields
+        // a blank image, fall back to a 1-frame unhide + drawViewHierarchy.
+        card.hidden = YES;
+        __block int polls = 0;
+        __block void (^pollBlock)(void) = NULL;
+        pollBlock = ^{
             @try {
-                if (card.window == nil) return;
+                polls++;
+                if (card.window == nil) { pollBlock = NULL; return; }
                 CGRect frame = [card convertRect:card.bounds toView:nil];
-                UIImage *shot = axs_dm_snapshot(card);
-                if (shot == nil || shot.CGImage == nil) return;
-                card.hidden = YES;   // hide the native card behind the assemble
+                CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
+                BOOL settled = (frame.size.width > 40.0 && frame.size.width < screenW * 0.85);
+                if (!settled && polls < 15) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.03 * NSEC_PER_SEC)),
+                                   dispatch_get_main_queue(), pollBlock);
+                    return;
+                }
+                pollBlock = NULL;
+                if (!settled) {
+                    axs_dm_log(@"OPEN frame never settled, native card restored");
+                    card.hidden = NO;
+                    return;
+                }
+                UIImage *shot = axs_dm_snapshotLayer(card);
+                BOOL blank = axs_dm_imageIsBlank(shot);
+                if (blank) {
+                    // renderInContext skipped the hidden layer -> flash one frame
+                    axs_dm_log(@"OPEN layer snapshot blank, 1-frame flash fallback");
+                    card.hidden = NO;
+                    shot = axs_dm_snapshot(card);
+                    card.hidden = YES;
+                }
+                if (shot == nil || shot.CGImage == nil) {
+                    card.hidden = NO;
+                    return;
+                }
                 BOOL ok = axs_metalAssemblePlay(shot, frame, duration, density, sourcePoint);
                 if (ok) {
-                    axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f source=%@ (%@)",
-                               duration, density, NSStringFromCGPoint(sourcePoint), sourceKind);
+                    axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%d blank=%d source=%@ (%@)",
+                               duration, density, polls, blank ? 1 : 0,
+                               NSStringFromCGPoint(sourcePoint), sourceKind);
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
                                    dispatch_get_main_queue(), ^{
                         @try {
@@ -425,8 +503,11 @@ static void axs_open_becameVisible(UIView *v) {
                     card.hidden = NO;
                     axs_dm_log(@"OPEN assemble unavailable, native card restored");
                 }
-            } @catch (NSException *ignored) { }
-        });
+            } @catch (NSException *ignored) {
+                card.hidden = NO;
+            }
+        };
+        pollBlock();
     } @catch (NSException *ignored) { }
 }
 
@@ -672,14 +753,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.119: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.120: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.119, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.120, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

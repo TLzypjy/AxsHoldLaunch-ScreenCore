@@ -1,6 +1,16 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.119
+版本：2.0.5+beautify.120
+
+beautify.120 变更（原生动画面归零 + 快照内容正确）：
+- .119 视频实锤：聚合粒子带的是整个设置页内容（开关变成绿色粒子球）——
+  0.02s 时 SCFloatingContainerView 布局未完成（present 初期还是全屏 frame），
+  快照拍到全屏页面，粒子聚合的是页面残影 = 用户看到的"原生动画"。
+- 修复：呼出即隐藏卡片（原生动画 0 帧可见，hidden 下布局照常进行）→
+  轮询 container frame 收敛到真实卡片尺寸（0.03s 间隔、至多 15 次、
+  判据宽 >40pt 且 <0.85 屏宽）→ renderInContext 截图（可渲染 hidden 视图）→
+  空白检测（alpha 采样）兜底：若 renderInContext 跳过 hidden 层输出全透明，
+  自动回退 1 帧闪现 drawViewHierarchy 重截。超时未收敛则放弃聚合恢复卡片。
 
 beautify.119 变更（呼出源改为 ARC 图标位置 + 隐藏提前到 1 帧）：
 - .118 视频证实：粒子确实从手指最后抬起位置涌出了，但那是 ARC 菜单项的点击位置
@@ -222,4 +232,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.119_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.120_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
