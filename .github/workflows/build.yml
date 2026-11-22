@@ -57,7 +57,7 @@ jobs:
 
       - name: Install build dependencies
         run: |
-          brew install ldid dpkg xz file coreutils
+          brew install dpkg xz file coreutils ldid-procursus
           # patch.sh (roothide conversion) calls plain `realpath`; coreutils ships grealpath
           ln -sf "$(brew --prefix coreutils)/bin/grealpath" "$(brew --prefix)/bin/realpath"
           echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
@@ -114,8 +114,8 @@ jobs:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
           set -euo pipefail
-          # brew bin first: Theos also ships an ldid, but patch.sh requires the
-          # Procursus flavor (brew install ldid) for its re-signing step.
+          # brew bin first: patch.sh requires the Procursus ldid fork
+          # (ldid-procursus formula) for its -Hsha256 re-signing step.
           PATH="$(brew --prefix)/bin:$PATH" sh packaging/package_beautify.sh
 
       - name: Verify final beautify deb
