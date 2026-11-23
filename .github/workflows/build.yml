@@ -543,7 +543,7 @@ jobs:
           grep -Fq "static CFAbsoluteTime axs_open_selfRestoreAt = -1e9;" Hooks/AxsDismissEffect.xm || { echo "selfRestore timestamp missing"; exit 1; }
           grep -Fq "static void axs_open_armSelfRestore(void)" Hooks/AxsDismissEffect.xm || { echo "armSelfRestore helper missing"; exit 1; }
           grep -Fq "axs_open_armSelfRestore();" Hooks/AxsDismissEffect.xm || { echo "arm sites not converted"; exit 1; }
-          ! grep -Fq "axs_open_selfRestore = YES;" Hooks/AxsDismissEffect.xm || { echo "raw selfRestore assignment still present"; exit 1; }
+          test "$(grep -cF 'axs_open_selfRestore = YES;' Hooks/AxsDismissEffect.xm)" -eq 1 || { echo "raw selfRestore assignment outside the arm helper"; exit 1; }
           grep -Fq "static CFAbsoluteTime axs_open_openActiveUntil = 0;" Hooks/AxsDismissEffect.xm || { echo "open ownership window missing"; exit 1; }
           grep -Fq "axs_open_openActiveUntil = CACurrentMediaTime() + duration + 0.3;" Hooks/AxsDismissEffect.xm || { echo "ownership window not armed on accept missing"; exit 1; }
           grep -Fq "OPEN stale assembled flag released, re-assembling" Hooks/AxsDismissEffect.xm || { echo "stale assembled self-heal missing"; exit 1; }
