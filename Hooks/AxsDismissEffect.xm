@@ -22,6 +22,10 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                        uint32_t style, CGFloat density);
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint);
+// .140: open assemble returning the live renderer handle + mid-flight texture swap
+void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                               CGFloat density, CGPoint sourcePoint);
+BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
 // .131: open assemble returning the live renderer handle (used by the wipe flow)
 void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGFloat density, CGPoint sourcePoint);
@@ -306,7 +310,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.139: ARC-open assemble animation ------------------------------
+// ---- beautify.140: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -457,7 +461,7 @@ static UIImage *axs_open_bgTexture(UIView *card) {
 // the particle cloud with a mask that expands from the top-right corner --
 // grains arrive there first, so the wipe keeps in sync with the convergence
 // and the window appears to be composed grain by grain.
-static void axs_open_startWipeReveal(UIView *card, CGFloat dur) {
+static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePoint) {
     @try {
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) return;
@@ -465,7 +469,12 @@ static void axs_open_startWipeReveal(UIView *card, CGFloat dur) {
         // live OUTSIDE the card bounds on the same layer; a bounds-tight mask
         // would clip them away for good
         CGFloat ov = 40.0;
-        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(sz.width + ov, -ov, 0, 0)];
+        // .140: the wipe starts at the corner NEAREST the finger and grows
+        // toward the opposite corner (dynamic direction)
+        CGPoint srcInCard = [card convertPoint:sourcePoint fromView:nil];
+        CGFloat x0 = (srcInCard.x > sz.width * 0.5) ? sz.width + ov : -ov;
+        CGFloat y0 = (srcInCard.y > sz.height * 0.5) ? sz.height + ov : -ov;
+        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(x0, y0, 0, 0)];
         mv.backgroundColor = [UIColor blackColor];
         mv.opaque = YES;
         card.layer.mask = mv.layer;
@@ -578,86 +587,6 @@ static UIImage *axs_open_captureAppContent(void) {
     return nil;
 }
 
-// .138: pixel-verified capture attempts (reference tweak's pollIsland pattern):
-// retry up to 8 times (0.06s apart) until the app scene view yields pixels;
-// fall back to white dots if the hosted content never appears.
-static void axs_open_captureStep(UIView *card, NSInteger attempts, CGFloat duration,
-                                 CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
-    @try {
-        if (card.window == nil) {
-            axs_dm_log(@"OPEN capture aborted, card left window");
-            axs_open_assembleInFlight = NO;
-            return;
-        }
-        UIImage *tex = axs_open_captureAppContent();
-        NSString *texKind = nil;
-        if (tex == nil) {
-            tex = axs_open_bgTexture(card);
-            texKind = @"bg-fallback";
-        } else {
-            texKind = @"scene-presentation";
-        }
-        if (tex == nil) {
-            if (attempts < 8) {
-                __weak UIView *weakCard = card;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    UIView *c = weakCard;
-                    if (c == nil) return;
-                    axs_open_captureStep(c, attempts + 1, duration, density, sourcePoint, sourceKind);
-                });
-                return;
-            }
-            axs_dm_log(@"OPEN texture unavailable after retries, native card restored");
-            axs_open_assembleInFlight = NO;
-            axs_open_selfRestore = YES;
-            card.hidden = NO;
-            return;
-        }
-        CGRect frame = [card convertRect:card.bounds toView:nil];
-        BOOL ok = axs_metalAssemblePlay(tex, frame, duration, density, sourcePoint);
-        if (!ok) {
-            axs_dm_log(@"OPEN assemble unavailable, native card restored");
-            axs_open_assembleInFlight = NO;
-            axs_open_selfRestore = YES;
-            card.hidden = NO;
-            return;
-        }
-        axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f attempts=%ld texture=%@ source=%@ (%@)",
-                   duration, density, (long)attempts, texKind,
-                   NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .137: wipe in sync with the convergence
-        __weak UIView *weakCard2 = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            UIView *c = weakCard2;
-            if (c == nil) return;
-            @try {
-                if (c.window == nil) return;
-                axs_open_assembleInFlight = NO;
-                axs_open_selfRestore = YES;
-                c.hidden = NO;
-                axs_open_startWipeReveal(c, duration);
-                // .139: drop the mask when the wipe completes, otherwise it
-                // lingers and clips the glow / later geometry changes
-                __weak UIView *weakCard3 = c;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    UIView *c3 = weakCard3;
-                    if (c3 == nil) return;
-                    axs_open_endWipeReveal(c3);
-                });
-            } @catch (NSException *ignored) {
-                axs_open_assembleInFlight = NO;
-                c.hidden = NO;
-            }
-        });
-    } @catch (NSException *ignored) {
-        axs_open_assembleInFlight = NO;
-        card.hidden = NO;
-    }
-}
-
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
     @try {
@@ -688,14 +617,67 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .138: pixel-verified capture of the app scene presentation view
-        // (the reference tweak's approach), then assemble with that texture
+        // .140: start the grains IMMEDIATELY with the fallback color (no
+        // capture wait), capture the app scene view in parallel, and swap the
+        // texture mid-flight when the real content is ready.
+        UIImage *dots = axs_open_bgTexture(card);
+        if (dots == nil) dots = axs_open_getWhiteTexture();
+        if (dots == nil) {
+            axs_dm_log(@"OPEN bg texture failed, native card restored");
+            axs_open_assembleInFlight = NO;
+            axs_open_selfRestore = YES;
+            card.hidden = NO;
+            return;
+        }
+        void *renderer = axs_metalAssemblePlayRet(dots, frame, duration, density, sourcePoint);
+        if (renderer == NULL) {
+            axs_open_assembleInFlight = NO;
+            axs_open_selfRestore = YES;
+            card.hidden = NO;
+            axs_dm_log(@"OPEN assemble unavailable, native card restored");
+            return;
+        }
+        axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
+                   duration, density, (long)polls,
+                   NSStringFromCGPoint(sourcePoint), sourceKind);
+        // .137/.140: wipe reveal in sync with the convergence
         __weak UIView *weakCard2 = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;
             if (c == nil) return;
-            axs_open_captureStep(c, 0, duration, density, sourcePoint, sourceKind);
+            @try {
+                if (c.window == nil) return;
+                axs_open_assembleInFlight = NO;
+                axs_open_selfRestore = YES;
+                c.hidden = NO;
+                axs_open_startWipeReveal(c, duration, sourcePoint);
+            } @catch (NSException *ignored) {
+                axs_open_assembleInFlight = NO;
+                c.hidden = NO;
+            }
+        });
+        // .140: parallel scene capture -> mid-flight texture swap
+        __block void *weakRenderer = renderer;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *c = weakCard2;
+            if (c == nil) { weakRenderer = NULL; return; }
+            @try {
+                if (c.window == nil) { weakRenderer = NULL; return; }
+                UIImage *tex = axs_open_captureAppContent();
+                NSString *texKind = tex ? @"scene-presentation" : nil;
+                if (tex != nil) {
+                    BOOL swapped = axs_metalReplaceTexture(weakRenderer, tex);
+                    axs_dm_log(@"OPEN texture swap %@ (%@)",
+                               swapped ? @"OK" : @"FAILED", texKind ?: @"none");
+                } else {
+                    axs_dm_log(@"OPEN scene capture blank, keeping fallback grains");
+                }
+                weakRenderer = NULL;
+            } @catch (NSException *ignored) {
+                weakRenderer = NULL;
+            }
         });
         return;
     } @catch (NSException *ignored) {
@@ -1090,14 +1072,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.139: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.140: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.139, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.140, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

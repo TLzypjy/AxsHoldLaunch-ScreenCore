@@ -1,8 +1,18 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.139
+版本：2.0.5+beautify.140
 
-beautify.139 变更（修复光晕消失 + 手势视觉失效）：
+beautify.140 变更（零延迟启动 + 成型方向跟随手指）：
+- .139 反馈：①聚合有 1~2s 延迟（全屏场景视图 drawViewHierarchy 主线程栅格化
+  ~0.5s + settle 轮询）；②成型方向固定右上→左下，应为从手指位置往对角扫。
+- 修复 ①：聚合不等截图——settled（~0.2s）后立即用底色粒子启动 + wipe 同步
+  开始；场景截图并行进行（0.15s 后启动、0.12s 间隔重试最多 8 次），完成后
+  中途换纹理（axs_metalReplaceTexture 回归）——粒子先起飞、飞到一半变成
+  浮窗内容碎片，感知延迟降到 ~0.2s。
+- 修复 ②：shader beginO 改为按粒子到手指位置的距离排序（近者先飞，方向跟随
+  手指）；mask 擦出起始角取手指最近的角（convertPoint 换算后判定左右/上下）。
+
+beautify.140 变更（修复光晕消失 + 手势视觉失效）：
 - .138 回归根因：wipe 揭示的 mask 挂在卡片 layer 上（光晕 glowOuter/glowInner
   也在同一 layer、位于卡片边界之外）——mask 按卡片边界裁剪 → 光晕被裁掉；
   且 .137 重构时删了 mask 移除调用 → mask 永久残留 → 浮窗后续尺寸/位置变化
@@ -421,4 +431,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.139_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.140_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
