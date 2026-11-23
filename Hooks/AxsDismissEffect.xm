@@ -682,6 +682,14 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 axs_open_assembleInFlight = NO;
                 axs_open_selfRestore = YES;
                 axs_open_startWipeReveal(c, 0.0, sourcePoint);
+                // final safety sweep at overlay dissolve: leave the card fully
+                // opaque + mask-free (also keeps endWipeReveal referenced)
+                __weak UIView *weakCard3 = c;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    UIView *c3 = weakCard3;
+                    if (c3 != nil) axs_open_endWipeReveal(c3);
+                });
             } @catch (NSException *ignored) {
                 axs_open_assembleInFlight = NO;
                 c.hidden = NO;
