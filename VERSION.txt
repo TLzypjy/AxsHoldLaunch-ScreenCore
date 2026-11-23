@@ -1,6 +1,15 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.136
+版本：2.0.5+beautify.137
+
+beautify.137 变更（成型节奏：wipe 与聚合实时同步）：
+- .136 日志：二次聚合已修复（每次呼出一次 assemble ✓、grain color final 0.15 ✓）。
+- 用户反馈：聚成浮窗之前仍会先聚成一次长方形——时序问题：粒子云先聚齐定格
+  （0.75s）wipe 才开始擦内容，出现"灰云定格→内容擦出"两段式观感。
+- 修复：wipe 揭示与聚合实时同步——聚合启动 0.10s 后即开始 wipe（卡片显示+
+  mask 从 0 起），wipe 时长=聚合时长（0.85s），粒子右上先到达、mask 右上先
+  揭示——粒子飞到哪内容就擦到哪，一气呵成。Metal overlay 存活恢复 1.0 倍
+  时长（不再需要定格遮恢复，卡片在云下已同步显示）。
 
 beautify.136 变更（修复二次聚合：呼出聚两次才成浮窗）：
 - .135 日志实锤：一次呼出跑了两次完整聚合（accepted → assemble #1 → 0.77s 后
@@ -393,4 +402,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.136_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.137_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

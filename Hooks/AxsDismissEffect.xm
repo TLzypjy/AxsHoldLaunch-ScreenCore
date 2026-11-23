@@ -306,7 +306,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.136: ARC-open assemble animation ------------------------------
+// ---- beautify.137: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -531,37 +531,26 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                    duration, density, (long)polls,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
         __weak UIView *weakCard2 = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration - 0.10) * NSEC_PER_SEC)),
+        // .137: the wipe runs IN SYNC with the convergence (same duration) --
+        // grains arrive right-top-first, the mask reveals right-top-first, so
+        // content appears exactly where/when the grains land: one fluid
+        // motion, no "cloud pauses as a rectangle, then the window flashes".
+        __weak UIView *weakCard2 = card;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;
             if (c == nil) return;
             @try {
                 if (c.window == nil) return;
-                // reveal the real card beneath the dense cloud, wiping from
-                // the top-right corner toward the bottom-left
-                // .135: stop the in-flight suppression here -- ScreenCore's
-                // own hidden toggles (its swallowed animations still drive
-                // show/hide calls) must pass through now, or the card would
-                // be forced back to hidden mid-reveal and never summon
+                // .135: suppression stops here -- ScreenCore's own hidden
+                // toggles must pass through, the mask controls the reveal
                 axs_open_assembleInFlight = NO;
                 // .136: this hidden=NO is OUR reveal -- mark self restore
                 // BEFORE unhiding, otherwise the open detector sees a stale
                 // goneAt (>0.4s old) and runs a SECOND assemble
                 axs_open_selfRestore = YES;
                 c.hidden = NO;
-                axs_open_startWipeReveal(c, 0.45);
-                // the cloud keeps flying/fading for 0.45s, then Metal fades it
-                __weak UIView *weakCard3 = c;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    UIView *c3 = weakCard3;
-                    if (c3 == nil) return;
-                    @try {
-                        axs_open_endWipeReveal(c3);
-                        axs_open_selfRestore = YES;
-                        axs_open_assembleInFlight = NO;
-                    } @catch (NSException *ignored) { }
-                });
+                axs_open_startWipeReveal(c, duration);
             } @catch (NSException *ignored) {
                 axs_open_assembleInFlight = NO;
                 c.hidden = NO;
@@ -960,14 +949,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.136: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.137: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.136, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.137, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
