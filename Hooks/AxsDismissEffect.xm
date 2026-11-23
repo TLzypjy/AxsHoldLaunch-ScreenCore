@@ -549,7 +549,6 @@ static UIImage *axs_open_sandTexture(void) {
         self.card = card;
         self.duration = dur;
         self.start = CACurrentMediaTime();
-        CGSize sz = card.bounds.size;
         CAShapeLayer *ml = [CAShapeLayer layer];
         ml.frame = card.bounds;
         ml.fillColor = [UIColor whiteColor].CGColor;
