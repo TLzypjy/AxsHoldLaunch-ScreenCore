@@ -1,6 +1,19 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.143
+版本：2.0.5+beautify.144
+
+beautify.144 变更（修复呼出动画自动无限循环）：
+- .143 反馈（视频 7b95d4/6a5cf1 + 日志 33）：浮窗在无任何操作时自己
+  "出现→粒子重聚→出现"，约每 1.76 秒一轮、连续循环约 20 次，用户并未
+  反复点击（循环轮 source 多为 fallback-card-center 而非手势）。
+- 根因：axs_open_selfRestore 是一次性 BOOL，reveal 时被消费一次后，
+  ScreenCore 重复 present / overlay 清理引发的后续可见性事件便失去保护，
+  被当成"新呼出"→ 再次聚合 → 无限循环。
+- 修复：改为卡片级"已组装"状态（objc 关联对象 axs_open_assembledKey）。
+  候选被接受的第一帧即置位；显示期间所有 becameVisible 事件因
+  "already assembled" 被忽略，直到真正的 dismiss（restore 块）才清除，
+  从而下次用户真实呼出仍可正常触发。
+- 保留 .143 的浮窗碎片逆聚合、瞬间交接、无淡入无 mask、密度上限放开。
 
 beautify.143 变更（消散的逆过程：浮窗碎片组合，中途就是半个浮窗）：
 - .142 反馈（视频 ef0b84... + 日志 32）：浮窗最后是"整体出来"的，不是碎片

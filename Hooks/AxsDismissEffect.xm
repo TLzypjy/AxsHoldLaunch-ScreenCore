@@ -323,6 +323,14 @@ static NSMutableSet *axs_dm_hooked = nil;
 //   - if the subclass declares the method -> hook at subclass level (safe)
 //   - otherwise -> class_addMethod an override that forwards with msgSendSuper
 static char axs_open_goneKey;
+// .144: per-card "already assembled / owned by us" state. Replaces the
+// one-shot axs_open_selfRestore for suppressing OUR OWN reveal: after a card
+// has been taken over by an assemble, its reveal (hidden=NO) and every later
+// present/overlay-cleanup visibility event would otherwise be read as a brand
+// new open and re-trigger the assemble forever (.143 infinite loop). This flag
+// stays set for the whole time the card is displayed and is cleared only on a
+// genuine dismiss (axs_dm_trigger / didMoveToWindow off-window).
+static char axs_open_assembledKey;
 static CFAbsoluteTime axs_open_lastDismissHide = -1e9;
 // .116: our own assemble restores the card (hidden=NO) which would re-trigger
 // the open detection -> infinite loop. Flag suppresses exactly that one event.
@@ -359,6 +367,19 @@ static BOOL axs_open_enabled(void) {
 static void axs_open_markGone(UIView *v) {
     objc_setAssociatedObject(v, &axs_open_goneKey, @(CACurrentMediaTime()),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+// .144: card-level assembled state -- persists across ALL visibility events
+// until a real dismiss, unlike the one-shot selfRestore flag.
+static void axs_open_setAssembled(UIView *v, BOOL yes) {
+    if (v == nil) return;
+    objc_setAssociatedObject(v, &axs_open_assembledKey,
+                             yes ? @YES : nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+static BOOL axs_open_isAssembled(UIView *v) {
+    if (v == nil) return NO;
+    NSNumber *n = objc_getAssociatedObject(v, &axs_open_assembledKey);
+    return n ? [n boolValue] : NO;
 }
 
 // .122: animation-modification window state (declared before first use)
@@ -705,6 +726,14 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
 
 static void axs_open_becameVisible(UIView *v) {
     @try {
+        // .144: a card already owned by an assemble is STILL the same visible
+        // window -- its own reveal and ScreenCore's repeated presents must not
+        // start a new assemble. This is persistent (unlike selfRestore) and is
+        // cleared only on a genuine dismiss / off-window.
+        if (axs_open_isAssembled(v)) {
+            axs_dm_log(@"OPEN candidate skipped (already assembled)");
+            return;
+        }
         if (axs_open_selfRestore) {
             axs_open_selfRestore = NO;
             axs_dm_log(@"OPEN candidate skipped (self restore)");
@@ -751,6 +780,10 @@ static void axs_open_becameVisible(UIView *v) {
         // block-copy of strong view captures anywhere.
         card.hidden = YES;
         axs_open_assembleInFlight = YES;
+        // .144: mark the card as owned from the FIRST frame. Every later
+        // visibility event (our reveal, overlay cleanup, repeated present)
+        // now resolves to "already assembled" and cannot re-enter this path.
+        axs_open_setAssembled(card, YES);
         axs_open_pollStep(card, 0, duration, density, sourcePoint, sourceKind);
     } @catch (NSException *ignored) { }
 }
@@ -983,6 +1016,11 @@ static void axs_dm_trigger(NSString *tag) {
                 // .124: precise event-level suppression of the open detector
                 // (replaces the old 3s time window the user asked to remove)
                 axs_open_selfRestore = YES;
+                // .144: the dismiss is complete -- release the card so the
+                // user's NEXT genuine open can assemble. Until now the card
+                // stayed "assembled" and every repeated present during the
+                // dismiss was ignored.
+                axs_open_setAssembled(container, NO);
                 container.hidden = NO;
             } @catch (NSException *ignored) { }
         });
