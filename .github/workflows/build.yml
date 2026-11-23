@@ -564,7 +564,7 @@ jobs:
           grep -Fq "@interface AXSOpenWipeDriver : NSObject" Hooks/AxsDismissEffect.xm || { echo "wipe driver class missing"; exit 1; }
           grep -Fq "CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)" Hooks/AxsDismissEffect.xm || { echo "wipe driver display link missing"; exit 1; }
           grep -Fq "self.maskLayer.path = path;" Hooks/AxsDismissEffect.xm || { echo "jagged mask path update missing"; exit 1; }
-          grep -Fq "float n = sinf(fx \* 17.3f + 0.7f) \* 0.50f" Hooks/AxsDismissEffect.xm || { echo "jagged boundary noise missing"; exit 1; }
+          grep -Fq "float n = sinf(fx * 17.3f + 0.7f) * 0.50f" Hooks/AxsDismissEffect.xm || { echo "jagged boundary noise missing"; exit 1; }
           grep -Fq "CGFloat gatherAt = duration * 0.37;" Hooks/AxsDismissEffect.xm || { echo "grain->reveal timing missing"; exit 1; }
           grep -Fq "CGFloat revealSpan = duration * 0.51;" Hooks/AxsDismissEffect.xm || { echo "jagged reveal span missing"; exit 1; }
           grep -Fq "axs_open_interceptUntil = 0" Hooks/AxsDismissEffect.xm || { echo "intercept disarm missing"; exit 1; }
