@@ -55,18 +55,17 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.143): the DISMISS SAND played backwards.
-// The user: "dissolve cuts the window into fragments and blows them away, so
-// assemble must be window fragments coming back together -- even half-way
-// through you should see a (partial) WINDOW, not sand that only becomes a
-// card at the very end." So each cell is a square WINDOW TILE carrying real
-// content for its whole flight; arrival times are staggered across the
-// timeline so at any moment some cells have already landed and stitch into a
-// visible piece of the window while the rest are still flying in from the
-// finger. A landed tile is a full square (breakage 0) that tiles seamlessly
-// with its neighbours. NOTE: no // comments are allowed INSIDE the string
-// below -- the Logos preprocessor strips // to EOL (including the trailing
-// line-continuation backslash) and would break the multiline literal.
+// OPEN MODE (openMode=1, beautify.145): the reference plugin's reveal.
+// Colored sand bursts from the finger, gathers along the TOP EDGE of the
+// card, then rides the top->bottom reveal wavefront down while the REAL card
+// is unmasked row by row underneath. Grains live only on the reveal boundary
+// and dissolve as the wave completes; the window itself is always the real
+// (correct, sharp) card -- never a mosaic of screenshot tiles. The grain
+// texture is a generated rainbow gradient: NO full-screen capture, which in
+// .144 cut the home-screen clock into the particles. NOTE: no // comments
+// are allowed INSIDE the string below -- the Logos preprocessor strips // to
+// EOL (including the trailing line-continuation backslash) and would break
+// the multiline literal.
 static NSString * const AXS_MSD_SHADER = @"\
 #include <metal_stdlib>\n\
 using namespace metal;\n\
@@ -108,30 +107,46 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
+        // two-phase: 0..0.42 gather finger -> top edge, 0.42..1 ride the\n\
+        // top->bottom reveal wavefront (matches the real card's mask wipe)\n\
         float2 srcN = clamp((float2(u.sourceX,u.sourceY) - u.origin) / u.cardSize, 0.0, 1.0);\n\
         float2 opp = float2(srcN.x > 0.5 ? 0.0 : 1.0, srcN.y > 0.5 ? 0.0 : 1.0);\n\
         float2 dirv = normalize(opp - srcN + float2(0.001, 0.001));\n\
-        float beginO = clamp(dot(unit - srcN, dirv), 0.0, 1.5)*0.32 + r*0.030;\n\
-        float spanO  = 0.45 + 0.035*r2;\n\
-        float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
-        float flyM = smoothstep(0.0,1.0,progressO);\n\
+        // stagger the take-off so grains stream in rather than pop together\n\
+        float beginO = clamp(dot(unit - srcN, dirv), 0.0, 1.5)*0.10 + r*0.055;\n\
         float angS = r*6.2831853;\n\
-        float radS = (26.0 + 150.0*r4);\n\
+        float radS = (10.0 + 90.0*r4);\n\
         float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
-        float2 endP = u.origin + unit*u.cardSize;\n\
-        float shrinkO = mix(mix(0.92,1.06,r3), 1.0, flyM);\n\
-        float angleO = (r3-0.5)*1.6*(1.0-flyM);\n\
+        // Phase A target: a horizontal band just ABOVE the card's top edge,\n\
+        // spread across the full width by unit.x. Grains pile up at the top.\n\
+        float2 topP = float2(u.origin.x + unit.x*u.cardSize.x,\n\
+                             u.origin.y - (4.0 + 26.0*r2));\n\
+        float tA = clamp((u.time - beginO)/0.42, 0.0, 1.0);\n\
+        float gatherE = smoothstep(0.0,1.0,tA);\n\
+        float2 pA = mix(startP, topP, gatherE);\n\
+        // Phase B: the reveal front sweeps top->bottom; each grain rides it,\n\
+        // with a small vertical jitter that shrinks as the wave completes.\n\
+        float wave = clamp((u.time - 0.42)/0.58, 0.0, 1.0);\n\
+        float waveE = smoothstep(0.0,1.0,wave);\n\
+        float bandY = (r3-0.5)*0.14;\n\
+        float2 frontP = float2(u.origin.x + unit.x*u.cardSize.x,\n\
+                               u.origin.y + clamp(waveE + bandY,0.0,1.0)*u.cardSize.y);\n\
+        float tB = smoothstep(0.40,0.46,u.time);\n\
+        float2 pO = mix(pA, frontP, tB);\n\
         float2 tileSizeO = u.cardSize/grid;\n\
-        float2 deltaO = (corner-0.5)*tileSizeO*shrinkO;\n\
+        float2 deltaO = (corner-0.5)*tileSizeO*0.92;\n\
+        float angleO = (r2-0.5)*3.2*(1.0-gatherE);\n\
         float cO=cos(angleO),sO=sin(angleO);\n\
         deltaO=float2(cO*deltaO.x-sO*deltaO.y,sO*deltaO.x+cO*deltaO.y);\n\
-        float2 pO = mix(startP, endP, flyM) + deltaO;\n\
+        pO += deltaO;\n\
         DustVertex outO;\n\
         outO.position=float4(2.0*pO.x/u.viewport.x-1.0,1.0-2.0*pO.y/u.viewport.y,0,1);\n\
-        outO.uv=(cell+corner)/grid;\n\
+        outO.uv=fract(float2(r4, r3) + unit*0.35);\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.07,progressO);\n\
-        outO.breakage=0.0;\n\
+        // fade in fast during gather; dissolve away as the wave finishes so\n\
+        // grains vanish ON the reveal boundary instead of lingering\n\
+        outO.fade=smoothstep(0.0,0.12,u.time) * (1.0 - smoothstep(0.86,1.0,u.time));\n\
+        outO.breakage=1.0;\n\
         return outO;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\

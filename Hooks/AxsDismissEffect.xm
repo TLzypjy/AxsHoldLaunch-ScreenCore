@@ -478,31 +478,71 @@ static UIImage *axs_open_bgTexture(UIView *card) {
     return tex;
 }
 
-// .143: NO reveal animation at all. The particles ARE the window -- square
-// window tiles with real content land across the whole timeline, so by the
-// time the last tile arrives the floating window is already fully drawn on
-// screen. The real card is then switched on INSTANTLY underneath the finished
-// particle window (identical content), and the Metal overlay dissolves over
-// 0.18s. There is no alpha 0->1 fade and no mask: the user specifically
-// rejected the "whole card floats in at the end" look. An instant swap under
-// an already-complete window is invisible; a fade would read as the card
-// being assembled all at once. No layer mask also keeps the glow unclipped
-// and gestures/geometry changes working. sourcePoint kept for the API.
+// .145: colored sand texture for the open reveal. The reference plugin's
+// grains are vivid cyan/purple/orange, NOT fragments of the whole screen --
+// .144 cut the home-screen clock into the particles by capturing the full
+// _UIScenePresentationView. A generated gradient gives every grain a stable
+// color (the shader samples it with a per-cell hash) with zero capture cost.
+static UIImage *axs_open_sandTexture(void) {
+    @try {
+        CGFloat S = 128.0;
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        fmt.scale = 1.0;
+        UIGraphicsImageRenderer *r =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, S, S) format:fmt];
+        return [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            CGContextRef c = ctx.CGContext;
+            NSArray *cols = @[
+                (id)[UIColor colorWithRed:0.18 green:0.86 blue:0.92 alpha:1.0].CGColor, // cyan
+                (id)[UIColor colorWithRed:0.42 green:0.42 blue:0.95 alpha:1.0].CGColor, // indigo
+                (id)[UIColor colorWithRed:0.86 green:0.36 blue:0.78 alpha:1.0].CGColor, // magenta
+                (id)[UIColor colorWithRed:1.00 green:0.55 blue:0.28 alpha:1.0].CGColor, // orange
+                (id)[UIColor colorWithRed:0.99 green:0.82 blue:0.35 alpha:1.0].CGColor  // yellow
+            ];
+            CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+            CGGradientRef grad = CGGradientCreateWithColors(cs, (CFArrayRef)cols, NULL);
+            CGContextDrawLinearGradient(c, grad, CGPointMake(0, 0), CGPointMake(S, S), 0);
+            CGGradientRelease(grad);
+            CGColorSpaceRelease(cs);
+        }];
+    } @catch (NSException *ignored) {
+        return nil;
+    }
+}
+
+// .145: the real card is revealed top->bottom by a growing mask while the
+// colored grains ride the SAME wavefront (shader Phase B) and dissolve on it.
+// Any mid-way frame therefore shows a real, sharp, half-revealed window with
+// a band of sand on the reveal edge -- exactly the reference plugin. The mask
+// is overscanned horizontally so the side glow/border is never clipped; the
+// bottom edge of the mask IS the reveal front. sourcePoint kept for the API.
 static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePoint) {
     @try {
-        (void)sourcePoint; (void)dur;
+        (void)sourcePoint;
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) return;
-        if (card.layer.mask != nil) card.layer.mask = nil;
-        // Native present animation was already swallowed at candidate-accept;
-        // disarm the window so nothing we do here can be swallowed either.
+        // Native present animation was swallowed at candidate-accept; disarm
+        // the window so nothing we add here is swallowed either.
         axs_open_interceptUntil = 0;
-        card.alpha = 1.0;   // instant, not animated
+        card.alpha = 1.0;
         card.hidden = NO;
+        if (card.layer.mask != nil) card.layer.mask = nil;
+        if (dur <= 0) return;
+        CGFloat ov = 40.0;
+        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(-ov, -ov, sz.width + 2 * ov, 0.0)];
+        mv.backgroundColor = [UIColor blackColor];
+        mv.opaque = YES;
+        card.layer.mask = mv.layer;
+        // ease-in-out on the UIView side closely matches the shader's
+        // smoothstep wave, so grains stay glued to the reveal boundary.
+        [UIView animateWithDuration:dur animations:^{
+            mv.frame = CGRectMake(-ov, -ov, sz.width + 2 * ov, sz.height + ov);
+        }];
     } @catch (NSException *ignored) { }
 }
 
-// .143: guarantee the card ends fully opaque and mask-free (gesture/glow safe)
+// .145: once the wave completes, drop the mask so glow + gestures are intact
 static void axs_open_endWipeReveal(UIView *card) {
     @try {
         card.alpha = 1.0;
@@ -645,13 +685,16 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .141: capture BEFORE the grains launch -- the screen is still
-        // static here, so the (now half-resolution, ~0.1s) rasterization
-        // hitch is invisible; mid-flight swaps caused both the stutter and
-        // the appearance pop
-        UIImage *tex = axs_open_captureAppContent();
-        NSString *texKind = tex ? @"scene-presentation" : @"bg-color";
-        if (tex == nil) tex = axs_open_bgTexture(card);
+        // .145: grains are COLORED SAND, not pieces of the screen. .144 cut
+        // the full _UIScenePresentationView into grains, which is why the
+        // home-screen clock flew up with them. A generated rainbow gradient
+        // is cheap, deterministic and 100% sand -- no screen capture at all.
+        UIImage *tex = axs_open_sandTexture();
+        NSString *texKind = tex ? @"color-sand" : @"scene-presentation";
+        // defensive fallbacks only -- the generated gradient never fails;
+        // kept so the legacy capture/bg helpers stay referenced (no -Wunused)
+        if (tex == nil) tex = axs_open_captureAppContent();
+        if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
         if (tex == nil) {
             axs_dm_log(@"OPEN texture unavailable, native card restored");
             axs_open_assembleInFlight = NO;
@@ -667,11 +710,11 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             axs_dm_log(@"OPEN assemble unavailable, native card restored");
             return;
         }
-        // .143: all fallback paths above already returned, so the assemble
-        // WILL run. The card stays hidden (not alpha-0) while the particles
-        // build the window; it is switched on INSTANTLY once they have landed.
-        // Clear any stale mask defensively, but never touch alpha -- an alpha
-        // 0->1 fade is exactly the "whole card floats in" look the user rejects.
+        // all fallback paths above already returned, so the assemble WILL run.
+        // The card stays fully hidden while grains gather finger -> top edge;
+        // then the real card is unmasked top->bottom while the grains ride the
+        // same wave down and dissolve. No alpha fade -- the user rejects the
+        // "whole card floats in" look; this is a real row-by-row reveal.
         @try {
             if (card.layer.mask != nil) card.layer.mask = nil;
             card.alpha = 1.0;
@@ -679,16 +722,13 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
                    duration, density, (long)polls, texKind,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .143: the particles ARE the window -- staggered square window tiles
-        // land across the whole timeline, so mid-way a half-built WINDOW is
-        // already visible (not a sand cloud). Hold the real card hidden until
-        // the last tiles land (~0.92), then switch it on INSTANTLY underneath
-        // the now-complete particle window. No alpha fade / no mask: the fade
-        // was the "whole card floats in" look the user rejected. The overlay
-        // then dissolves over 0.18s revealing the identical real card.
+        // .145: grains reach the top edge at t=0.42; from there the real card
+        // reveals top->bottom over the remaining 0.58 of the timeline, masked,
+        // with the sand glued to the boundary. Overlay dissolves at t=1.0+0.18.
         __weak UIView *weakCard2 = card;
-        CGFloat revealAt = duration * 0.92;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(revealAt * NSEC_PER_SEC)),
+        CGFloat gatherAt = duration * 0.42;
+        CGFloat revealSpan = duration * 0.58;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(gatherAt * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;
             if (c == nil) return;
@@ -702,11 +742,11 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 }
                 axs_open_assembleInFlight = NO;
                 axs_open_selfRestore = YES;
-                axs_open_startWipeReveal(c, 0.0, sourcePoint);
+                axs_open_startWipeReveal(c, revealSpan, sourcePoint);
                 // final safety sweep at overlay dissolve: leave the card fully
                 // opaque + mask-free (also keeps endWipeReveal referenced)
                 __weak UIView *weakCard3 = c;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((revealSpan + 0.05) * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     UIView *c3 = weakCard3;
                     if (c3 != nil) axs_open_endWipeReveal(c3);
@@ -715,6 +755,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 axs_open_assembleInFlight = NO;
                 c.hidden = NO;
                 c.alpha = 1.0;
+                if (c.layer.mask != nil) c.layer.mask = nil;
             }
         });
         return;
