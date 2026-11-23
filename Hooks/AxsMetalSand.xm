@@ -103,8 +103,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
-        // .140: grains nearest the finger depart first (direction follows the source)
-        float2 srcN = clamp((float2(u.sourceX,u.sourceY) - u.origin) / u.cardSize, 0.0, 1.0);
+        float2 srcN = clamp((float2(u.sourceX,u.sourceY) - u.origin) / u.cardSize, 0.0, 1.0);\n\
         float beginO = length(unit - srcN)*0.22 + r*0.025;\n\
         float spanO  = 0.56 + 0.035*r2;\n\
         float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
