@@ -364,9 +364,23 @@ static BOOL axs_open_enabled(void) {
     return on;
 }
 
+// .146: wipe driver association key (declared early so markGone can clear it)
+static char axs_open_wipeDriverKey;
+
 static void axs_open_markGone(UIView *v) {
     objc_setAssociatedObject(v, &axs_open_goneKey, @(CACurrentMediaTime()),
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    // .146: a real dismiss/hide must stop any running reveal driver and drop
+    // its mask, otherwise a reused card keeps a half-built ragged mask.
+    @try {
+        id driver = objc_getAssociatedObject(v, &axs_open_wipeDriverKey);
+        if (driver != nil) {
+            [driver performSelector:@selector(stop)];
+            objc_setAssociatedObject(v, &axs_open_wipeDriverKey, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        if (v.layer.mask != nil) v.layer.mask = nil;
+    } @catch (NSException *ignored) { }
 }
 
 // .144: card-level assembled state -- persists across ALL visibility events
@@ -511,42 +525,124 @@ static UIImage *axs_open_sandTexture(void) {
     }
 }
 
-// .145: the real card is revealed top->bottom by a growing mask while the
-// colored grains ride the SAME wavefront (shader Phase B) and dissolve on it.
-// Any mid-way frame therefore shows a real, sharp, half-revealed window with
-// a band of sand on the reveal edge -- exactly the reference plugin. The mask
-// is overscanned horizontally so the side glow/border is never clipped; the
-// bottom edge of the mask IS the reveal front. sourcePoint kept for the API.
+// .146: the real card is revealed top->bottom by a NOISE-JAGGED mask driven
+// by a CADisplayLink, not by a flat rectangle. A flat growing rect made every
+// mid frame a hard-edged rectangle sliding down ("too board-like"). Here the
+// mask bottom boundary is a multi-sample wave (several sine octaves + a slow
+// wobble) so it looks like sand settling into the card row by row, matching
+// the shader grains that now fly to their own cells instead of a single line.
+// The driver is retained on the card via association and stops itself when the
+// wave completes or the card leaves the window, so gesture/glow stay intact.
+
+@interface AXSOpenWipeDriver : NSObject
+@property (nonatomic, weak) UIView *card;
+@property (nonatomic, strong) CAShapeLayer *maskLayer;
+@property (nonatomic, strong) CADisplayLink *link;
+@property (nonatomic, assign) CFTimeInterval start;
+@property (nonatomic, assign) CGFloat duration;
+@end
+
+@implementation AXSOpenWipeDriver
+
+- (void)startWithCard:(UIView *)card duration:(CGFloat)dur {
+    @try {
+        self.card = card;
+        self.duration = dur;
+        self.start = CACurrentMediaTime();
+        CGSize sz = card.bounds.size;
+        CAShapeLayer *ml = [CAShapeLayer layer];
+        ml.frame = card.bounds;
+        ml.fillColor = [UIColor whiteColor].CGColor;
+        ml.strokeColor = nil;
+        CGMutablePathRef empty = CGPathCreateMutable(); // empty => fully masked at t=0
+        ml.path = empty;
+        CGPathRelease(empty);
+        self.maskLayer = ml;
+        card.layer.mask = ml;
+        self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
+        [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    } @catch (NSException *ignored) { }
+}
+
+- (void)tick:(CADisplayLink *)link {
+    @try {
+        UIView *card = self.card;
+        if (card == nil || card.window == nil) { [self stop]; return; }
+        CGFloat elapsed = CACurrentMediaTime() - self.start;
+        CGFloat p = self.duration > 0 ? elapsed / self.duration : 1.0;
+        if (p >= 1.0) {
+            card.layer.mask = nil;
+            [self stop];
+            return;
+        }
+        CGSize sz = card.bounds.size;
+        if (sz.width < 1 || sz.height < 1) { [self stop]; return; }
+        CGFloat ov = 40.0;
+        const int N = 24;
+        CGFloat amp = MIN(sz.height * 0.055, 30.0);
+        CGMutablePathRef path = CGPathCreateMutable();
+        CGPathMoveToPoint(path, NULL, -ov, -ov - 4.0);
+        CGPathAddLineToPoint(path, NULL, sz.width + ov, -ov - 4.0);
+        // right -> left so the polygon is consistent; y is a noise-jagged front
+        for (int i = N - 1; i >= 0; i--) {
+            CGFloat fx = (CGFloat)i / (CGFloat)(N - 1);
+            CGFloat x = fx * sz.width;
+            float n = sinf(fx * 17.3f + 0.7f) * 0.50f
+                    + sinf(fx * 41.7f + 2.1f) * 0.30f
+                    + sinf(fx * 83.1f + 4.3f) * 0.20f;
+            float wob = 0.78f + 0.22f * sinf((float)elapsed * 2.6f + fx * 9.0f);
+            CGFloat y = -ov + p * (sz.height + 2.0 * ov) + n * amp * wob;
+            CGPathAddLineToPoint(path, NULL, x, y);
+        }
+        CGPathCloseSubpath(path);
+        self.maskLayer.path = path;
+        CGPathRelease(path);
+    } @catch (NSException *ignored) {
+        [self stop];
+    }
+}
+
+- (void)stop {
+    if (self.link != nil) {
+        [self.link invalidate];
+        self.link = nil;
+    }
+}
+
+- (void)dealloc {
+    [self stop];
+}
+@end
+
 static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePoint) {
     @try {
         (void)sourcePoint;
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) return;
-        // Native present animation was swallowed at candidate-accept; disarm
-        // the window so nothing we add here is swallowed either.
         axs_open_interceptUntil = 0;
         card.alpha = 1.0;
         card.hidden = NO;
         if (card.layer.mask != nil) card.layer.mask = nil;
         if (dur <= 0) return;
-        CGFloat ov = 40.0;
-        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(-ov, -ov, sz.width + 2 * ov, 0.0)];
-        mv.backgroundColor = [UIColor blackColor];
-        mv.opaque = YES;
-        card.layer.mask = mv.layer;
-        // ease-in-out on the UIView side closely matches the shader's
-        // smoothstep wave, so grains stay glued to the reveal boundary.
-        [UIView animateWithDuration:dur animations:^{
-            mv.frame = CGRectMake(-ov, -ov, sz.width + 2 * ov, sz.height + ov);
-        }];
+        AXSOpenWipeDriver *driver = [AXSOpenWipeDriver new];
+        objc_setAssociatedObject(card, &axs_open_wipeDriverKey, driver,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [driver startWithCard:card duration:dur];
     } @catch (NSException *ignored) { }
 }
 
-// .145: once the wave completes, drop the mask so glow + gestures are intact
+// .146: final sweep -- drop the mask and stop the driver so glow + gestures
+// are fully restored. Idempotent: tick already clears the mask on completion.
 static void axs_open_endWipeReveal(UIView *card) {
     @try {
         card.alpha = 1.0;
         card.hidden = NO;
+        AXSOpenWipeDriver *driver = objc_getAssociatedObject(card, &axs_open_wipeDriverKey);
+        if (driver != nil) {
+            [driver stop];
+            objc_setAssociatedObject(card, &axs_open_wipeDriverKey, nil,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
         if (card.layer.mask != nil) card.layer.mask = nil;
     } @catch (NSException *ignored) { }
 }
@@ -711,10 +807,11 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             return;
         }
         // all fallback paths above already returned, so the assemble WILL run.
-        // The card stays fully hidden while grains gather finger -> top edge;
-        // then the real card is unmasked top->bottom while the grains ride the
-        // same wave down and dissolve. No alpha fade -- the user rejects the
-        // "whole card floats in" look; this is a real row-by-row reveal.
+        // .146: the card stays hidden while grains fly finger -> their own
+        // cells; then a noise-jagged mask reveals the real card top->bottom
+        // while each grain dissolves as it settles. No alpha fade -- the user
+        // rejects the "whole card floats in" look; this is a grain-by-grain
+        // reveal with a ragged, non-rectangular boundary.
         @try {
             if (card.layer.mask != nil) card.layer.mask = nil;
             card.alpha = 1.0;
@@ -722,12 +819,13 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
                    duration, density, (long)polls, texKind,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .145: grains reach the top edge at t=0.42; from there the real card
-        // reveals top->bottom over the remaining 0.58 of the timeline, masked,
-        // with the sand glued to the boundary. Overlay dissolves at t=1.0+0.18.
+        // .146: grains fly to their own cells and begin dissolving from the
+        // top at t~0.37. The noise-jagged mask starts there and sweeps down to
+        // t~0.88, so the card is revealed exactly as the sand settles. Overlay
+        // dissolves at t=1.0+0.18.
         __weak UIView *weakCard2 = card;
-        CGFloat gatherAt = duration * 0.42;
-        CGFloat revealSpan = duration * 0.58;
+        CGFloat gatherAt = duration * 0.37;
+        CGFloat revealSpan = duration * 0.51;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(gatherAt * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;

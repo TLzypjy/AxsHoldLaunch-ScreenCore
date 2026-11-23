@@ -55,14 +55,17 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.145): the reference plugin's reveal.
-// Colored sand bursts from the finger, gathers along the TOP EDGE of the
-// card, then rides the top->bottom reveal wavefront down while the REAL card
-// is unmasked row by row underneath. Grains live only on the reveal boundary
-// and dissolve as the wave completes; the window itself is always the real
-// (correct, sharp) card -- never a mosaic of screenshot tiles. The grain
-// texture is a generated rainbow gradient: NO full-screen capture, which in
-// .144 cut the home-screen clock into the particles. NOTE: no // comments
+// OPEN MODE (openMode=1, beautify.146): the reference plugin's reveal.
+// Colored sand bursts from the finger and each grain flies to ITS OWN cell
+// inside the card (targetP = origin + unit*cardSize). Grains start in a
+// staggered top->bottom order (rowDelay + per-grain jitter), so the cloud
+// settles gradually like sand instead of snapping into one straight line at
+// the top edge. Each grain dissolves as it arrives; the REAL card is revealed
+// underneath by a noise-jagged mask that follows the same top->bottom pace.
+// The window itself is always the real (correct, sharp) card -- never a
+// mosaic of screenshot tiles. The grain texture is a generated rainbow
+// gradient: NO full-screen capture, which in .144 cut the home-screen clock
+// into the particles. NOTE: no // comments
 // are allowed INSIDE the string below -- the Logos preprocessor strips // to
 // EOL (including the trailing line-continuation backslash) and would break
 // the multiline literal.
@@ -107,36 +110,30 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
-        float2 srcN = clamp((float2(u.sourceX,u.sourceY) - u.origin) / u.cardSize, 0.0, 1.0);\n\
-        float2 opp = float2(srcN.x > 0.5 ? 0.0 : 1.0, srcN.y > 0.5 ? 0.0 : 1.0);\n\
-        float2 dirv = normalize(opp - srcN + float2(0.001, 0.001));\n\
-        float beginO = clamp(dot(unit - srcN, dirv), 0.0, 1.5)*0.10 + r*0.055;\n\
         float angS = r*6.2831853;\n\
-        float radS = (10.0 + 90.0*r4);\n\
+        float radS = 8.0 + 52.0*r4;\n\
         float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
-        float2 topP = float2(u.origin.x + unit.x*u.cardSize.x,\n\
-                             u.origin.y - (4.0 + 26.0*r2));\n\
-        float tA = clamp((u.time - beginO)/0.42, 0.0, 1.0);\n\
-        float gatherE = smoothstep(0.0,1.0,tA);\n\
-        float2 pA = mix(startP, topP, gatherE);\n\
-        float wave = clamp((u.time - 0.42)/0.58, 0.0, 1.0);\n\
-        float waveE = smoothstep(0.0,1.0,wave);\n\
-        float bandY = (r3-0.5)*0.14;\n\
-        float2 frontP = float2(u.origin.x + unit.x*u.cardSize.x,\n\
-                               u.origin.y + clamp(waveE + bandY,0.0,1.0)*u.cardSize.y);\n\
-        float tB = smoothstep(0.40,0.46,u.time);\n\
-        float2 pO = mix(pA, frontP, tB);\n\
+        float2 targetP = u.origin + unit * u.cardSize;\n\
+        float rowDelay = unit.y * 0.34;\n\
+        float jitter = r2*0.16 + r3*0.05;\n\
+        float begin = 0.02 + rowDelay + jitter;\n\
+        float span = 0.26 + r4*0.14;\n\
+        float progress = clamp((u.time - begin)/span, 0.0, 1.0);\n\
+        float motion = 1.0-(1.0-progress)*(1.0-progress);\n\
+        float2 p = mix(startP, targetP, motion);\n\
+        float arc = sin(progress*3.1415926)*(r-0.5)*70.0;\n\
+        p += float2(arc, arc*0.30);\n\
         float2 tileSizeO = u.cardSize/grid;\n\
-        float2 deltaO = (corner-0.5)*tileSizeO*0.92;\n\
-        float angleO = (r2-0.5)*3.2*(1.0-gatherE);\n\
+        float2 deltaO = (corner-0.5)*tileSizeO*0.80;\n\
+        float angleO = (r3-0.5)*4.0*(1.0-motion);\n\
         float cO=cos(angleO),sO=sin(angleO);\n\
         deltaO=float2(cO*deltaO.x-sO*deltaO.y,sO*deltaO.x+cO*deltaO.y);\n\
-        pO += deltaO;\n\
+        p += deltaO;\n\
         DustVertex outO;\n\
-        outO.position=float4(2.0*pO.x/u.viewport.x-1.0,1.0-2.0*pO.y/u.viewport.y,0,1);\n\
+        outO.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
         outO.uv=fract(float2(r4, r3) + unit*0.35);\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.12,u.time) * (1.0 - smoothstep(0.86,1.0,u.time));\n\
+        outO.fade=smoothstep(0.0,0.08,u.time) * (1.0 - smoothstep(0.74,1.0,progress));\n\
         outO.breakage=1.0;\n\
         return outO;\n\
     }\n\
