@@ -1,6 +1,14 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.138
+版本：2.0.5+beautify.139
+
+beautify.139 变更（修复光晕消失 + 手势视觉失效）：
+- .138 回归根因：wipe 揭示的 mask 挂在卡片 layer 上（光晕 glowOuter/glowInner
+  也在同一 layer、位于卡片边界之外）——mask 按卡片边界裁剪 → 光晕被裁掉；
+  且 .137 重构时删了 mask 移除调用 → mask 永久残留 → 浮窗后续尺寸/位置变化
+  时旧 mask 持续裁剪（边缘操作视觉失效，被感知为手势失效）。
+- 修复：①mask 框架向四周外扩 40pt（揭示期间光晕不被裁）；②wipe 动画完成后
+  移除 mask（axs_open_endWipeReveal 回归）。
 
 beautify.138 变更（按参考插件实现：App 场景呈现视图截图 + 像素验证轮询）：
 - 参考插件（com.ms.openparticleanimation 0.3.67）二进制反推确认：它截取的是
@@ -413,4 +421,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.138_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.139_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

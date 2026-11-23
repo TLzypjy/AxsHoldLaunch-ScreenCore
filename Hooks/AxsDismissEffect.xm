@@ -306,7 +306,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.138: ARC-open assemble animation ------------------------------
+// ---- beautify.139: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -461,12 +461,16 @@ static void axs_open_startWipeReveal(UIView *card, CGFloat dur) {
     @try {
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) return;
-        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(sz.width, 0, 0, 0)];
+        // .139: overscan the mask by 40pt on every side -- the glow layers
+        // live OUTSIDE the card bounds on the same layer; a bounds-tight mask
+        // would clip them away for good
+        CGFloat ov = 40.0;
+        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(sz.width + ov, -ov, 0, 0)];
         mv.backgroundColor = [UIColor blackColor];
         mv.opaque = YES;
         card.layer.mask = mv.layer;
         [UIView animateWithDuration:dur animations:^{
-            mv.frame = CGRectMake(0, 0, sz.width, sz.height);
+            mv.frame = CGRectMake(-ov, -ov, sz.width + 2 * ov, sz.height + 2 * ov);
         }];
     } @catch (NSException *ignored) { }
 }
@@ -625,6 +629,15 @@ static void axs_open_captureStep(UIView *card, NSInteger attempts, CGFloat durat
                 axs_open_selfRestore = YES;
                 c.hidden = NO;
                 axs_open_startWipeReveal(c, duration);
+                // .139: drop the mask when the wipe completes, otherwise it
+                // lingers and clips the glow / later geometry changes
+                __weak UIView *weakCard3 = c;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    UIView *c3 = weakCard3;
+                    if (c3 == nil) return;
+                    axs_open_endWipeReveal(c3);
+                });
             } @catch (NSException *ignored) {
                 axs_open_assembleInFlight = NO;
                 c.hidden = NO;
@@ -1068,14 +1081,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.138: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.139: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.138, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.139, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
