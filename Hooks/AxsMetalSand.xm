@@ -107,25 +107,18 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
-        // two-phase: 0..0.42 gather finger -> top edge, 0.42..1 ride the\n\
-        // top->bottom reveal wavefront (matches the real card's mask wipe)\n\
         float2 srcN = clamp((float2(u.sourceX,u.sourceY) - u.origin) / u.cardSize, 0.0, 1.0);\n\
         float2 opp = float2(srcN.x > 0.5 ? 0.0 : 1.0, srcN.y > 0.5 ? 0.0 : 1.0);\n\
         float2 dirv = normalize(opp - srcN + float2(0.001, 0.001));\n\
-        // stagger the take-off so grains stream in rather than pop together\n\
         float beginO = clamp(dot(unit - srcN, dirv), 0.0, 1.5)*0.10 + r*0.055;\n\
         float angS = r*6.2831853;\n\
         float radS = (10.0 + 90.0*r4);\n\
         float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
-        // Phase A target: a horizontal band just ABOVE the card's top edge,\n\
-        // spread across the full width by unit.x. Grains pile up at the top.\n\
         float2 topP = float2(u.origin.x + unit.x*u.cardSize.x,\n\
                              u.origin.y - (4.0 + 26.0*r2));\n\
         float tA = clamp((u.time - beginO)/0.42, 0.0, 1.0);\n\
         float gatherE = smoothstep(0.0,1.0,tA);\n\
         float2 pA = mix(startP, topP, gatherE);\n\
-        // Phase B: the reveal front sweeps top->bottom; each grain rides it,\n\
-        // with a small vertical jitter that shrinks as the wave completes.\n\
         float wave = clamp((u.time - 0.42)/0.58, 0.0, 1.0);\n\
         float waveE = smoothstep(0.0,1.0,wave);\n\
         float bandY = (r3-0.5)*0.14;\n\
@@ -143,8 +136,6 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.position=float4(2.0*pO.x/u.viewport.x-1.0,1.0-2.0*pO.y/u.viewport.y,0,1);\n\
         outO.uv=fract(float2(r4, r3) + unit*0.35);\n\
         outO.local=corner;\n\
-        // fade in fast during gather; dissolve away as the wave finishes so\n\
-        // grains vanish ON the reveal boundary instead of lingering\n\
         outO.fade=smoothstep(0.0,0.12,u.time) * (1.0 - smoothstep(0.86,1.0,u.time));\n\
         outO.breakage=1.0;\n\
         return outO;\n\
