@@ -306,7 +306,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.135: ARC-open assemble animation ------------------------------
+// ---- beautify.136: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -438,7 +438,10 @@ static UIImage *axs_open_bgTexture(UIView *card) {
         col = nil;
     }
     if (col == nil) col = [UIColor colorWithWhite:0.15 alpha:0.95];
-    axs_dm_log(@"OPEN grain color %.2f %.2f %.2f %.2f", r1, g1, b1, a1);
+    CGFloat fr=0, fg=0, fb=0, fa=0;
+    [col getRed:&fr green:&fg blue:&fb alpha:&fa];
+    axs_dm_log(@"OPEN grain color final %.2f %.2f %.2f %.2f (raw %.2f %.2f %.2f %.2f)",
+               fr, fg, fb, fa, r1, g1, b1, a1);
     UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
     fmt.opaque = NO;
     UIGraphicsImageRenderer *r =
@@ -501,6 +504,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         if (!settled) {
             axs_dm_log(@"OPEN frame never settled, native card restored");
             axs_open_assembleInFlight = NO;
+            axs_open_selfRestore = YES;
             card.hidden = NO;
             return;
         }
@@ -520,6 +524,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             axs_open_assembleInFlight = NO;
             card.hidden = NO;
             axs_dm_log(@"OPEN assemble unavailable, native card restored");
+            axs_open_selfRestore = YES;
             return;
         }
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
@@ -539,6 +544,10 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 // show/hide calls) must pass through now, or the card would
                 // be forced back to hidden mid-reveal and never summon
                 axs_open_assembleInFlight = NO;
+                // .136: this hidden=NO is OUR reveal -- mark self restore
+                // BEFORE unhiding, otherwise the open detector sees a stale
+                // goneAt (>0.4s old) and runs a SECOND assemble
+                axs_open_selfRestore = YES;
                 c.hidden = NO;
                 axs_open_startWipeReveal(c, 0.45);
                 // the cloud keeps flying/fading for 0.45s, then Metal fades it
@@ -951,14 +960,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.135: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.136: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.135, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.136, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

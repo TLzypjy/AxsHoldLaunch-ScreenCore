@@ -1,6 +1,17 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.135
+版本：2.0.5+beautify.136
+
+beautify.136 变更（修复二次聚合：呼出聚两次才成浮窗）：
+- .135 日志实锤：一次呼出跑了两次完整聚合（accepted → assemble #1 → 0.77s 后
+  又 accepted → assemble #2 → self restore）——用户看到"聚两次长方形，第三次
+  才成浮窗"。
+- 根因：wipe 揭示块（.135）置 flight=NO 后自己的 hidden=NO 触发呼出检测——
+  quick toggle 用的 goneAt 是聚合启动时的时间（0.5s 前 > 0.4s 门限）→ 拦不住
+  → 二次聚合。
+- 修复：wipe 揭示的 hidden=NO 之前先置 selfRestore=YES（自己的显示动作检测器
+  跳过）；never-settled / assemble-unavailable 终态路径同样补置；
+  grain color 日志改为打印 fallback 后的最终颜色（附原始读取值）。
 
 beautify.135 变更（修复呼不出来 + 粒子不可见）：
 - .134 日志实锤：呼出流程中 ScreenCore 自己做 hidden:YES→NO 切换（动画被吞但
@@ -382,4 +393,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.135_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.136_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
