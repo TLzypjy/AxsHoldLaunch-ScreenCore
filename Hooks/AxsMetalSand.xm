@@ -368,9 +368,6 @@ static NSMutableArray *sMsdActiveRenderers = nil;
 // .140: the currently-running open-assemble renderer (mid-flight texture swap)
 static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
 
-// .131: the currently-running open-assemble renderer (mid-flight texture swap)
-static __weak AXSMetalSandRenderer *sMsdActiveOpenRenderer = nil;
-
 static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
 
 @implementation AXSMetalSandRenderer
@@ -677,7 +674,6 @@ static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat dur
         AXSMetalSandRenderer *renderer = [AXSMetalSandRenderer new];
         if (sMsdActiveRenderers == nil) sMsdActiveRenderers = [NSMutableArray array];
         [sMsdActiveRenderers addObject:renderer];
-        if (openMode == 1u) sMsdActiveOpenRenderer = renderer;
         if (openMode == 1u) sMsdActiveOpenRenderer = renderer;
 
         float seed = (float)(arc4random_uniform(100000)) / 1000.0f;
