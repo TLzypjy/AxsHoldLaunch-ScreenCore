@@ -475,6 +475,15 @@ static void axs_open_startWipeReveal(UIView *card, CGFloat dur) {
     } @catch (NSException *ignored) { }
 }
 
+// .139: remove the mask once the wipe completes -- a lingering mask keeps
+// clipping the glow and any later geometry changes (perceived as broken
+// gestures)
+static void axs_open_endWipeReveal(UIView *card) {
+    @try {
+        if (card.layer.mask != nil) card.layer.mask = nil;
+    } @catch (NSException *ignored) { }
+}
+
 
 // blank probe: samples the alpha channel on a sparse grid
 static BOOL axs_dm_imageIsBlank(UIImage *img) {
