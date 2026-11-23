@@ -55,13 +55,15 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.141): the dismiss-sand timeline played
-// backwards -- grains start scattered up-right at reduced scale, invisible,
-// then converge onto the card frame and fade IN; at time=1 the full card is
-// assembled and the caller swaps in the real view. NOTE: no // comments are
-// allowed INSIDE the string below -- the Logos preprocessor strips // to EOL
-// (including the trailing line-continuation backslash) and would break the
-// multiline literal.
+// OPEN MODE (openMode=1, beautify.142): a cloud of near-full-size WINDOW
+// FRAGMENTS spreads out around the finger, then flies to each cell of the
+// card grid and snaps into place (round fragment in flight -> square tile on
+// arrival, so the pieces stitch seamlessly into the floating window). This
+// mirrors the dismiss sand (which the user liked) played backwards: visible,
+// sizeable fragments converging -- NOT a thin point-spray nor a wipe reveal.
+// NOTE: no // comments are allowed INSIDE the string below -- the Logos
+// preprocessor strips // to EOL (including the trailing line-continuation
+// backslash) and would break the multiline literal.
 static NSString * const AXS_MSD_SHADER = @"\
 #include <metal_stdlib>\n\
 using namespace metal;\n\
@@ -106,18 +108,18 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 srcN = clamp((float2(u.sourceX,u.sourceY) - u.origin) / u.cardSize, 0.0, 1.0);\n\
         float2 opp = float2(srcN.x > 0.5 ? 0.0 : 1.0, srcN.y > 0.5 ? 0.0 : 1.0);\n\
         float2 dirv = normalize(opp - srcN + float2(0.001, 0.001));\n\
-        float beginO = clamp(dot(unit - srcN, dirv), 0.0, 1.5)*0.24 + r*0.025;\n\
-        float spanO  = 0.56 + 0.035*r2;\n\
+        float beginO = clamp(dot(unit - srcN, dirv), 0.0, 1.5)*0.16 + r*0.020;\n\
+        float spanO  = 0.64 + 0.035*r2;\n\
         float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
-        float leave = smoothstep(0.0,0.28,progressO);\n\
-        float flyE = smoothstep(0.30,1.0,progressO);\n\
-        float flyM = pow(flyE,1.12);\n\
+        float leave = smoothstep(0.0,0.22,progressO);\n\
+        float flyE = smoothstep(0.06,1.0,progressO);\n\
+        float flyM = pow(flyE,1.06);\n\
         float angS = r*6.2831853;\n\
-        float radS = (6.0 + 30.0*r4)*leave;\n\
+        float radS = (26.0 + 130.0*r4)*leave;\n\
         float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
         float2 endP = u.origin + unit*u.cardSize;\n\
-        float shrinkO = mix(mix(0.15,0.40,r3), 1.0, flyM);\n\
-        float angleO = (r3-0.5)*4.8*(1.0-flyM);\n\
+        float shrinkO = mix(mix(0.82,1.18,r3), 1.0, flyM);\n\
+        float angleO = (r3-0.5)*3.0*(1.0-flyM);\n\
         float2 tileSizeO = u.cardSize/grid;\n\
         float2 deltaO = (corner-0.5)*tileSizeO*shrinkO;\n\
         float cO=cos(angleO),sO=sin(angleO);\n\
@@ -127,8 +129,8 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.position=float4(2.0*pO.x/u.viewport.x-1.0,1.0-2.0*pO.y/u.viewport.y,0,1);\n\
         outO.uv=(cell+corner)/grid;\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.10,progressO);\n\
-        outO.breakage=1.0;\n\
+        outO.fade=smoothstep(0.0,0.09,progressO);\n\
+        outO.breakage=1.0-flyM;\n\
         return outO;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
@@ -410,9 +412,12 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     // scale their characteristic base grids (Glass stays chunky 5x6, Dust 14x14...).
     uint32_t cols, rows;
     if (style == 8u || openMode == 1u) {
+        // .142: raise the cap and the rows clamp -- at density=3 the old
+        // rows>240 clamp truncated 42000 grains down to 32640, so the slider
+        // never actually delivered its full density on the tall card aspect.
         int particles = (int)lround(14000.0 * density);
         if (particles < 200) particles = 200;
-        if (particles > 40000) particles = 40000;
+        if (particles > 48000) particles = 48000;
         CGFloat aspect = frame.size.height > 0.5 ? frame.size.width / frame.size.height : 1.0;
         cols = (uint32_t)lround(sqrtf((float)particles * (float)aspect));
         rows = (uint32_t)((particles + (int)cols - 1) / (int)cols);
@@ -428,8 +433,8 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
         cols = (uint32_t)lround((CGFloat)baseCols * density);
         rows = (uint32_t)lround((CGFloat)baseRows * density);
     }
-    if (cols < 2) cols = 2; if (cols > 240) cols = 240;
-    if (rows < 2) rows = 2; if (rows > 240) rows = 240;
+    if (cols < 2) cols = 2; if (cols > 320) cols = 320;
+    if (rows < 2) rows = 2; if (rows > 320) rows = 320;
     u.columns = cols;
     u.rows = rows;
     self.grainCount = (int)(cols * rows);

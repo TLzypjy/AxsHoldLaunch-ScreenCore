@@ -457,38 +457,41 @@ static UIImage *axs_open_bgTexture(UIView *card) {
     return tex;
 }
 
-// .134: right-top -> left-bottom wipe reveal. The real card is shown beneath
-// the particle cloud with a mask that expands from the top-right corner --
-// grains arrive there first, so the wipe keeps in sync with the convergence
-// and the window appears to be composed grain by grain.
+// .142: the real card NO LONGER wipes in from a corner over the whole
+// timeline. That linear mask read as "the window is being erased in" and it
+// covered up the particle assembly -- the exact opposite of the reference
+// effect. Now the fragments assemble on their own first; only near the end
+// does the real card fade in as a whole underneath the (still-converging)
+// particles, so the cloud visibly builds the window and the hand-off is
+// seamless when the overlay dissolves. A plain alpha fade also means NO
+// layer mask: the glow (outside card bounds) is never clipped and later
+// geometry changes / gestures keep working. sourcePoint kept in the API for
+// the call site and future direction tweaks.
 static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePoint) {
     @try {
+        (void)sourcePoint;
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) return;
-        // .139: overscan the mask by 40pt on every side -- the glow layers
-        // live OUTSIDE the card bounds on the same layer; a bounds-tight mask
-        // would clip them away for good
-        CGFloat ov = 40.0;
-        // .140: the wipe starts at the corner NEAREST the finger and grows
-        // toward the opposite corner (dynamic direction)
-        CGPoint srcInCard = [card convertPoint:sourcePoint fromView:nil];
-        CGFloat x0 = (srcInCard.x > sz.width * 0.5) ? sz.width + ov : -ov;
-        CGFloat y0 = (srcInCard.y > sz.height * 0.5) ? sz.height + ov : -ov;
-        UIView *mv = [[UIView alloc] initWithFrame:CGRectMake(x0, y0, 0, 0)];
-        mv.backgroundColor = [UIColor blackColor];
-        mv.opaque = YES;
-        card.layer.mask = mv.layer;
+        // safety: clear any mask a previous run may have left behind
+        if (card.layer.mask != nil) card.layer.mask = nil;
+        // .142: the native present animation was already swallowed (and its
+        // completion fired) right after the candidate was accepted, so the
+        // intercept window has served its purpose. Disarm it here or the
+        // addAnimation hook would swallow THIS alpha fade too (the card layer's
+        // delegate is SCFloatingContainerView), leaving the card stuck at
+        // alpha 0 -- i.e. the window would never appear.
+        axs_open_interceptUntil = 0;
+        card.alpha = 0.0;
         [UIView animateWithDuration:dur animations:^{
-            mv.frame = CGRectMake(-ov, -ov, sz.width + 2 * ov, sz.height + 2 * ov);
+            card.alpha = 1.0;
         }];
     } @catch (NSException *ignored) { }
 }
 
-// .139: remove the mask once the wipe completes -- a lingering mask keeps
-// clipping the glow and any later geometry changes (perceived as broken
-// gestures)
+// .142: guarantee the card ends fully opaque and mask-free (gesture/glow safe)
 static void axs_open_endWipeReveal(UIView *card) {
     @try {
+        card.alpha = 1.0;
         if (card.layer.mask != nil) card.layer.mask = nil;
     } @catch (NSException *ignored) { }
 }
@@ -649,24 +652,49 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             axs_dm_log(@"OPEN assemble unavailable, native card restored");
             return;
         }
+        // .142: all fallback paths above already returned, so from here the
+        // assemble WILL run. Start the real card from alpha 0 (and clear any
+        // stale mask) so the late whole-card fade-in is guaranteed clean.
+        @try {
+            card.alpha = 0.0;
+            if (card.layer.mask != nil) card.layer.mask = nil;
+        } @catch (NSException *ignored) { }
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
                    duration, density, (long)polls, texKind,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .137/.140: wipe reveal in sync with the convergence
+        // .142: let the fragments own the assembly. The old code revealed the
+        // real card at t=0.10s with a corner mask wiping over the whole
+        // duration, so what the eye saw was "the window being erased in" and
+        // the particle convergence was hidden underneath. Now the card stays
+        // hidden for ~86% of the timeline while the fragments fly and stitch,
+        // then fades in from alpha 0 near the end -- by the time the Metal
+        // overlay dissolves (t=1.0 + 0.18s) the real card is fully there.
         __weak UIView *weakCard2 = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)),
+        // The last grains land around t=0.90; hold the card back until then
+        // so the fragments visibly build the window on their own, then fade
+        // the real card in quickly for a clean hand-off before the overlay
+        // dissolves at t=1.0 + 0.18s.
+        CGFloat fadeLead = duration * 0.86;
+        CGFloat fadeSpan = duration * 0.14;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(fadeLead * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;
             if (c == nil) return;
             @try {
-                if (c.window == nil) return;
+                if (c.window == nil) {
+                    // card left the window mid-assemble: never leave it at alpha 0
+                    axs_open_assembleInFlight = NO;
+                    axs_open_selfRestore = YES;
+                    c.alpha = 1.0;
+                    return;
+                }
                 axs_open_assembleInFlight = NO;
                 axs_open_selfRestore = YES;
                 c.hidden = NO;
-                axs_open_startWipeReveal(c, duration, sourcePoint);
-                // .139: drop the mask when the wipe completes
+                axs_open_startWipeReveal(c, fadeSpan, sourcePoint);
+                // .142: make sure it ends fully opaque + mask-free
                 __weak UIView *weakCard3 = c;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((fadeSpan + 0.05) * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
                     UIView *c3 = weakCard3;
                     if (c3 == nil) return;
@@ -675,6 +703,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             } @catch (NSException *ignored) {
                 axs_open_assembleInFlight = NO;
                 c.hidden = NO;
+                c.alpha = 1.0;
             }
         });
         return;
