@@ -471,12 +471,6 @@ static void axs_open_startWipeReveal(UIView *card, CGFloat dur) {
     } @catch (NSException *ignored) { }
 }
 
-static void axs_open_endWipeReveal(UIView *card) {
-    @try {
-        card.layer.mask = nil;
-    } @catch (NSException *ignored) { }
-}
-
 
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
