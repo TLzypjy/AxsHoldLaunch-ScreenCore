@@ -651,6 +651,15 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 axs_open_selfRestore = YES;
                 c.hidden = NO;
                 axs_open_startWipeReveal(c, duration, sourcePoint);
+                // .139: drop the mask when the wipe completes, otherwise it
+                // lingers and clips the glow / later geometry changes
+                __weak UIView *weakCard3 = c;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    UIView *c3 = weakCard3;
+                    if (c3 == nil) return;
+                    axs_open_endWipeReveal(c3);
+                });
             } @catch (NSException *ignored) {
                 axs_open_assembleInFlight = NO;
                 c.hidden = NO;
