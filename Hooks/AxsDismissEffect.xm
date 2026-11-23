@@ -621,7 +621,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // capture wait), capture the app scene view in parallel, and swap the
         // texture mid-flight when the real content is ready.
         UIImage *dots = axs_open_bgTexture(card);
-        if (dots == nil) dots = axs_open_getWhiteTexture();
         if (dots == nil) {
             axs_dm_log(@"OPEN bg texture failed, native card restored");
             axs_open_assembleInFlight = NO;
