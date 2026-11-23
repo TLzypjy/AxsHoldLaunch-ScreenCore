@@ -310,7 +310,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.140: ARC-open assemble animation ------------------------------
+// ---- beautify.141: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -552,33 +552,43 @@ static UIImage *axs_open_captureAppContent(void) {
         CGFloat bb = b.bounds.size.width * b.bounds.size.height;
         return aa > bb ? NSOrderedAscending : (aa < bb ? NSOrderedDescending : NSOrderedSame);
     }];
+    // .141: render at HALF resolution -- the texture only feeds small
+    // grains, and the full-screen rasterization (430x932) was blocking the
+    // main thread ~0.4s (visible as animation stutter)
     for (UIView *v in cands) {
+        CGSize small = CGSizeMake(MAX(v.bounds.size.width * 0.5, 120.0),
+                                  MAX(v.bounds.size.height * 0.5, 120.0));
         UIImage *shot = nil;
         @try {
             UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
             fmt.opaque = NO;
+            fmt.scale = 1.0;
             UIGraphicsImageRenderer *r =
-                [[UIGraphicsImageRenderer alloc] initWithBounds:v.bounds format:fmt];
+                [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, small.width, small.height) format:fmt];
             shot = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-                [v drawViewHierarchyInRect:v.bounds afterScreenUpdates:NO];
+                [v drawViewHierarchyInRect:CGRectMake(0, 0, v.bounds.size.width, v.bounds.size.height) afterScreenUpdates:NO];
             }];
         } @catch (NSException *ignored) {
             shot = nil;
         }
         if (!axs_dm_imageIsBlank(shot)) {
-            axs_dm_log(@"OPEN scene capture ok class=%@ size=%@",
-                       NSStringFromClass([v class]), NSStringFromCGSize(v.bounds.size));
+            axs_dm_log(@"OPEN scene capture ok class=%@ px=%zux%zu",
+                       NSStringFromClass([v class]),
+                       (size_t)small.width, (size_t)small.height);
             return shot;
         }
         @try {
+            UIGraphicsImageRendererFormat *fmt2 = [UIGraphicsImageRendererFormat defaultFormat];
+            fmt2.opaque = NO;
+            fmt2.scale = 1.0;
             UIGraphicsImageRenderer *r2 =
-                [[UIGraphicsImageRenderer alloc] initWithBounds:v.bounds];
+                [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, small.width, small.height) format:fmt2];
             UIImage *shot2 = [r2 imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
                 [v.layer renderInContext:ctx.CGContext];
             }];
             if (!axs_dm_imageIsBlank(shot2)) {
-                axs_dm_log(@"OPEN scene capture ok (renderInContext) class=%@ size=%@",
-                           NSStringFromClass([v class]), NSStringFromCGSize(v.bounds.size));
+                axs_dm_log(@"OPEN scene capture ok (renderInContext) px=%zux%zu",
+                           (size_t)small.width, (size_t)small.height);
                 return shot2;
             }
         } @catch (NSException *ignored) { }
@@ -598,7 +608,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         CGFloat screenW = [UIScreen mainScreen].bounds.size.width;
         // .130: require >=0.15s of settle time so the app content has a
         // chance to load before the texture is captured
-        BOOL settled = (polls >= 5 && frame.size.width > 40.0
+        BOOL settled = (polls >= 2 && frame.size.width > 40.0
                         && frame.size.width < screenW * 0.85);
         if (!settled && polls < 15) {
             __weak UIView *weakCard = card;
@@ -617,18 +627,21 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .140: start the grains IMMEDIATELY with the fallback color (no
-        // capture wait), capture the app scene view in parallel, and swap the
-        // texture mid-flight when the real content is ready.
-        UIImage *dots = axs_open_bgTexture(card);
-        if (dots == nil) {
-            axs_dm_log(@"OPEN bg texture failed, native card restored");
+        // .141: capture BEFORE the grains launch -- the screen is still
+        // static here, so the (now half-resolution, ~0.1s) rasterization
+        // hitch is invisible; mid-flight swaps caused both the stutter and
+        // the appearance pop
+        UIImage *tex = axs_open_captureAppContent();
+        NSString *texKind = tex ? @"scene-presentation" : @"bg-color";
+        if (tex == nil) tex = axs_open_bgTexture(card);
+        if (tex == nil) {
+            axs_dm_log(@"OPEN texture unavailable, native card restored");
             axs_open_assembleInFlight = NO;
             axs_open_selfRestore = YES;
             card.hidden = NO;
             return;
         }
-        void *renderer = axs_metalAssemblePlayRet(dots, frame, duration, density, sourcePoint);
+        void *renderer = axs_metalAssemblePlayRet(tex, frame, duration, density, sourcePoint);
         if (renderer == NULL) {
             axs_open_assembleInFlight = NO;
             axs_open_selfRestore = YES;
@@ -636,8 +649,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             axs_dm_log(@"OPEN assemble unavailable, native card restored");
             return;
         }
-        axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
-                   duration, density, (long)polls,
+        axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
+                   duration, density, (long)polls, texKind,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
         // .137/.140: wipe reveal in sync with the convergence
         __weak UIView *weakCard2 = card;
@@ -651,8 +664,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 axs_open_selfRestore = YES;
                 c.hidden = NO;
                 axs_open_startWipeReveal(c, duration, sourcePoint);
-                // .139: drop the mask when the wipe completes, otherwise it
-                // lingers and clips the glow / later geometry changes
+                // .139: drop the mask when the wipe completes
                 __weak UIView *weakCard3 = c;
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * NSEC_PER_SEC)),
                                dispatch_get_main_queue(), ^{
@@ -663,28 +675,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             } @catch (NSException *ignored) {
                 axs_open_assembleInFlight = NO;
                 c.hidden = NO;
-            }
-        });
-        // .140: parallel scene capture -> mid-flight texture swap
-        __block void *weakRenderer = renderer;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            UIView *c = weakCard2;
-            if (c == nil) { weakRenderer = NULL; return; }
-            @try {
-                if (c.window == nil) { weakRenderer = NULL; return; }
-                UIImage *tex = axs_open_captureAppContent();
-                NSString *texKind = tex ? @"scene-presentation" : nil;
-                if (tex != nil) {
-                    BOOL swapped = axs_metalReplaceTexture(weakRenderer, tex);
-                    axs_dm_log(@"OPEN texture swap %@ (%@)",
-                               swapped ? @"OK" : @"FAILED", texKind ?: @"none");
-                } else {
-                    axs_dm_log(@"OPEN scene capture blank, keeping fallback grains");
-                }
-                weakRenderer = NULL;
-            } @catch (NSException *ignored) {
-                weakRenderer = NULL;
             }
         });
         return;
@@ -1080,14 +1070,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.140: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.141: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.140, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.141, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

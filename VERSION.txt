@@ -1,6 +1,16 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.140
+版本：2.0.5+beautify.141
+
+beautify.141 变更（消除卡顿 + 方向统一）：
+- .140 反馈：①卡顿感——全屏场景视图 drawViewHierarchy 主线程栅格化 ~0.4s，
+  卡住粒子动画的 DisplayLink；②方向混乱——粒子出发是径向排序、mask 擦出是
+  对角方向，两个波前不一致，加上中途换纹理的外观跳变。
+- 修复 ①：截图降采样（0.5x 分辨率，成本 ~1/4 → ~0.1s）且提前到粒子起飞前的
+  静态阶段执行（hitch 无感知）——删除中途换纹理，粒子第一帧就带内容。
+- 修复 ②：shader beginO 改为沿擦出方向的投影距离（单一方向波前，与 mask
+  完全一致）——粒子飞到哪、内容擦到哪，方向统一。
+- settle 门限 polls>=5→2（内容加载等待已无意义，截图的是场景视图）。
 
 beautify.140 变更（零延迟启动 + 成型方向跟随手指）：
 - .139 反馈：①聚合有 1~2s 延迟（全屏场景视图 drawViewHierarchy 主线程栅格化
@@ -12,7 +22,7 @@ beautify.140 变更（零延迟启动 + 成型方向跟随手指）：
 - 修复 ②：shader beginO 改为按粒子到手指位置的距离排序（近者先飞，方向跟随
   手指）；mask 擦出起始角取手指最近的角（convertPoint 换算后判定左右/上下）。
 
-beautify.140 变更（修复光晕消失 + 手势视觉失效）：
+beautify.141 变更（修复光晕消失 + 手势视觉失效）：
 - .138 回归根因：wipe 揭示的 mask 挂在卡片 layer 上（光晕 glowOuter/glowInner
   也在同一 layer、位于卡片边界之外）——mask 按卡片边界裁剪 → 光晕被裁掉；
   且 .137 重构时删了 mask 移除调用 → mask 永久残留 → 浮窗后续尺寸/位置变化
@@ -431,4 +441,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.140_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.141_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）

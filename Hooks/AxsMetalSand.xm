@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.140): the dismiss-sand timeline played
+// OPEN MODE (openMode=1, beautify.141): the dismiss-sand timeline played
 // backwards -- grains start scattered up-right at reduced scale, invisible,
 // then converge onto the card frame and fade IN; at time=1 the full card is
 // assembled and the caller swaps in the real view. NOTE: no // comments are
@@ -104,7 +104,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
         float2 srcN = clamp((float2(u.sourceX,u.sourceY) - u.origin) / u.cardSize, 0.0, 1.0);\n\
-        float beginO = length(unit - srcN)*0.22 + r*0.025;\n\
+        float2 opp = float2(srcN.x > 0.5 ? 0.0 : 1.0, srcN.y > 0.5 ? 0.0 : 1.0);\n\
+        float2 dirv = normalize(opp - srcN + float2(0.001, 0.001));\n\
+        float beginO = clamp(dot(unit - srcN, dirv), 0.0, 1.5)*0.24 + r*0.025;\n\
         float spanO  = 0.56 + 0.035*r2;\n\
         float progressO = clamp((u.time-beginO)/spanO, 0.0, 1.0);\n\
         float leave = smoothstep(0.0,0.28,progressO);\n\
@@ -715,7 +717,7 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
 // captured (so the screen crop contains the card, not the particles)
 // .131: swap the particle texture mid-flight (the caller captured the real
 // card while it was briefly visible under the dense cloud)
-// beautify.140 open-assemble: grains fly FROM sourcePoint TO the card
+// beautify.141 open-assemble: grains fly FROM sourcePoint TO the card
 // .140: open assemble returning the live renderer handle (for mid-flight swap)
 void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGFloat density, CGPoint sourcePoint) {
