@@ -306,7 +306,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
     }
 }
 
-// ---- beautify.137: ARC-open assemble animation ------------------------------
+// ---- beautify.138: ARC-open assemble animation ------------------------------
 static NSMutableSet *axs_dm_hooked = nil;
 
 // Scope (user decision): only ARC-menu opens for now (fullscreen->floating
@@ -472,6 +472,167 @@ static void axs_open_startWipeReveal(UIView *card, CGFloat dur) {
 }
 
 
+// blank probe: samples the alpha channel on a sparse grid
+static BOOL axs_dm_imageIsBlank(UIImage *img) {
+    if (img == nil || img.CGImage == NULL) return YES;
+    CGImageRef cg = img.CGImage;
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    if (w == 0 || h == 0) return YES;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    size_t bpr = w * 4;
+    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
+    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
+                                             kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+    CGContextRelease(ctx);
+    CGColorSpaceRelease(cs);
+    const uint8_t *px = (const uint8_t *)[data bytes];
+    size_t step = ((w * h) / 256) + 1;
+    BOOL anyOpaque = NO;
+    for (size_t i = 0; i < w * h; i += step) {
+        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
+    }
+    return !anyOpaque;
+}
+
+// .138: THE fix the reference tweak uses -- the floating window content is
+// HOSTED from another process, but its layers attach locally under the app
+// scene's _UIScenePresentationView in SpringBoard. Capturing THAT view (not
+// the card, not the full screen) yields the live app content pixels.
+static void axs_open_collectSceneViews(UIView *root, NSMutableArray *outArr, int depth, int *budget) {
+    if (root == nil || depth > 6 || (*budget) <= 0) return;
+    (*budget)--;
+    const char *cn = object_getClassName(root);
+    if (strcmp(cn, "_UIScenePresentationView") == 0) [outArr addObject:root];
+    for (UIView *sv in root.subviews) axs_open_collectSceneViews(sv, outArr, depth + 1, budget);
+}
+
+static UIImage *axs_open_captureAppContent(void) {
+    NSMutableArray *cands = [NSMutableArray array];
+    int budget = 500;
+    @try {
+        NSArray *wins = [UIApplication sharedApplication].windows;
+        for (UIWindow *w in wins) {
+            if (w == nil) continue;
+            axs_open_collectSceneViews(w, cands, 0, &budget);
+        }
+    } @catch (NSException *ignored) {
+        return nil;
+    }
+    if (cands.count == 0) return nil;
+    // largest first (app scenes are fullscreen-sized)
+    [cands sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+        CGFloat aa = a.bounds.size.width * a.bounds.size.height;
+        CGFloat bb = b.bounds.size.width * b.bounds.size.height;
+        return aa > bb ? NSOrderedAscending : (aa < bb ? NSOrderedDescending : NSOrderedSame);
+    }];
+    for (UIView *v in cands) {
+        UIImage *shot = nil;
+        @try {
+            UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+            fmt.opaque = NO;
+            UIGraphicsImageRenderer *r =
+                [[UIGraphicsImageRenderer alloc] initWithBounds:v.bounds format:fmt];
+            shot = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+                [v drawViewHierarchyInRect:v.bounds afterScreenUpdates:NO];
+            }];
+        } @catch (NSException *ignored) {
+            shot = nil;
+        }
+        if (!axs_dm_imageIsBlank(shot)) {
+            axs_dm_log(@"OPEN scene capture ok class=%@ size=%@",
+                       NSStringFromClass([v class]), NSStringFromCGSize(v.bounds.size));
+            return shot;
+        }
+        @try {
+            UIGraphicsImageRenderer *r2 =
+                [[UIGraphicsImageRenderer alloc] initWithBounds:v.bounds];
+            UIImage *shot2 = [r2 imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+                [v.layer renderInContext:ctx.CGContext];
+            }];
+            if (!axs_dm_imageIsBlank(shot2)) {
+                axs_dm_log(@"OPEN scene capture ok (renderInContext) class=%@ size=%@",
+                           NSStringFromClass([v class]), NSStringFromCGSize(v.bounds.size));
+                return shot2;
+            }
+        } @catch (NSException *ignored) { }
+    }
+    axs_dm_log(@"OPEN scene capture: %lu candidates all blank", (unsigned long)cands.count);
+    return nil;
+}
+
+// .138: pixel-verified capture attempts (reference tweak's pollIsland pattern):
+// retry up to 8 times (0.06s apart) until the app scene view yields pixels;
+// fall back to white dots if the hosted content never appears.
+static void axs_open_captureStep(UIView *card, NSInteger attempts, CGFloat duration,
+                                 CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
+    @try {
+        if (card.window == nil) {
+            axs_dm_log(@"OPEN capture aborted, card left window");
+            axs_open_assembleInFlight = NO;
+            return;
+        }
+        UIImage *tex = axs_open_captureAppContent();
+        NSString *texKind = nil;
+        if (tex == nil) {
+            tex = axs_open_bgTexture(card);
+            texKind = @"bg-fallback";
+        } else {
+            texKind = @"scene-presentation";
+        }
+        if (tex == nil) {
+            if (attempts < 8) {
+                __weak UIView *weakCard = card;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    UIView *c = weakCard;
+                    if (c == nil) return;
+                    axs_open_captureStep(c, attempts + 1, duration, density, sourcePoint, sourceKind);
+                });
+                return;
+            }
+            axs_dm_log(@"OPEN texture unavailable after retries, native card restored");
+            axs_open_assembleInFlight = NO;
+            axs_open_selfRestore = YES;
+            card.hidden = NO;
+            return;
+        }
+        CGRect frame = [card convertRect:card.bounds toView:nil];
+        BOOL ok = axs_metalAssemblePlay(tex, frame, duration, density, sourcePoint);
+        if (!ok) {
+            axs_dm_log(@"OPEN assemble unavailable, native card restored");
+            axs_open_assembleInFlight = NO;
+            axs_open_selfRestore = YES;
+            card.hidden = NO;
+            return;
+        }
+        axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f attempts=%ld texture=%@ source=%@ (%@)",
+                   duration, density, (long)attempts, texKind,
+                   NSStringFromCGPoint(sourcePoint), sourceKind);
+        // .137: wipe in sync with the convergence
+        __weak UIView *weakCard2 = card;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *c = weakCard2;
+            if (c == nil) return;
+            @try {
+                if (c.window == nil) return;
+                axs_open_assembleInFlight = NO;
+                axs_open_selfRestore = YES;
+                c.hidden = NO;
+                axs_open_startWipeReveal(c, duration);
+            } @catch (NSException *ignored) {
+                axs_open_assembleInFlight = NO;
+                c.hidden = NO;
+            }
+        });
+    } @catch (NSException *ignored) {
+        axs_open_assembleInFlight = NO;
+        card.hidden = NO;
+    }
+}
+
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
     @try {
@@ -502,52 +663,14 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .134: particles in the card's own background color fly in and
-        // converge; the real card is revealed beneath the cloud with a
-        // right-top -> left-bottom wipe that matches the convergence order,
-        // so the window appears to be composed grain by grain.
-        UIImage *dots = axs_open_bgTexture(card);
-        if (dots == nil) {
-            axs_dm_log(@"OPEN bg texture failed, native card restored");
-            axs_open_assembleInFlight = NO;
-            card.hidden = NO;
-            return;
-        }
-        BOOL assembleStarted = axs_metalAssemblePlay(dots, frame, duration, density, sourcePoint);
-        if (!assembleStarted) {
-            axs_open_assembleInFlight = NO;
-            card.hidden = NO;
-            axs_dm_log(@"OPEN assemble unavailable, native card restored");
-            axs_open_selfRestore = YES;
-            return;
-        }
-        axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
-                   duration, density, (long)polls,
-                   NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .137: the wipe runs IN SYNC with the convergence (same duration) --
-        // grains arrive right-top-first, the mask reveals right-top-first, so
-        // content appears exactly where/when the grains land: one fluid
-        // motion, no "cloud pauses as a rectangle, then the window flashes".
+        // .138: pixel-verified capture of the app scene presentation view
+        // (the reference tweak's approach), then assemble with that texture
         __weak UIView *weakCard2 = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.10 * NSEC_PER_SEC)),
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;
             if (c == nil) return;
-            @try {
-                if (c.window == nil) return;
-                // .135: suppression stops here -- ScreenCore's own hidden
-                // toggles must pass through, the mask controls the reveal
-                axs_open_assembleInFlight = NO;
-                // .136: this hidden=NO is OUR reveal -- mark self restore
-                // BEFORE unhiding, otherwise the open detector sees a stale
-                // goneAt (>0.4s old) and runs a SECOND assemble
-                axs_open_selfRestore = YES;
-                c.hidden = NO;
-                axs_open_startWipeReveal(c, duration);
-            } @catch (NSException *ignored) {
-                axs_open_assembleInFlight = NO;
-                c.hidden = NO;
-            }
+            axs_open_captureStep(c, 0, duration, density, sourcePoint, sourceKind);
         });
         return;
     } @catch (NSException *ignored) {
@@ -942,14 +1065,14 @@ static void axs_dm_installAll(void) {
                    (IMP)axs_dm_closeAnimated, &axs_orig_closeAnimated, @"closeAnimated");
     axs_dm_install(@"sc_closeAllSessions", "", 0,
                    (IMP)axs_dm_closeAll, &axs_orig_closeAll, @"closeAll");
-    // beautify.137: ARC-open assemble hooks (class may load later -> retried)
+    // beautify.138: ARC-open assemble hooks (class may load later -> retried)
     axs_open_installAll();
 }
 
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
-        axs_dm_log(@"DME module loaded in SpringBoard (beautify.137, dismiss+open)");
+        axs_dm_log(@"DME module loaded in SpringBoard (beautify.138, dismiss+open)");
         axs_dm_installAll();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });

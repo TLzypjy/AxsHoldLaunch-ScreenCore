@@ -1,6 +1,17 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.137
+版本：2.0.5+beautify.138
+
+beautify.138 变更（按参考插件实现：App 场景呈现视图截图 + 像素验证轮询）：
+- 参考插件（com.ms.openparticleanimation 0.3.67）二进制反推确认：它截取的是
+  App 场景的 _UIScenePresentationView——跨进程托管渲染的 App 内容图层就挂载
+  在这个本地视图的 layer 树里，对它 drawViewHierarchy/renderInContext 能拿到
+  活内容像素。我们此前截的是浮窗卡片（里面没有托管内容图层）或合成屏，全错。
+- 实现：①遍历 SpringBoard 窗口树收集 _UIScenePresentationView（深度 6、预算
+  500）；②按面积降序逐一截图（drawViewHierarchy → renderInContext 兜底）+
+  空白检测；③像素验证轮询（pollIsland 模式：最多 8 次、间隔 0.06s，拿不到
+  像素不启动）；④仍失败退化为底色粒子。
+- wipe 揭示与聚合同步（.137）保持不变。
 
 beautify.137 变更（成型节奏：wipe 与聚合实时同步）：
 - .136 日志：二次聚合已修复（每次呼出一次 assemble ✓、grain color final 0.15 ✓）。
@@ -402,4 +413,4 @@ beautify.100 变更（新增第 9 种消散样式：彩砂飘散 ColorSand）：
 - 日志 emit: sand cleaned grains=N；CI/打包脚本新增 ColorSand 源码、dylib、面板断言。
 
 打包日期：2026-11-22
-构建产物：com.susudear.screencore_2.0.5+beautify.137_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
+构建产物：com.susudear.screencore_2.0.5+beautify.138_iphoneos-arm64e-roothide.deb（CI 交付，桌面交付隐根包）
