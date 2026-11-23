@@ -334,7 +334,23 @@ static char axs_open_assembledKey;
 static CFAbsoluteTime axs_open_lastDismissHide = -1e9;
 // .116: our own assemble restores the card (hidden=NO) which would re-trigger
 // the open detection -> infinite loop. Flag suppresses exactly that one event.
+// .149: the flag is one-shot and can be ORPHANED -- it is set right before the
+// safety-net unhide, but if that unhide never reaches our hooks (container
+// detached, event eaten), the flag survives and silently EATS the user's next
+// genuine open (no particles, card pops in). Every arm now records WHEN it
+// was armed; becameVisible releases flags older than 0.6s instead of skipping.
 static BOOL axs_open_selfRestore = NO;
+static CFAbsoluteTime axs_open_selfRestoreAt = -1e9;
+static void axs_open_armSelfRestore(void) {
+    axs_open_armSelfRestore();
+    axs_open_selfRestoreAt = CACurrentMediaTime();
+}
+// .149: window during which an accepted open OWNS the card (assemble +
+// reveal + cleanup). Repeated visibility events inside the window are ours
+// even if the assembled flag was lost; outside it a set flag is STALE (a
+// missed dismissal path) and must be released so the next open gets its
+// particles instead of popping the card in with no animation.
+static CFAbsoluteTime axs_open_openActiveUntil = 0;
 // .116: last finger-lift position (ARC menu tap), tracked via UIWindow sendEvent
 static CGPoint axs_open_lastTouchUp = {-1, -1};
 static CFAbsoluteTime axs_open_lastTouchUpAt = 0;
@@ -779,7 +795,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         if (!settled) {
             axs_dm_log(@"OPEN frame never settled, native card restored");
             axs_open_assembleInFlight = NO;
-            axs_open_selfRestore = YES;
+            axs_open_armSelfRestore();
             card.hidden = NO;
             return;
         }
@@ -796,14 +812,14 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         if (tex == nil) {
             axs_dm_log(@"OPEN texture unavailable, native card restored");
             axs_open_assembleInFlight = NO;
-            axs_open_selfRestore = YES;
+            axs_open_armSelfRestore();
             card.hidden = NO;
             return;
         }
         void *renderer = axs_metalAssemblePlayRet(tex, frame, duration, density, sourcePoint);
         if (renderer == NULL) {
             axs_open_assembleInFlight = NO;
-            axs_open_selfRestore = YES;
+            axs_open_armSelfRestore();
             card.hidden = NO;
             axs_dm_log(@"OPEN assemble unavailable, native card restored");
             return;
@@ -835,13 +851,13 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             @try {
                 if (c.window == nil) {
                     axs_open_assembleInFlight = NO;
-                    axs_open_selfRestore = YES;
+                    axs_open_armSelfRestore();
                     c.alpha = 1.0;
                     c.hidden = NO;
                     return;
                 }
                 axs_open_assembleInFlight = NO;
-                axs_open_selfRestore = YES;
+                axs_open_armSelfRestore();
                 axs_open_startWipeReveal(c, revealSpan, sourcePoint);
                 // final safety sweep at overlay dissolve: leave the card fully
                 // opaque + mask-free (also keeps endWipeReveal referenced)
@@ -871,14 +887,44 @@ static void axs_open_becameVisible(UIView *v) {
         // window -- its own reveal and ScreenCore's repeated presents must not
         // start a new assemble. This is persistent (unlike selfRestore) and is
         // cleared only on a genuine dismiss / off-window.
+        // .149: but if the flag survives PAST our animation window while no
+        // assemble is running, it is STALE (a dismissal path missed its
+        // release). Skipping then eats a genuine open -- no particles, card
+        // pops in. Release the stale flag and fall through to accept.
         if (axs_open_isAssembled(v)) {
-            axs_dm_log(@"OPEN candidate skipped (already assembled)");
-            return;
+            CFAbsoluteTime nowA = CACurrentMediaTime();
+            if (!axs_open_assembleInFlight && nowA > axs_open_openActiveUntil) {
+                axs_open_setAssembled(v, NO);
+                axs_dm_log(@"OPEN stale assembled flag released, re-assembling");
+            } else {
+                axs_dm_log(@"OPEN candidate skipped (already assembled)");
+                return;
+            }
         }
+        // .149: one-shot self-restore with an age check. The safety net arms
+        // it immediately before its own unhide, so the legit consume happens
+        // within milliseconds. If the flag is still here >0.6s later, its
+        // restore event never arrived (orphaned) -- release it and let this
+        // genuine open assemble instead of silently eating it.
         if (axs_open_selfRestore) {
             axs_open_selfRestore = NO;
-            axs_dm_log(@"OPEN candidate skipped (self restore)");
-            return;
+            if (CACurrentMediaTime() - axs_open_selfRestoreAt > 0.6) {
+                axs_dm_log(@"OPEN orphaned self-restore flag released, re-assembling");
+            } else {
+                axs_dm_log(@"OPEN candidate skipped (self restore)");
+                return;
+            }
+        }
+        // .149: within the open-ownership window every extra visibility event
+        // is ours (repeated presents, overlay cleanup), even if the assembled
+        // flag was cleared behind our back by a racing dismissal safety net.
+        {
+            CFAbsoluteTime nowB = CACurrentMediaTime();
+            if (nowB < axs_open_openActiveUntil) {
+                axs_dm_log(@"OPEN candidate skipped (open still active %.2fs)",
+                           axs_open_openActiveUntil - nowB);
+                return;
+            }
         }
         if (v.window == nil) return;
         if (v.bounds.size.width < 40 || v.bounds.size.height < 40) return;
@@ -899,6 +945,8 @@ static void axs_open_becameVisible(UIView *v) {
         axs_open_interceptUntil = CACurrentMediaTime() + 3.0;
         CGFloat density = axs_open_density();
         CGFloat duration = 0.85 / axs_open_speedScale();
+        // .149: own the card for the whole assemble+reveal+cleanup window
+        axs_open_openActiveUntil = CACurrentMediaTime() + duration + 0.3;
         CGRect cardFrame = [card convertRect:card.bounds toView:nil];
         CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
         // .147: fallback must NEVER be the card center (that made grains
@@ -1160,7 +1208,7 @@ static void axs_dm_trigger(NSString *tag) {
             @try {
                 // .124: precise event-level suppression of the open detector
                 // (replaces the old 3s time window the user asked to remove)
-                axs_open_selfRestore = YES;
+                axs_open_armSelfRestore();
                 // .144: the dismiss is complete -- release the card so the
                 // user's NEXT genuine open can assemble. Until now the card
                 // stayed "assembled" and every repeated present during the

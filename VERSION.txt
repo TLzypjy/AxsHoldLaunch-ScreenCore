@@ -1,6 +1,29 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.148
+版本：2.0.5+beautify.149
+
+beautify.149 变更（修偶发"呼出无粒子、浮窗直接出现"）：
+- .148 反馈（日志 38）：效果不错，但偶尔呼出时没有粒子、浮窗直接出现。
+- 日志 38 中 64 次呼出全部走了完整粒子链路（64/64 配对，metal 全部启动），
+  失败场景没被抓到——根因在状态标志竞态，按代码路径分析：
+  1. assembled 标志只在消散兜底 dispatch(+2.2s) 里清除；若那次清理因时序/
+     路径问题没生效，残留 YES 会让下一次真呼出被 "already assembled" 跳过，
+     而原生动画还在 3~5s 吞截窗内被瞬间补完 → 卡片直接闪现、无粒子。
+  2. selfRestore 是一次性标志，消散兜底"设标志+立刻 unhide"本应成对消耗；
+     若那一刻容器已脱离窗口、事件没进来，标志就成了孤儿，下一次呼出的第一个
+     可见事件被它白白消耗 → 那次呼出没粒子。
+- 本次改动（AxsDismissEffect.xm）：
+  1. selfRestore 置位收敛为 axs_open_armSelfRestore()（7 处），记录置位时间；
+     becameVisible 里超过 0.6s 的标志视为孤儿，直接放行本次真呼出。
+  2. assembled 残留自愈：若标志为 YES 但不在动画窗口内（assembleInFlight=NO
+     且已过 openActiveUntil），判定为 stale，释放标志并继续正常呼出。
+  3. 新增 openActiveUntil 所有权窗口（accept 时 = now + duration + 0.3）：
+     窗口内的重复可见事件一律跳过（即使 assembled 标志被消散兜底竞态清掉），
+     窗口外的残留标志按 stale 处理。
+- 保留 .148 有机水花散射、.147 波前裁剪/底部起点、.146 参差 mask、
+  .145 彩色沙粒纹理、原生动画替换、.144 assembled 循环修复。
+- CI 断言：armSelfRestore 助手与 7 处转换、孤儿/残留自愈日志、年龄检查、
+  所有权窗口、活跃期守卫必须存在；裸 selfRestore=YES 赋值禁止。
 
 beautify.148 变更（有机水花散射，修 .147 退化成长方形）：
 - .147 反馈（视频 330e78e5 + 日志 37）：粒子又聚成长方形、板正，不如 .146。
