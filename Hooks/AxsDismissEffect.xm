@@ -568,12 +568,15 @@ static UIImage *axs_open_sandTexture(void) {
         UIView *card = self.card;
         if (card == nil || card.window == nil) { [self stop]; return; }
         CGFloat elapsed = CACurrentMediaTime() - self.start;
-        CGFloat p = self.duration > 0 ? elapsed / self.duration : 1.0;
-        if (p >= 1.0) {
+        CGFloat raw = self.duration > 0 ? elapsed / self.duration : 1.0;
+        if (raw >= 1.0) {
             card.layer.mask = nil;
             [self stop];
             return;
         }
+        // .147: smoothstep matches the shader's waveE so the grains that get
+        // clipped at frontY vanish exactly where the real card is revealed.
+        CGFloat p = raw * raw * (3.0 - 2.0 * raw);
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) { [self stop]; return; }
         CGFloat ov = 40.0;
@@ -896,14 +899,18 @@ static void axs_open_becameVisible(UIView *v) {
         axs_open_interceptUntil = CACurrentMediaTime() + 3.0;
         CGFloat density = axs_open_density();
         CGFloat duration = 0.85 / axs_open_speedScale();
-        CGPoint sourcePoint = CGPointMake(CGRectGetMidX([card convertRect:card.bounds toView:nil]),
-                                          CGRectGetMidY([card convertRect:card.bounds toView:nil]));
-        NSString *sourceKind = @"fallback-card-center";
-        if (nowT - axs_open_arcIconPosAt <= 4.0
+        CGRect cardFrame = [card convertRect:card.bounds toView:nil];
+        CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
+        // .147: fallback must NEVER be the card center (that made grains
+        // appear to sprout from the middle of the screen). Use the bottom
+        // center of the screen -- the lift gesture normally ends down there.
+        CGPoint sourcePoint = CGPointMake(CGRectGetMidX(cardFrame), screenH - 90.0);
+        NSString *sourceKind = @"fallback-screen-bottom";
+        if (nowT - axs_open_arcIconPosAt <= 6.0
             && axs_open_arcIconPos.x >= 0 && axs_open_arcIconPos.y >= 0) {
             sourcePoint = axs_open_arcIconPos;
             sourceKind = @"arc-icon";
-        } else if (nowT - axs_open_lastTouchUpAt <= 2.0
+        } else if (nowT - axs_open_lastTouchUpAt <= 4.0
             && axs_open_lastTouchUp.x >= 0 && axs_open_lastTouchUp.y >= 0) {
             sourcePoint = axs_open_lastTouchUp;
             sourceKind = @"last-lift";

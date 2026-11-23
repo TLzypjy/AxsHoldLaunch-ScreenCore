@@ -111,18 +111,22 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
         float angS = r*6.2831853;\n\
-        float radS = 8.0 + 52.0*r4;\n\
+        float radS = 4.0 + 30.0*r4;\n\
         float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
-        float2 targetP = u.origin + unit * u.cardSize;\n\
-        float rowDelay = unit.y * 0.34;\n\
-        float jitter = r2*0.16 + r3*0.05;\n\
-        float begin = 0.02 + rowDelay + jitter;\n\
-        float span = 0.26 + r4*0.14;\n\
+        float spread = smoothstep(0.0, 0.34, u.time);\n\
+        float2 cellTarget = float2(mix(u.sourceX, u.origin.x + unit.x*u.cardSize.x, spread),\n\
+                                   u.origin.y + unit.y*u.cardSize.y);\n\
+        float wave = clamp((u.time - 0.37)/0.51, 0.0, 1.0);\n\
+        float waveE = smoothstep(0.0,1.0,wave);\n\
+        float2 gather = float2(u.origin.x + u.cardSize.x*0.60,\n\
+                               u.origin.y + u.cardSize.y + 10.0);\n\
+        float2 targetP = mix(cellTarget, gather + float2((r2-0.5)*84.0,(r3-0.5)*46.0),\n\
+                             smoothstep(0.52,1.0,waveE));\n\
+        float begin = r2*0.05;\n\
+        float span = 0.32 + r4*0.12;\n\
         float progress = clamp((u.time - begin)/span, 0.0, 1.0);\n\
         float motion = 1.0-(1.0-progress)*(1.0-progress);\n\
         float2 p = mix(startP, targetP, motion);\n\
-        float arc = sin(progress*3.1415926)*(r-0.5)*70.0;\n\
-        p += float2(arc, arc*0.30);\n\
         float2 tileSizeO = u.cardSize/grid;\n\
         float2 deltaO = (corner-0.5)*tileSizeO*0.80;\n\
         float angleO = (r3-0.5)*4.0*(1.0-motion);\n\
@@ -133,7 +137,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
         outO.uv=fract(float2(r4, r3) + unit*0.35);\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.08,u.time) * (1.0 - smoothstep(0.74,1.0,progress));\n\
+        float frontY = u.origin.y + waveE*u.cardSize.y;\n\
+        float belowFront = smoothstep(frontY-8.0, frontY+6.0, p.y);\n\
+        outO.fade=smoothstep(0.0,0.08,u.time) * belowFront;\n\
         outO.breakage=1.0;\n\
         return outO;\n\
     }\n\
