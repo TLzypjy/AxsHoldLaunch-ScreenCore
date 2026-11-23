@@ -342,7 +342,7 @@ static CFAbsoluteTime axs_open_lastDismissHide = -1e9;
 static BOOL axs_open_selfRestore = NO;
 static CFAbsoluteTime axs_open_selfRestoreAt = -1e9;
 static void axs_open_armSelfRestore(void) {
-    axs_open_armSelfRestore();
+    axs_open_selfRestore = YES;
     axs_open_selfRestoreAt = CACurrentMediaTime();
 }
 // .149: window during which an accepted open OWNS the card (assemble +
