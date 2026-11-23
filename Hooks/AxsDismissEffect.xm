@@ -530,7 +530,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld source=%@ (%@)",
                    duration, density, (long)polls,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
-        __weak UIView *weakCard2 = card;
         // .137: the wipe runs IN SYNC with the convergence (same duration) --
         // grains arrive right-top-first, the mask reveals right-top-first, so
         // content appears exactly where/when the grains land: one fluid
