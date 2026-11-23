@@ -512,7 +512,10 @@ static UIImage *axs_open_captureAppContent(void) {
     NSMutableArray *cands = [NSMutableArray array];
     int budget = 500;
     @try {
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
         NSArray *wins = [UIApplication sharedApplication].windows;
+        #pragma clang diagnostic pop
         for (UIWindow *w in wins) {
             if (w == nil) continue;
             axs_open_collectSceneViews(w, cands, 0, &budget);
