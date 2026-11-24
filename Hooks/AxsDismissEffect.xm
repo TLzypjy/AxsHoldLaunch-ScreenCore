@@ -590,13 +590,16 @@ static UIImage *axs_open_sandTexture(void) {
             [self stop];
             return;
         }
-        // .151: the real-card reveal front uses the EXACT same formula/range
-        // as the shader grain band (origin + waveE*h + n*amp, no -ov/+2ov
-        // widening). Otherwise the mask edge sits above the grain band and a
-        // white gap opens between the card and the particles. waveE here is
-        // smoothstep(raw) == shader smoothstep(wave); p is that same eased
-        // fraction, so edge and grains advance in lockstep.
-        CGFloat p = raw * raw * (3.0 - 2.0 * raw);
+        // .152: the real-card reveal front must use the EXACT same wave as
+        // the shader grain band. .151 used smoothstep(raw) here but the shader
+        // used smoothstep((t-0.30)/0.62), so the mask edge ran ahead of the
+        // grain front and a white GAP opened between card and particles.
+        // Now both use wave=clamp((raw-0.30)/0.62,0,1) then smoothstep -> the
+        // card edge and the grain band advance in lockstep, no gap.
+        CGFloat wave = (raw - 0.30)/0.62;
+        if (wave < 0.0) wave = 0.0;
+        if (wave > 1.0) wave = 1.0;
+        CGFloat p = wave * wave * (3.0 - 2.0 * wave);
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) { [self stop]; return; }
         CGFloat ov = 40.0;

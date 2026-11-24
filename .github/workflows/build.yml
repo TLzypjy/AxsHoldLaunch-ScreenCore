@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.151 (rootless)
+name: Build ScreenCore beautify.152 (rootless)
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.151
+    name: Build rootless beautify.152
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
 
     steps:
@@ -40,7 +40,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.151"
+          VERSION="2.0.5+beautify.152"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -120,7 +120,7 @@ jobs:
           find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
           ls -la ./repack
 
-      - name: Package 2.0.5+beautify.151 (dpkg-deb)
+      - name: Package 2.0.5+beautify.152 (dpkg-deb)
         env:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
@@ -138,7 +138,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.151"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.152"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
@@ -467,7 +467,7 @@ jobs:
           grep -Fq "sc_promoteFrontmostFloatingSceneToFullscreen" Hooks/AxsFullscreenProbe.xm || { echo "probe promoteFrontmost hook missing"; exit 1; }
           grep -Fq "axs_fs_argsAreObjects" Hooks/AxsFullscreenProbe.xm || { echo "probe args-safety guard missing"; exit 1; }
           grep -Fq "FSP module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "probe load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.151 dismiss particle module check ==="
+          echo "=== beautify.152 dismiss particle module check ==="
           grep -Fq "splitBeautifyDismissAnimEnabled" Hooks/AxsDismissEffect.xm || { echo "dismiss switch key missing"; exit 1; }
           grep -Fq "DME module loaded in SpringBoard" Hooks/AxsDismissEffect.xm || { echo "dismiss load log missing"; exit 1; }
           # .111: hide the real card while the dissolve plays (no double image)
@@ -480,12 +480,12 @@ jobs:
           grep -Fq "overlay.windowScene = host.windowScene" Hooks/AxsMetalSand.xm || { echo "dismiss windowScene fix missing"; exit 1; }
           grep -Fq "axs_dm_sigMatches" Hooks/AxsDismissEffect.xm || { echo "dismiss sig guard missing"; exit 1; }
           grep -Fq "DME module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "dismiss load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.151 dismiss style selector check ==="
+          echo "=== beautify.152 dismiss style selector check ==="
           grep -Fq "splitBeautifyDismissStyle" Hooks/AxsDismissEffect.xm || { echo "dismiss style key missing"; exit 1; }
           grep -Fq "AXSDismissStyleGlass" Hooks/AxsDismissEffect.xm || { echo "dismiss style enum missing"; exit 1; }
           grep -Fq "style=%ld(%@)" Hooks/AxsDismissEffect.xm || { echo "dismiss style log missing"; exit 1; }
           grep -Fq "splitBeautifyDismissStyle" "$EXTRACT/dylib34.strings" || { echo "dismiss style key not compiled into dylib"; exit 1; }
-          echo "=== beautify.151 unified GPU engine (no CPU path) + density slider check ==="
+          echo "=== beautify.152 unified GPU engine (no CPU path) + density slider check ==="
           grep -Fq "AXSDismissStyleColorSand" Hooks/AxsDismissEffect.xm || { echo "ColorSand enum missing"; exit 1; }
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/plist.strings" || { echo "ColorSand panel option missing"; exit 1; }
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/zh.strings" || { echo "ColorSand zh label missing"; exit 1; }
@@ -499,7 +499,7 @@ jobs:
           grep -Fq "emit: gpu engine active" Hooks/AxsDismissEffect.xm || { echo "gpu engine log missing"; exit 1; }
           grep -Fq "axs_dm_styleBaseDuration" Hooks/AxsDismissEffect.xm || { echo "per-style base duration table missing"; exit 1; }
           grep -Fq "axs_metalSandPlay(shot, sourceFrameInWindow, duration," Hooks/AxsDismissEffect.xm || { echo "Metal call with style+density missing"; exit 1; }
-          echo "=== beautify.151 dismiss speed + density control check ==="
+          echo "=== beautify.152 dismiss speed + density control check ==="
           grep -Fq "static CGFloat axs_dm_speedScale" Hooks/AxsDismissEffect.xm || { echo "speed scale fn missing"; exit 1; }
           grep -Fq "splitBeautifyDismissSpeed" Hooks/AxsDismissEffect.xm || { echo "speed key missing in source"; exit 1; }
           grep -Fq "axs_dm_styleBaseDuration(style) * speedScale" Hooks/AxsDismissEffect.xm || { echo "style speed scaling missing"; exit 1; }
@@ -514,7 +514,7 @@ jobs:
           grep -Fq "DISMISS_DENSITY" "$EXTRACT/zh.strings" || { echo "density zh label missing"; exit 1; }
           grep -Fq "DISMISS_DENSITY" "$EXTRACT/en.strings" || { echo "density en label missing"; exit 1; }
           grep -Fq "splitBeautifyDismissDensity" "$EXTRACT/dylib34.strings" || { echo "density key not compiled into dylib"; exit 1; }
-          echo "=== beautify.151 ARC-open assemble animation check ==="
+          echo "=== beautify.152 ARC-open assemble animation check ==="
           grep -Fq "openMode" Hooks/AxsMetalSand.xm || { echo "shader openMode branch missing"; exit 1; }
           grep -Fq "axs_metalAssemblePlay" Hooks/AxsMetalSand.xm || { echo "assemble entry missing in Metal"; exit 1; }
           grep -Fq "axs_metalAssemblePlay" Hooks/AxsDismissEffect.xm || { echo "assemble call missing in dismiss"; exit 1; }
@@ -526,7 +526,7 @@ jobs:
           grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/zh.strings" || { echo "open zh label missing"; exit 1; }
           grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/en.strings" || { echo "open en label missing"; exit 1; }
           grep -Fq "splitBeautifyOpenAnimEnabled" "$EXTRACT/dylib34.strings" || { echo "open switch key not compiled into dylib"; exit 1; }
-          echo "=== beautify.151 finger-source assemble + loop fix check ==="
+          echo "=== beautify.152 finger-source assemble + loop fix check ==="
           grep -Fq "sourcePoint" Hooks/AxsMetalSand.xm || { echo "shader sourcePoint missing"; exit 1; }
           grep -Fq "axs_open_sendEvent" Hooks/AxsDismissEffect.xm || { echo "finger-lift tracking missing"; exit 1; }
           grep -Fq "UITouchPhaseEnded" Hooks/AxsDismissEffect.xm || { echo "touch-ended filter missing"; exit 1; }
@@ -537,7 +537,7 @@ jobs:
           grep -Fq "OPEN native animation replaced" Hooks/AxsDismissEffect.xm || { echo "animation swallow missing"; exit 1; }
           grep -Fq "animationDidStop:finished:" Hooks/AxsDismissEffect.xm || { echo "manual completion fire missing"; exit 1; }
 
-          echo "=== beautify.151 wavefront reveal + no-open-loop check ==="
+          echo "=== beautify.152 wavefront reveal + no-open-loop check ==="
           # .144: a card stays "assembled" from the first frame of an open
           # until its real dismiss -- repeated presents / overlay cleanup must
           # NOT be re-read as a new open (that caused the auto-open loop).
@@ -562,37 +562,45 @@ jobs:
           grep -Fq "axs_open_selfRestoreAt > 0.6" Hooks/AxsDismissEffect.xm || { echo "selfRestore age check missing"; exit 1; }
           grep -Fq "candidate skipped (open still active" Hooks/AxsDismissEffect.xm || { echo "open-active event guard missing"; exit 1; }
 
-          # .151: grains ride the reveal front as a thin band hugging the card
-          # edge, so particles follow the card down with NO white gap. .150
-          # scattered grains over the WHOLE card and used a DIFFERENT front
-          # formula/range than the mask -> a gap opened. Now shader frontY and
-          # mask edge both use origin+waveE*h + same quantized 26-cell noise.
-          # STAGE 1 finger burst kept; STAGE 2 curved flight to frontY+5..35.
+          # .152: grains stream CONTINUOUSLY to the reveal front. .151 still
+          # had a white gap + a cloud that slid down as ONE block: the mask
+          # eased by smoothstep(raw) while the shader used smoothstep((t-30)/62)
+          # (gap), and every grain finished flight near t=0.6 (one-shot pile).
+          # Now BOTH mask and shader use wave=clamp((t-0.30)/0.62)->smoothstep
+          # (lockstep, no gap), each grain has its OWN staggered arriveAt and
+          # dissolves shortly after landing, so the tight band is replenished
+          # at the CURRENT front instead of sliding as a block. Denser 22000.
           grep -Fq "outO.uv=fract(float2(r4, r3) + unit*0.35);" Hooks/AxsMetalSand.xm || { echo "colored-sand UV sampling missing"; exit 1; }
           grep -Fq "outO.breakage=1.0;" Hooks/AxsMetalSand.xm || { echo "round sand grain missing"; exit 1; }
           grep -Fq "float2 finger = float2(u.sourceX,u.sourceY);" Hooks/AxsMetalSand.xm || { echo "finger origin missing"; exit 1; }
-          grep -Fq "float burstT = clamp(u.time/0.24, 0.0, 1.0);" Hooks/AxsMetalSand.xm || { echo "stage-1 finger burst timing missing"; exit 1; }
+          grep -Fq "float burstT = clamp(u.time/0.20, 0.0, 1.0);" Hooks/AxsMetalSand.xm || { echo "stage-1 finger burst timing missing"; exit 1; }
           grep -Fq "float2 burstP = finger + burstDir*burstR*burstE;" Hooks/AxsMetalSand.xm || { echo "stage-1 finger burst position missing"; exit 1; }
-          grep -Fq "float flightBegin = 0.18 + r2*0.10;" Hooks/AxsMetalSand.xm || { echo "stage-2 staggered flight missing"; exit 1; }
-          grep -Fq "float belowFront = mix(1.0, frontClip, flightE);" Hooks/AxsMetalSand.xm || { echo "reveal clip ramps in with flight missing"; exit 1; }
+          grep -Fq "float wave = clamp((u.time - 0.30)/0.62, 0.0, 1.0);" Hooks/AxsMetalSand.xm || { echo "shader reveal wave phase missing"; exit 1; }
+          grep -Fq "float arriveAt = 0.30 + r2*0.48;" Hooks/AxsMetalSand.xm || { echo "per-grain staggered arrival missing"; exit 1; }
+          grep -Fq "float flight = clamp((u.time - (arriveAt - flightSpan))/flightSpan, 0.0, 1.0);" Hooks/AxsMetalSand.xm || { echo "continuous flight to front missing"; exit 1; }
+          grep -Fq "float dissolve = 1.0 - smoothstep(arriveAt, arriveAt+0.22, u.time);" Hooks/AxsMetalSand.xm || { echo "post-arrival dissolve missing"; exit 1; }
           grep -Fq "float rx = dustHash(noiseCell + 5.1);" Hooks/AxsMetalSand.xm || { echo "per-grain random scatter X missing"; exit 1; }
           grep -Fq "float ry = dustHash(noiseCell + 8.3);" Hooks/AxsMetalSand.xm || { echo "per-grain random scatter Y missing"; exit 1; }
           grep -Fq "float cellX = floor(clamp(rx,0.0,0.9999)*26.0);" Hooks/AxsMetalSand.xm || { echo "quantized 26-cell front noise missing"; exit 1; }
           grep -Fq "float n = sin(cellX*2.399)*0.60 + sin(cellX*5.137+1.3)*0.40;" Hooks/AxsMetalSand.xm || { echo "square-tooth front noise phases missing"; exit 1; }
           grep -Fq "float amp = min(u.cardSize.y*0.045, 20.0);" Hooks/AxsMetalSand.xm || { echo "front noise amp missing"; exit 1; }
           grep -Fq "float frontY = u.origin.y + waveE*u.cardSize.y + n*amp;" Hooks/AxsMetalSand.xm || { echo "front-hugging frontY formula missing"; exit 1; }
-          grep -Fq "frontY + 5.0 + ry*30.0" Hooks/AxsMetalSand.xm || { echo "thin front-hugging grain band missing"; exit 1; }
-          grep -Fq "float bow = (r - 0.5) * (0.25 + 0.30*r4) * length(seg);" Hooks/AxsMetalSand.xm || { echo "curved flight path missing"; exit 1; }
-          grep -Fq "sin(u.time*7.0 + r*41.0)" Hooks/AxsMetalSand.xm || { echo "continuous cloud wobble missing"; exit 1; }
-          grep -Fq "float frontClip = smoothstep(frontY-8.0, frontY+6.0, p.y);" Hooks/AxsMetalSand.xm || { echo "revealed-area grain clipping missing"; exit 1; }
-          grep -Fq "float endFade = 1.0 - smoothstep(0.82, 0.99, waveE);" Hooks/AxsMetalSand.xm || { echo "end-of-life dissolve missing"; exit 1; }
+          grep -Fq "float bandY = frontY + 2.0 + ry*14.0;" Hooks/AxsMetalSand.xm || { echo "thin front-hugging grain band missing"; exit 1; }
+          grep -Fq "float bow = (r - 0.5) * (0.18 + 0.22*r4) * length(seg);" Hooks/AxsMetalSand.xm || { echo "curved flight path missing"; exit 1; }
+          grep -Fq "float belowFront = smoothstep(frontY-10.0, frontY+4.0, p.y);" Hooks/AxsMetalSand.xm || { echo "revealed-area grain clipping missing"; exit 1; }
+          grep -Fq "float endFade = 1.0 - smoothstep(0.92, 1.0, u.time);" Hooks/AxsMetalSand.xm || { echo "end-of-life dissolve missing"; exit 1; }
+          grep -Fq "(openMode == 1u ? 22000.0 : 14000.0)" Hooks/AxsMetalSand.xm || { echo "denser open-mode grain count missing"; exit 1; }
           # mask driver MUST use the same front formula/range as the shader
+          grep -Fq "CGFloat wave = (raw - 0.30)/0.62;" Hooks/AxsDismissEffect.xm || { echo "mask reveal wave phase not synced with shader"; exit 1; }
           grep -Fq "float cellX = floorf(fminf(fmaxf((float)fx, 0.0f), 0.9999f) * 26.0f);" Hooks/AxsDismissEffect.xm || { echo "mask quantized cell noise missing"; exit 1; }
           grep -Fq "sinf(cellX * 2.399f) * 0.60f + sinf(cellX * 5.137f + 1.3f) * 0.40f" Hooks/AxsDismissEffect.xm || { echo "mask square-tooth noise phases missing"; exit 1; }
           grep -Fq "CGFloat y = p * sz.height + n * amp;" Hooks/AxsDismissEffect.xm || { echo "mask front range not aligned with shader"; exit 1; }
-          # whole-card scatter / widened mask range / smooth big-wave edge are forbidden
+          # one-shot / whole-card scatter / widened mask range / old front phases are forbidden
+          ! grep -Fq "float flightBegin = 0.18 + r2*0.10;" Hooks/AxsMetalSand.xm || { echo "stale one-shot flight begin still present"; exit 1; }
           ! grep -Fq "float2 scatter = u.origin + float2(rx, ry) * u.cardSize;" Hooks/AxsMetalSand.xm || { echo "stale whole-card scatter target still present"; exit 1; }
           ! grep -Fq "scatter += (float2(rz, r3) - 0.5) * u.cardSize" Hooks/AxsMetalSand.xm || { echo "stale scatter overshoot still present"; exit 1; }
+          ! grep -Fq "frontY + 5.0 + ry*30.0" Hooks/AxsMetalSand.xm || { echo "stale .151 wide grain band still present"; exit 1; }
+          ! grep -Fq "CGFloat p = raw \* raw \* (3.0 - 2.0 \* raw);" Hooks/AxsDismissEffect.xm || { echo "stale un-synced mask ease still present"; exit 1; }
           ! grep -Fq "-ov + p * (sz.height + 2.0 * ov)" Hooks/AxsDismissEffect.xm || { echo "stale widened mask front range still present"; exit 1; }
           ! grep -Fq "sinf(fx * 17.3f + 0.7f)" Hooks/AxsDismissEffect.xm || { echo "stale smooth big-wave mask edge still present"; exit 1; }
           ! grep -Fq "u.origin.y + unit.y*u.cardSize.y" Hooks/AxsMetalSand.xm || { echo "stale grid cell target still present"; exit 1; }
@@ -631,7 +639,7 @@ jobs:
           ! grep -Fq "card.alpha = 0.0;" Hooks/AxsDismissEffect.xm || { echo "whole-card alpha fade still present"; exit 1; }
           ! grep -Fq "CGFloat revealAt = duration * 0.92;" Hooks/AxsDismissEffect.xm || { echo "stale instant card swap still present"; exit 1; }
 
-          echo "=== beautify.151 GPU Metal sand engine check ==="
+          echo "=== beautify.152 GPU Metal sand engine check ==="
           test -f Hooks/AxsMetalSand.xm || { echo "Metal engine source missing"; exit 1; }
           grep -Fq "nlDustVertex" Hooks/AxsMetalSand.xm || { echo "Metal shader vertex fn missing"; exit 1; }
           grep -Fq "nlDustFragment" Hooks/AxsMetalSand.xm || { echo "Metal shader fragment fn missing"; exit 1; }
@@ -662,7 +670,7 @@ jobs:
           echo "=== roothide (hidden-root) variant verification ==="
           RH_DEB=$(find ./packaging/out -name "*roothide*.deb" | head -n 1)
           test -n "$RH_DEB" || { echo "roothide deb missing"; exit 1; }
-          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.151"
+          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.152"
           # roothide bootstrap marker: Sileo installs arm64e directly, but pops
           # the "convert .deb" dialog for plain iphoneos-arm64 (rootless) debs.
           dpkg-deb -f "$RH_DEB" Architecture | grep -qx "iphoneos-arm64e" || { echo "roothide deb must be Architecture iphoneos-arm64e"; exit 1; }

@@ -55,19 +55,20 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.151): grains ride the reveal front.
-// .150 burst at the finger then flew to RANDOM points spread over the WHOLE
-// card. The card's reveal mask and the grain clip used DIFFERENT front
-// formulas/ranges, so the mask edge sat above the grain band and a white GAP
-// opened between the card and the particles; the mask edge was also a smooth
-// big wave, not the reference's fine square teeth. Now: STAGE 1 (t<0.24)
-// grains burst OUTWARD at the finger (burstR 22..126); STAGE 2 (t>0.18,
-// staggered) they fly along curved paths to a THIN band hugging just BELOW
-// the reveal front (frontY + 5..35), so the cloud follows the card edge down
-// as one piece. frontY uses the SAME quantized 26-cell noise (cellX 2.399/
-// 5.137, amp=min(h*0.045,20)) and the SAME origin+waveE*h range as the
-// AXSOpenWipeDriver mask edge -- edge and grains are locked together, no gap.
-// The reveal-front clip fades IN with flightE so finger-stage grains survive.
+// OPEN MODE (openMode=1, beautify.152): grains stream CONTINUOUSLY to the
+// reveal front. .151 still had a white GAP and the cloud slid down as ONE
+// block: two causes. (a) the AXSOpenWipeDriver mask eased front as
+// smoothstep(raw) while the shader used smoothstep((t-0.30)/0.62), so the
+// mask edge ran AHEAD of the grain band; (b) every grain's flight finished
+// near t=0.6, piling them all at the top before the card moved. Now BOTH the
+// mask and the shader use wave=clamp((t-0.30)/0.62,0,1)->smoothstep, so the
+// edges lock with no gap. STAGE 1 (t<0.20) grains burst OUTWARD at the finger;
+// STAGE 2 each grain has its OWN arriveAt=0.30+r2*0.48 (staggered across the
+// whole reveal) and flies to a THIN band hugging BELOW the moving front
+// (frontY+2..16, denser 22000 grains). Grains that arrive dissolve within
+// 0.22s, so the cloud is continuously replenished at the CURRENT front
+// instead of sliding down as a fixed block. frontY uses the SAME quantized
+// 26-cell noise (cellX 2.399/5.137, amp=min(h*0.045,20)) as the mask edge.
 // Grain texture is a generated rainbow gradient -- NO full-screen capture
 // (which in .144 cut the clock into the particles).
 // NOTE: no // comments
@@ -115,43 +116,43 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
-        float angS = r*6.2831853;\n\
-        float2 finger = float2(u.sourceX,u.sourceY);\n\
-        float2 burstDir = float2(cos(angS), sin(angS));\n\
-        float burstR = 22.0 + 104.0*r4;\n\
-        float burstT = clamp(u.time/0.24, 0.0, 1.0);\n\
-        float burstE = 1.0-(1.0-burstT)*(1.0-burstT);\n\
-        float2 burstP = finger + burstDir*burstR*burstE;\n\
         float rx = dustHash(noiseCell + 5.1);\n\
         float ry = dustHash(noiseCell + 8.3);\n\
         float rz = dustHash(noiseCell + 11.7);\n\
-        float wave = clamp((u.time - 0.37)/0.51, 0.0, 1.0);\n\
-        float waveE = smoothstep(0.0,1.0,wave);\n\
+        float angS = r*6.2831853;\n\
+        float2 finger = float2(u.sourceX,u.sourceY);\n\
+        float2 burstDir = float2(cos(angS), sin(angS));\n\
+        float burstR = 18.0 + 74.0*r4;\n\
+        float burstT = clamp(u.time/0.20, 0.0, 1.0);\n\
+        float burstE = 1.0-(1.0-burstT)*(1.0-burstT);\n\
+        float2 burstP = finger + burstDir*burstR*burstE;\n\
+        float wave = clamp((u.time - 0.30)/0.62, 0.0, 1.0);\n\
+        float waveE = smoothstep(0.0, 1.0, wave);\n\
         float cellX = floor(clamp(rx,0.0,0.9999)*26.0);\n\
         float n = sin(cellX*2.399)*0.60 + sin(cellX*5.137+1.3)*0.40;\n\
         float amp = min(u.cardSize.y*0.045, 20.0);\n\
         float frontY = u.origin.y + waveE*u.cardSize.y + n*amp;\n\
-        float2 target = float2(u.origin.x + rx*u.cardSize.x,\n\
-                               frontY + 5.0 + ry*30.0);\n\
-        float flightBegin = 0.18 + r2*0.10;\n\
-        float flightSpan = 0.32 + rz*0.12;\n\
-        float flight = clamp((u.time - flightBegin)/flightSpan, 0.0, 1.0);\n\
+        float arriveAt = 0.30 + r2*0.48;\n\
+        float flightSpan = 0.18 + rz*0.12;\n\
+        float flight = clamp((u.time - (arriveAt - flightSpan))/flightSpan, 0.0, 1.0);\n\
         float flightE = flight*flight*(3.0-2.0*flight);\n\
+        float bandY = frontY + 2.0 + ry*14.0;\n\
+        float2 target = float2(u.origin.x + rx*u.cardSize.x, bandY);\n\
         float2 seg = target - burstP;\n\
         float2 perp = normalize(float2(-seg.y, seg.x) + float2(0.0001, 0.0));\n\
-        float bow = (r - 0.5) * (0.25 + 0.30*r4) * length(seg);\n\
+        float bow = (r - 0.5) * (0.18 + 0.22*r4) * length(seg);\n\
         float2 p = burstP + seg*flightE + perp*bow*sin(flightE*3.1415926);\n\
-        p += float2(sin(u.time*7.0 + r*41.0), cos(u.time*6.3 + r2*43.0)) * 2.0;\n\
+        p += float2(sin(u.time*6.0 + r*41.0), cos(u.time*5.4 + r2*43.0)) * 1.6;\n\
         float2 tileSizeO = u.cardSize/grid;\n\
-        p += (corner-0.5)*tileSizeO*0.80;\n\
-        float frontClip = smoothstep(frontY-8.0, frontY+6.0, p.y);\n\
-        float belowFront = mix(1.0, frontClip, flightE);\n\
-        float endFade = 1.0 - smoothstep(0.82, 0.99, waveE);\n\
+        p += (corner-0.5)*tileSizeO*1.05;\n\
+        float belowFront = smoothstep(frontY-10.0, frontY+4.0, p.y);\n\
+        float dissolve = 1.0 - smoothstep(arriveAt, arriveAt+0.22, u.time);\n\
+        float endFade = 1.0 - smoothstep(0.92, 1.0, u.time);\n\
         DustVertex outO;\n\
         outO.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
         outO.uv=fract(float2(r4, r3) + unit*0.35);\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.05,u.time) * belowFront * endFade;\n\
+        outO.fade=smoothstep(0.0,0.04,u.time) * flightE * belowFront * dissolve * endFade;\n\
         outO.breakage=1.0;\n\
         return outO;\n\
     }\n\
@@ -437,7 +438,9 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
         // .142: raise the cap and the rows clamp -- at density=3 the old
         // rows>240 clamp truncated 42000 grains down to 32640, so the slider
         // never actually delivered its full density on the tall card aspect.
-        int particles = (int)lround(14000.0 * density);
+        // .152: open mode uses a denser cloud so the band hugging the reveal
+        // front reads as a tight cluster (reference), not a sparse drizzle.
+        int particles = (int)lround((openMode == 1u ? 22000.0 : 14000.0) * density);
         if (particles < 200) particles = 200;
         if (particles > 48000) particles = 48000;
         CGFloat aspect = frame.size.height > 0.5 ? frame.size.width / frame.size.height : 1.0;
