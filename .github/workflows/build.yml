@@ -2,6 +2,17 @@ name: Build ScreenCore beautify.150 (rootless)
 
 on:
   workflow_dispatch:
+    inputs:
+      runner_label:
+        description: 'macOS runner pool (switch pools if one is congested)'
+        required: false
+        default: 'macos-15'
+        type: choice
+        options:
+          - macos-15
+          - macos-15-intel
+          - macos-13
+          - macos-14
 
 permissions:
   contents: read
@@ -14,7 +25,7 @@ env:
 jobs:
   build:
     name: Build rootless beautify.150
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner_label || 'macos-15' }}
 
     steps:
       - name: Checkout
