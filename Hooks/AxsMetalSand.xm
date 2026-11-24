@@ -55,23 +55,17 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.154): PARTICLE == WINDOW (inspired by the
-// reference plugin's algorithm, reimplemented here in our own code). The old
-// .151-.153 design had TWO layers -- colored grains flying to a "front band"
-// plus a separate noise-mask revealing the real card -- and every frame the
-// two had to be aligned; any drift opened a white GAP. Now there is ONE layer:
-// the grain texture IS the real card snapshot (captured in AxsDismissEffect).
-// Each grain owns one grid cell, bursts outward from the finger, then flies on
-// a cubic Bezier to its OWN cell. Per-cell integer hash gives a stable, chaotic
-// stagger (arriveAt=0.16+order*0.62). On arrival `dock` grows the grain from a
-// small round dot to a full tile and crossfades its flight color (axsPalette,
-// cyan->blue->purple->pink->orange) to the REAL snapshot texel at that cell --
-// so the settled grains literally paint the floating window, edge and all.
-// No separate mask, no second layer, no gap. The real card view stays hidden
-// until endWipeReveal (duration+0.05), when it takes over from the identical
-// settled image as the overlay fades -- a seamless handoff, never a "flash in".
-// ONE clock (u.time) drives everything. Only the card is rasterized, never the
-// full screen, so the clock can never be cut into grains (.144).
+// OPEN MODE (openMode=1, beautify.155): REFERENCE-STYLE FINE DUST + CPU REVEAL.
+// The reference plugin does NOT turn particles into the window. It keeps every
+// grain as a 1.15-2.4px round colored sand dot, releases it from the lift point
+// on a per-cell clock, flies it down and back up into its OWN destination cell,
+// and DELETES the grain exactly when a CPU mask reveals that same cell of the
+// real card. .154 tried to make particles BE the window; because the hidden
+// card snapshot often failed, the fallback 128x128 gradient got docked as a
+// large rainbow board and then flashed into the real card. This version copies
+// the reference ALGORITHM (not its code): dust stays dust, card stays card,
+// both share one normalized clock and one integer-hash stagger, so there is
+// neither a white gap nor a gradient board. No screenshot is needed at all.
 // NOTE: no // comments
 // are allowed INSIDE the string below -- the Logos preprocessor strips // to
 // EOL (including the trailing line-continuation backslash) and would break
@@ -102,6 +96,8 @@ struct DustVertex {\n\
     float dock;\n\
     float3 tint;\n\
     float isOpen;\n\
+    float noiseX;\n\
+    float noiseY;\n\
 };\n\
 float dustHash(float2 v) {\n\
     return fract(sin(dot(v, float2(127.1,311.7))) * 43758.5453);\n\
@@ -128,38 +124,39 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
-        uint h = uint(cell.x)*92837111u ^ uint(cell.y)*689287499u ^ 0x9e3779b9u;\n\
-        h ^= h >> 15u; h *= 0x85ebca6bu; h ^= h >> 13u;\n\
+        uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+        h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = clamp(unit.y*0.92 + hf*0.08, 0.0, 1.0);\n\
-        float arriveAt = 0.16 + order*0.62;\n\
-        float flight = 0.30;\n\
-        float t = clamp((u.time - (arriveAt - flight))/flight, 0.0, 1.0);\n\
-        float te = t*t*(3.0-2.0*t);\n\
-        float ang = r*6.2831853;\n\
+        float order = 0.96*(1.0-unit.y) + 0.04*hf;\n\
+        float arrival = 0.35 + 0.65*order;\n\
+        float departure = arrival - 0.35;\n\
+        float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
+        float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
+        float2 landing = (cell + 0.5 + jitter)/grid;\n\
         float2 finger = float2(u.sourceX, u.sourceY);\n\
-        float burstR = 16.0 + 70.0*r4;\n\
-        float2 start = finger + float2(cos(ang), sin(ang))*burstR;\n\
-        float2 dest = u.origin + unit*u.cardSize;\n\
-        float approach = clamp(u.cardSize.y*0.20, 50.0, 130.0);\n\
-        float2 c1 = start + float2((r-0.5)*burstR*1.2, -approach*0.5);\n\
-        float2 c2 = dest - float2(0.0, approach);\n\
-        float b = 1.0 - te;\n\
-        float2 pos = b*b*b*start + 3.0*b*b*te*c1 + 3.0*b*te*te*c2 + te*te*te*dest;\n\
-        float dock = smoothstep(0.82, 1.0, te);\n\
-        float2 dustSize = float2(mix(1.6, 3.0, r3));\n\
-        float2 tileSize = u.cardSize/grid;\n\
-        float2 size = mix(dustSize, tileSize, dock);\n\
-        pos += (corner-0.5)*size;\n\
+        float ang = r*6.2831853;\n\
+        float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
+        float2 dest = u.origin + landing*u.cardSize;\n\
+        float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
+        float2 c1 = float2(mix(start.x, dest.x, 0.35), max(start.y, dest.y) + approach*1.5);\n\
+        float2 c2 = dest + float2(0.0, approach);\n\
+        float b = 1.0 - t;\n\
+        float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
+        float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
+        pos += (corner-0.5)*dustSize;\n\
+        float born = step(departure, u.time);\n\
+        float gone = 1.0 - step(arrival - 0.006, u.time);\n\
         DustVertex outO;\n\
         outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
-        outO.uv=(cell+corner)/grid;\n\
+        outO.uv=unit;\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.04,u.time);\n\
+        outO.fade=born*gone*(1.0-smoothstep(0.94,1.0,t));\n\
         outO.breakage=0.0;\n\
-        outO.dock=dock;\n\
+        outO.dock=t;\n\
         outO.tint=axsPalette(r + hf*0.15);\n\
         outO.isOpen=1.0;\n\
+        outO.noiseX=r;\n\
+        outO.noiseY=r3;\n\
         return outO;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
@@ -270,9 +267,18 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], texture2d<float> imag
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
     float4 texel=image.sample(sampleImage,in.uv);\n\
     if (in.isOpen > 0.5) {\n\
-        float4 flying=float4(in.tint,1.0);\n\
-        float4 col=mix(flying,texel,in.dock);\n\
-        float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
+        float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));\n\
+        float core=1.0-smoothstep(0.0,0.40,length(in.local-0.5));\n\
+        float phase=u.seed + u.time*2.1;\n\
+        float3 grain=axsPalette(in.noiseX + phase*0.025);\n\
+        float sparkle=0.5+0.5*sin(phase*2.1+in.noiseY*6.2831853);\n\
+        float glint=smoothstep(0.60,0.87,in.noiseY)*core*(0.15+0.30*sparkle);\n\
+        grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
+        float impact=smoothstep(0.88,0.985,in.dock)*(1.0-smoothstep(0.985,1.0,in.dock));\n\
+        grain+=axsPalette(in.noiseX)*impact*0.22;\n\
+        return float4(grain,1.0)*(roundDust*in.fade);\n\
+    }\n\
+    float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
         float shape=mix(roundDust,1.0,in.dock);\n\
         return col*(in.fade*shape);\n\
     }\n\
@@ -782,4 +788,12 @@ BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
                                sourcePoint);
+}
+
+// .155: the CPU reveal mask must use the renderer's exact clock, not a
+// separately re-based one, or the card edge and particle arrivals drift apart.
+CFTimeInterval axs_metalAssembleStartTime(void *renderer) {
+    if (renderer == NULL) return CACurrentMediaTime();
+    AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
+    return r.start;
 }

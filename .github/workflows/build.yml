@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.154 (rootless)
+name: Build ScreenCore beautify.155 (rootless)
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.154
+    name: Build rootless beautify.155
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
 
     steps:
@@ -40,7 +40,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.154"
+          VERSION="2.0.5+beautify.155"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -138,7 +138,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.154"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.155"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
@@ -563,43 +563,38 @@ jobs:
           grep -Fq "candidate skipped (open still active" Hooks/AxsDismissEffect.xm || { echo "open-active event guard missing"; exit 1; }
 
           # .154: PARTICLE == WINDOW (reference-plugin idea, own code). One
-          # layer only: the grain texture IS the real card snapshot; each grain
-          # owns one grid cell, bursts from the finger, flies a cubic Bezier to
-          # its OWN cell, then  grows it to a full tile and crossfades its
-          # flight color (axsPalette) to the REAL snapshot texel. Settled grains
-          # literally paint the window -- no second mask, no gap. ONE clock.
+          # .155: reference-style fine dust. Grains stay 1.15-2.4px colored
+          # dots and die at arrival; the real card is revealed by a CPU mask
+          # with the SAME per-cell hash/clock. No gradient board, no flash.
           grep -Fq "float3 axsPalette(float p)" Hooks/AxsMetalSand.xm || { echo "rainbow palette function missing"; exit 1; }
           grep -Fq "float4 position [[position]];" Hooks/AxsMetalSand.xm || { echo "vertex position missing"; exit 1; }
           grep -Fq "    float dock;" Hooks/AxsMetalSand.xm || { echo "dock varying missing"; exit 1; }
           grep -Fq "    float3 tint;" Hooks/AxsMetalSand.xm || { echo "tint varying missing"; exit 1; }
           grep -Fq "    float isOpen;" Hooks/AxsMetalSand.xm || { echo "isOpen varying missing"; exit 1; }
+          grep -Fq "    float noiseX;" Hooks/AxsMetalSand.xm || { echo "dust noise varying missing"; exit 1; }
           grep -Fq "if (u.openMode == 1u) {" Hooks/AxsMetalSand.xm || { echo "open mode branch missing"; exit 1; }
-          grep -Fq "uint h = uint(cell.x)*92837111u ^ uint(cell.y)*689287499u ^ 0x9e3779b9u;" Hooks/AxsMetalSand.xm || { echo "per-cell integer hash missing"; exit 1; }
+          grep -Fq "uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;" Hooks/AxsMetalSand.xm || { echo "per-cell integer hash missing"; exit 1; }
           grep -Fq "float hf = (float)(h & 0xffffu)/65535.0;" Hooks/AxsMetalSand.xm || { echo "hash normalization missing"; exit 1; }
-          grep -Fq "float order = clamp(unit.y*0.92 + hf*0.08, 0.0, 1.0);" Hooks/AxsMetalSand.xm || { echo "chaotic stagger order missing"; exit 1; }
-          grep -Fq "float arriveAt = 0.16 + order*0.62;" Hooks/AxsMetalSand.xm || { echo "staggered arrival missing"; exit 1; }
+          grep -Fq "float order = 0.96*(1.0-unit.y) + 0.04*hf;" Hooks/AxsMetalSand.xm || { echo "reference arrival order missing"; exit 1; }
+          grep -Fq "float arrival = 0.35 + 0.65*order;" Hooks/AxsMetalSand.xm || { echo "staggered arrival missing"; exit 1; }
+          grep -Fq "float departure = arrival - 0.35;" Hooks/AxsMetalSand.xm || { echo "staggered departure missing"; exit 1; }
+          grep -Fq "float2 landing = (cell + 0.5 + jitter)/grid;" Hooks/AxsMetalSand.xm || { echo "jittered landing cell missing"; exit 1; }
           grep -Fq "float2 finger = float2(u.sourceX, u.sourceY);" Hooks/AxsMetalSand.xm || { echo "finger origin missing"; exit 1; }
-          grep -Fq "float2 start = finger + float2(cos(ang), sin(ang))*burstR;" Hooks/AxsMetalSand.xm || { echo "finger burst missing"; exit 1; }
-          grep -Fq "float2 dest = u.origin + unit*u.cardSize;" Hooks/AxsMetalSand.xm || { echo "per-cell window target missing"; exit 1; }
-          grep -Fq "float2 pos = b*b*b*start + 3.0*b*b*te*c1 + 3.0*b*te*te*c2 + te*te*te*dest;" Hooks/AxsMetalSand.xm || { echo "cubic Bezier flight missing"; exit 1; }
-          grep -Fq "float dock = smoothstep(0.82, 1.0, te);" Hooks/AxsMetalSand.xm || { echo "dock gate missing"; exit 1; }
-          grep -Fq "float2 size = mix(dustSize, tileSize, dock);" Hooks/AxsMetalSand.xm || { echo "grain->tile growth missing"; exit 1; }
-          grep -Fq "outO.uv=(cell+corner)/grid;" Hooks/AxsMetalSand.xm || { echo "true cell UV missing"; exit 1; }
-          grep -Fq "outO.tint=axsPalette(r + hf*0.15);" Hooks/AxsMetalSand.xm || { echo "flight color missing"; exit 1; }
-          grep -Fq "outO.isOpen=1.0;" Hooks/AxsMetalSand.xm || { echo "open flag missing"; exit 1; }
+          grep -Fq "float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);" Hooks/AxsMetalSand.xm || { echo "finger burst missing"; exit 1; }
+          grep -Fq "float2 dest = u.origin + landing*u.cardSize;" Hooks/AxsMetalSand.xm || { echo "per-cell window target missing"; exit 1; }
+          grep -Fq "float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;" Hooks/AxsMetalSand.xm || { echo "cubic Bezier flight missing"; exit 1; }
+          grep -Fq "float2 dustSize = float2(mix(1.15, 2.4, r3));" Hooks/AxsMetalSand.xm || { echo "fine dust size missing"; exit 1; }
+          grep -Fq "float gone = 1.0 - step(arrival - 0.006, u.time);" Hooks/AxsMetalSand.xm || { echo "arrival delete gate missing"; exit 1; }
+          grep -Fq "outO.fade=born*gone*(1.0-smoothstep(0.94,1.0,t));" Hooks/AxsMetalSand.xm || { echo "dust fade gate missing"; exit 1; }
+          grep -Fq "outO.noiseX=r;" Hooks/AxsMetalSand.xm || { echo "dust noise output missing"; exit 1; }
           grep -Fq "out.isOpen=0.0;" Hooks/AxsMetalSand.xm || { echo "dismiss branch open flag reset missing"; exit 1; }
           grep -Fq "if (in.isOpen > 0.5) {" Hooks/AxsMetalSand.xm || { echo "fragment open branch missing"; exit 1; }
-          grep -Fq "float4 col=mix(flying,texel,in.dock);" Hooks/AxsMetalSand.xm || { echo "flight->window texel crossfade missing"; exit 1; }
-          # old two-layer architecture is forbidden
-          ! grep -Fq "float frontY = u.origin.y + waveE*u.cardSize.y + n*amp;" Hooks/AxsMetalSand.xm || { echo "stale front-band architecture still present"; exit 1; }
-          ! grep -Fq "float bandY = frontY + 2.0 + ry*14.0;" Hooks/AxsMetalSand.xm || { echo "stale grain band still present"; exit 1; }
-          ! grep -Fq "float dissolve = 1.0 - smoothstep(arriveAt, arriveAt+0.22, u.time);" Hooks/AxsMetalSand.xm || { echo "stale post-arrival dissolve still present"; exit 1; }
-          ! grep -Fq "float belowFront = smoothstep(frontY-10.0, frontY+4.0, p.y);" Hooks/AxsMetalSand.xm || { echo "stale revealed-area clip still present"; exit 1; }
-          ! grep -Fq "outO.uv=fract(float2(r4, r3) + unit*0.35);" Hooks/AxsMetalSand.xm || { echo "stale gradient UV still present"; exit 1; }
-          ! grep -Fq "float flightBegin = 0.18 + r2*0.10;" Hooks/AxsMetalSand.xm || { echo "stale one-shot flight begin still present"; exit 1; }
-          ! grep -Fq "float2 scatter = u.origin + float2(rx, ry) * u.cardSize;" Hooks/AxsMetalSand.xm || { echo "stale whole-card scatter target still present"; exit 1; }
-          ! grep -Fq "CGFloat gatherAt = duration \* 0.37;" Hooks/AxsDismissEffect.xm || { echo "stale delayed mask startup still present"; exit 1; }
-          ! grep -Fq "CGFloat elapsed = CACurrentMediaTime() - self.start;" Hooks/AxsDismissEffect.xm || { echo "stale re-based mask clock still present"; exit 1; }
+          grep -Fq "float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));" Hooks/AxsMetalSand.xm || { echo "round dust shape missing"; exit 1; }
+          grep -Fq "return float4(grain,1.0)*(roundDust*in.fade);" Hooks/AxsMetalSand.xm || { echo "dust fragment output missing"; exit 1; }
+          grep -Fq "CFTimeInterval axs_metalAssembleStartTime(void *renderer)" Hooks/AxsMetalSand.xm || { echo "shared renderer clock accessor missing"; exit 1; }
+          ! grep -Fq "float4 col=mix(flying,texel,in.dock);" Hooks/AxsMetalSand.xm || { echo "stale particle-as-window crossfade still present"; exit 1; }
+          ! grep -Fq "float2 size = mix(dustSize, tileSize, dock);" Hooks/AxsMetalSand.xm || { echo "stale grain->tile growth still present"; exit 1; }
+          ! grep -Fq "startWithCardIdle" Hooks/AxsDismissEffect.xm || { echo "stale idle driver anchor still present"; exit 1; }
           # density=3 must actually deliver full grains (no rows>240 truncation)
           grep -Fq "if (particles > 48000) particles = 48000" Hooks/AxsMetalSand.xm || { echo "grains cap raise missing"; exit 1; }
           grep -Fq "if (rows > 320) rows = 320" Hooks/AxsMetalSand.xm || { echo "rows clamp raise missing"; exit 1; }
@@ -607,16 +602,19 @@ jobs:
           # the primary grain source (that leaked the home-screen clock)
           grep -Fq "static UIImage *axs_open_sandTexture(void)" Hooks/AxsDismissEffect.xm || { echo "sand texture generator missing"; exit 1; }
           grep -Fq "CGGradientCreateWithColors" Hooks/AxsDismissEffect.xm || { echo "sand gradient missing"; exit 1; }
-          grep -Fq "UIImage *tex = axs_open_captureCardForAssembly(card);" Hooks/AxsDismissEffect.xm || { echo "real card snapshot not used as primary grain texture"; exit 1; }
-          # .154: the wipe driver is now an IDLE timing anchor only -- the
-          # docked grains assemble the window themselves, so NO mask is applied
-          # to the card (a second reveal layer reopened the gap).
+          grep -Fq "UIImage *tex = axs_open_sandTexture();" Hooks/AxsDismissEffect.xm || { echo "dust texture not used"; exit 1; }
+          ! grep -Fq "UIImage *tex = axs_open_captureCardForAssembly(card);" Hooks/AxsDismissEffect.xm || { echo "stale hidden-card snapshot still present"; exit 1; }
+          # .155: CPU per-cell reveal mask driven by the same shared clock.
           grep -Fq "@interface AXSOpenWipeDriver : NSObject" Hooks/AxsDismissEffect.xm || { echo "wipe driver class missing"; exit 1; }
-          grep -Fq "startWithCardIdle:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0" Hooks/AxsDismissEffect.xm || { echo "idle driver anchor missing"; exit 1; }
-          grep -Fq "[driver startWithCardIdle:card duration:dur sharedStart:sharedStart];" Hooks/AxsDismissEffect.xm || { echo "idle driver not started"; exit 1; }
+          grep -Fq "static uint32_t axs_open_cellHash(uint32_t x, uint32_t y)" Hooks/AxsDismissEffect.xm || { echo "CPU cell hash missing"; exit 1; }
+          grep -Fq "CGFloat progress = (raw - 0.35)/0.65 + 0.012;" Hooks/AxsDismissEffect.xm || { echo "shared reveal clock missing"; exit 1; }
+          grep -Fq "CGPathAddLineToPoint(path, NULL, x, boundary*sz.height);" Hooks/AxsDismissEffect.xm || { echo "ragged reveal edge missing"; exit 1; }
+          grep -Fq "axs_open_gridForDensity(density, frame" Hooks/AxsDismissEffect.xm || { echo "CPU grid sync missing"; exit 1; }
+          grep -Fq "CFTimeInterval assemblyStart = axs_metalAssembleStartTime(renderer);" Hooks/AxsDismissEffect.xm || { echo "shared start not adopted"; exit 1; }
+          grep -Fq "[driver startWithCard:card duration:dur sharedStart:sharedStart" Hooks/AxsDismissEffect.xm || { echo "reveal driver not started"; exit 1; }
+          grep -Fq "card.layer.mask = ml;" Hooks/AxsDismissEffect.xm || { echo "reveal mask not applied"; exit 1; }
           grep -Fq "card.hidden = NO;" Hooks/AxsDismissEffect.xm || { echo "final card restore missing"; exit 1; }
           grep -Fq "axs_open_interceptUntil = 0" Hooks/AxsDismissEffect.xm || { echo "intercept disarm missing"; exit 1; }
-          ! grep -Fq "card.layer.mask = ml;" Hooks/AxsDismissEffect.xm || { echo "stale mask applied to card still present"; exit 1; }
           # .147: fallback source must be screen-bottom, never card center
           grep -Fq "screenH - 90.0" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback source missing"; exit 1; }
           grep -Fq "@\"fallback-screen-bottom\"" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback tag missing"; exit 1; }
@@ -626,7 +624,7 @@ jobs:
           ! grep -Fq "card.alpha = 0.0;" Hooks/AxsDismissEffect.xm || { echo "whole-card alpha fade still present"; exit 1; }
           ! grep -Fq "CGFloat revealAt = duration * 0.92;" Hooks/AxsDismissEffect.xm || { echo "stale instant card swap still present"; exit 1; }
 
-          echo "=== beautify.154 GPU Metal sand engine check ==="
+          echo "=== beautify.155 GPU Metal fine-dust engine check ==="
           test -f Hooks/AxsMetalSand.xm || { echo "Metal engine source missing"; exit 1; }
           grep -Fq "nlDustVertex" Hooks/AxsMetalSand.xm || { echo "Metal shader vertex fn missing"; exit 1; }
           grep -Fq "nlDustFragment" Hooks/AxsMetalSand.xm || { echo "Metal shader fragment fn missing"; exit 1; }
