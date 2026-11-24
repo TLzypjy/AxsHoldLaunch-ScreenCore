@@ -282,7 +282,9 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms
         float impact=smoothstep(0.88,0.985,in.dock)*(1.0-smoothstep(0.985,1.0,in.dock));\n\
         grain+=axsPalette(in.noiseX)*impact*0.22;\n\
         float shape=mix(roundDust, 1.0, in.dock);\n\
-        float4 col=mix(float4(grain,1.0), texel, in.dock);\n\
+        float ta = max(texel.a, 0.001);\n\
+        float3 tileCol = (texel.a > 0.02) ? (texel.rgb/ta) : grain;\n\
+        float4 col = mix(float4(grain,1.0), float4(tileCol, 0.92), in.dock);\n\
         return col*(shape*in.fade);\n\
     }\n\
     float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
@@ -706,6 +708,19 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
     if (tex == nil) return nil;
     [tex replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
              withBytes:[data bytes] bytesPerRow:bpr];
+    // .173: read back a few alpha samples right after upload -- a transparent
+    // upload (empty texture) is immediately visible in the log instead of
+    // silently killing the deposit reveal.
+    @try {
+        if (td.storageMode == MTLStorageModeShared) {
+            uint8_t smp[4 * 4 * 4];
+            [tex getBytes:smp bytesPerRow:4 * 4 * 4
+              fromRegion:MTLRegionMake2D(w / 2, h / 2, 4, 4) mipmapLevel:0];
+            axs_msd_log(@"texture upload %lux%lu alpha %d %d %d %d",
+                        (unsigned long)w, (unsigned long)h,
+                        smp[3], smp[19], smp[35], smp[51]);
+        }
+    } @catch (NSException *ignored) { }
     return tex;
 }
 
