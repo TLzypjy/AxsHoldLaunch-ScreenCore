@@ -368,6 +368,7 @@ static UIImage *axs_open_cachedCardSnapshotForView(UIView *owner) {
 }
 
 static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
+static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView);   // defined later in this file
 
 // .158: cheap 1x-scale capture of a VISIBLE card (no unhide games needed).
 static UIImage *axs_open_captureVisibleCardCheap(UIView *card) {
