@@ -57,10 +57,10 @@ static void axs_msd_log(NSString *format, ...) {
 // fractions of T0 so the speed slider keeps working unchanged.
 // OPEN MODE (openMode=1, beautify.157): ALL-GPU REFERENCE REVEAL.
 // Copied from the reference plugin's ALGORITHM (its own code stays its own):
-// every grain rises out of a thin band along the BOTTOM edge of the screen,
+// every grain falls out of a thin band along the TOP edge of the screen,
 // flies on a gentle S-curve into its own jittered cell and DIES at arrival;
 // a second draw pass (openMode=2) deposits the REAL card texel for each cell
-// gated by the SAME per-cell hash arrival clock, so the rising card edge and
+// gated by the SAME per-cell hash arrival clock, so the descending card edge and
 // the dust front are literally the same front -- no gap, no CPU mask, no
 // per-frame CAShapeLayer rebuild. The card snapshot is captured ASYNC and
 // swapped in mid-flight (cardReady); the card view itself stays hidden until
@@ -126,7 +126,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = 0.96*(1.0-unit.y) + 0.04*hf;\n\
+        float order = 0.96*unit.y + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
@@ -135,12 +135,12 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
         float2 landing = (cell + 0.5 + jitter)/grid;\n\
         float2 src = float2(2.0 + hnoise.x*max(1.0, u.viewport.x - 4.0),\n\
-                            u.viewport.y - 2.0 - hnoise.y*min(16.0, u.viewport.y*0.025));\n\
+                            2.0 + hnoise.y*min(16.0, u.viewport.y*0.025));\n\
         float2 dest = u.origin + landing*u.cardSize;\n\
         float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
         float spread = (hnoise.x - 0.5)*min(u.viewport.x*0.32, 130.0);\n\
-        float2 c1 = src + float2(spread, -approach);\n\
-        float2 c2 = dest + float2(0.0, approach);\n\
+        float2 c1 = src + float2(spread, approach);\n\
+        float2 c2 = dest - float2(0.0, approach);\n\
         float b = 1.0 - t;\n\
         float2 pos = b*b*b*src + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
@@ -164,7 +164,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = 0.96*(1.0-unit.y) + 0.04*hf2;\n\
+        float order2 = 0.96*unit.y + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
         float open = step(arrival2 - 0.006, u.time);\n\
         float2 tile = u.cardSize/grid;\n\
@@ -512,6 +512,13 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     u.rows = rows;
     self.grainCount = (int)(cols * rows);
     self.cardReady = NO;
+    // .159: .158 seeds the open pass with the cached visible-card snapshot as
+    // the INITIAL texture; cardReady used to be armed only in
+    // replaceTextureWithImage, so the deposit pass never drew and the card
+    // popped in after the dust. Arm it right here for a real initial capture.
+    if (openMode == 1u && tex.width >= 256 && tex.height >= 256) {
+        self.cardReady = YES;
+    }
     self.u = u;
 
     // .105: explicitly set the drawable pixel size. Without this the freshly

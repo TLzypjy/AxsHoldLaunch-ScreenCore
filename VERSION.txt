@@ -1,3 +1,16 @@
+beautify.159 变更（修正显现方向 + 修复 deposit 从未绘制）：
+- 对帧确认参考视频：浮窗从顶部往下逐格显现（黑色内容带自顶向下
+  生长，尘埃贴在下边缘随之下移）；我们此前是自下而上，方向反了。
+- 两个关键修复：
+  1) cardReady 只在 replaceTexture 里置位，而 .158 的缓存快照是
+     作为初始纹理走 startWithTexture 传入的，deposit pass 从未
+     画过（log47 已有 cached-card 纹理仍不显现的直接原因）；
+     现在初始纹理为真截图(>=256px)时立即置位 cardReady。
+  2) 逐格 order 翻转为 0.96*unit.y（顶部行先开），尘埃源带移到
+     屏幕顶部边缘，粒子下落、以向下切线落入格子，贴着下移的
+     显现边缘——与参考 shader5/6 full-open 方向一致。
+- 版本升至 2.0.5+beautify.159，CI 断言同步更新。
+
 beautify.158 变更（修复呼出 deposit 无纹理→浮窗最后直接出现）：
 - log(46) 显示每次呼出都是 "OPEN gpu texture never captured, deposit
   stays off"：浮窗隐藏时跨进程远端内容无法离屏栅格化，30 次异步
@@ -40,7 +53,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.158
+版本：2.0.5+beautify.159
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，
