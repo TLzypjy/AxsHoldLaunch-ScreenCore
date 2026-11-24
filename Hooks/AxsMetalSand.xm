@@ -57,10 +57,10 @@ static void axs_msd_log(NSString *format, ...) {
 // fractions of T0 so the speed slider keeps working unchanged.
 // OPEN MODE (openMode=1, beautify.157): ALL-GPU REFERENCE REVEAL.
 // Copied from the reference plugin's ALGORITHM (its own code stays its own):
-// every grain falls out of a thin band along the TOP edge of the screen,
+// every grain bursts from the FINGER lift point and flies to its own cell,
 // flies on a gentle S-curve into its own jittered cell and DIES at arrival;
 // a second draw pass (openMode=2) deposits the REAL card texel for each cell
-// gated by the SAME per-cell hash arrival clock, so the descending card edge and
+// gated by the SAME per-cell hash arrival clock, so the rising card edge and
 // the dust front are literally the same front -- no gap, no CPU mask, no
 // per-frame CAShapeLayer rebuild. The card snapshot is captured ASYNC and
 // swapped in mid-flight (cardReady); the card view itself stays hidden until
@@ -126,22 +126,20 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = 0.96*unit.y + 0.04*hf;\n\
+        float order = 0.96*(1.0-unit.y) + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
-        float2 hnoise = float2(float(h & 65535u)/65535.0,\n\
-                               float((h >> 16u) & 65535u)/65535.0);\n\
-        float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
         float2 landing = (cell + 0.5 + jitter)/grid;\n\
-        float2 src = float2(2.0 + hnoise.x*max(1.0, u.viewport.x - 4.0),\n\
-                            2.0 + hnoise.y*min(16.0, u.viewport.y*0.025));\n\
+        float2 finger = float2(u.sourceX, u.sourceY);\n\
+        float ang = r*6.2831853;\n\
+        float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
         float2 dest = u.origin + landing*u.cardSize;\n\
         float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
-        float spread = (hnoise.x - 0.5)*min(u.viewport.x*0.32, 130.0);\n\
-        float2 c1 = src + float2(spread, approach);\n\
-        float2 c2 = dest - float2(0.0, approach);\n\
+        float2 c1 = float2(mix(start.x, dest.x, 0.35), max(start.y, dest.y) + approach*1.5);\n\
+        float2 c2 = dest + float2(0.0, approach);\n\
         float b = 1.0 - t;\n\
+        float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         float2 pos = b*b*b*src + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
         pos += (corner-0.5)*dustSize;\n\
@@ -164,7 +162,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = 0.96*unit.y + 0.04*hf2;\n\
+        float order2 = 0.96*(1.0-unit.y) + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
         float open = step(arrival2 - 0.006, u.time);\n\
         float2 tile = u.cardSize/grid;\n\

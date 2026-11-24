@@ -289,22 +289,82 @@ static UIImage *axs_dm_snapshot(UIView *view) {
 // snapshot around and reuse it as the deposit texture at the next open.
 // Refresh points: every dismiss (texture creation) and 0.35s after every
 // open completes (the card is visible again by then).
-// .160: the cache is PER-CONTAINER (associated object on the view itself).
-// A single global slot made opening another app's window deposit the
-// previously closed window's content; the same SCFloatingContainerView
-// instance cycles dismiss -> open, so its own cache always holds its own
-// last-visible pixels.
-static char axs_open_cachedSnapshotKey;
+// .160 lesson: an associated-object cache on the container view DIES with
+// the view -- ScreenCore recreates SCFloatingContainerView between close and
+// open, so log(49) showed the refresh succeeding but the next open reading
+// nothing. .161: key the cache by the WINDOW's bundle identity, which
+// survives view recreation: try container.session.bundleIdentifier, then a
+// manager.sessionsByBundleID lookup through the container's delegate, then
+// sceneIdentifier / containerIdentifier; geometry is the last resort.
+static NSMutableDictionary *axs_open_snapshotCache = nil;
+
+static NSString *axs_open_windowKeyForView(UIView *view) {
+    @try {
+        if (view == nil) return nil;
+        id session = nil;
+        @try { session = [view valueForKey:@"session"]; } @catch (NSException *ignored) { }
+        NSMutableArray *cands = [NSMutableArray arrayWithObject:view];
+        if (session != nil) [cands addObject:session];
+        for (id obj in cands) {
+            if (obj == nil) continue;
+            for (NSString *key in @[@"bundleIdentifier", @"bundleID", @"bundleId",
+                                     @"sceneIdentifier", @"containerIdentifier"]) {
+                NSString *val = nil;
+                @try { val = [obj valueForKey:key]; } @catch (NSException *ignored) { }
+                if ([val isKindOfClass:[NSString class]] && val.length > 0) return val;
+            }
+        }
+        id mgr = nil;
+        @try { mgr = [view valueForKey:@"delegate"]; } @catch (NSException *ignored) { }
+        if (mgr != nil) {
+            NSDictionary *byBundle = nil;
+            @try { byBundle = [mgr valueForKey:@"sessionsByBundleID"]; } @catch (NSException *ignored) { }
+            if ([byBundle isKindOfClass:[NSDictionary class]]) {
+                for (NSString *bid in byBundle) {
+                    id sess = byBundle[bid];
+                    if (sess == nil) continue;
+                    id cv = nil;
+                    @try { cv = [sess valueForKey:@"containerView"]; } @catch (NSException *ignored) { }
+                    if (cv == view) return bid;
+                    id rec = nil;
+                    @try { rec = [sess valueForKey:@"record"]; } @catch (NSException *ignored) { }
+                    id rcv = nil;
+                    @try { rcv = [rec valueForKey:@"containerView"]; } @catch (NSException *ignored) { }
+                    if (rcv == view) return bid;
+                }
+            }
+        }
+    } @catch (NSException *ignored) { }
+    CGRect f = view.frame;
+    return [NSString stringWithFormat:@"geom-%.0fx%.0f", f.size.width, f.size.height];
+}
+
 static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img) {
-    if (owner == nil || img == nil || img.CGImage == NULL) return;
-    if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return;
-    objc_setAssociatedObject(owner, &axs_open_cachedSnapshotKey, img,
-                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    @try {
+        if (owner == nil || img == nil || img.CGImage == NULL) return;
+        if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return;
+        NSString *key = axs_open_windowKeyForView(owner);
+        if (key == nil) return;
+        if (axs_open_snapshotCache == nil) axs_open_snapshotCache = [NSMutableDictionary new];
+        axs_open_snapshotCache[key] = img;
+        axs_dm_log(@"OPEN snapshot cached key=%@ %zux%zu", key,
+                   (size_t)CGImageGetWidth(img.CGImage),
+                   (size_t)CGImageGetHeight(img.CGImage));
+    } @catch (NSException *ignored) { }
 }
 
 static UIImage *axs_open_cachedCardSnapshotForView(UIView *owner) {
-    if (owner == nil) return nil;
-    return objc_getAssociatedObject(owner, &axs_open_cachedSnapshotKey);
+    @try {
+        if (owner == nil) return nil;
+        NSString *key = axs_open_windowKeyForView(owner);
+        if (key == nil || axs_open_snapshotCache == nil) return nil;
+        UIImage *img = axs_open_snapshotCache[key];
+        if (img == nil || img.CGImage == NULL) return nil;
+        if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return nil;
+        return img;
+    } @catch (NSException *ignored) {
+        return nil;
+    }
 }
 
 static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
