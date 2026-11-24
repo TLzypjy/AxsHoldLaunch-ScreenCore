@@ -298,6 +298,19 @@ static UIImage *axs_dm_snapshot(UIView *view) {
 // sceneIdentifier / containerIdentifier; geometry is the last resort.
 static NSMutableDictionary *axs_open_snapshotCache = nil;
 
+static NSString *axs_open_cacheDir(void) {
+    static NSString *dir = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dir = @"/var/mobile/Documents/sc-open-cache";
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir
+                                  withIntermediateDirectories:YES
+                                                   attributes:nil
+                                                        error:NULL];
+    });
+    return dir;
+}
+
 static NSString *axs_open_windowKeyForView(UIView *view) {
     @try {
         if (view == nil) return nil;
@@ -350,6 +363,19 @@ static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img) {
         axs_dm_log(@"OPEN snapshot cached key=%@ %zux%zu", key,
                    (size_t)CGImageGetWidth(img.CGImage),
                    (size_t)CGImageGetHeight(img.CGImage));
+        // .168: persist per window so even the first open after a respring
+        // has the last-known content (the accept-time capture usually comes
+        // back blank because the remote content is not attached yet).
+        NSString *pngPath = [[axs_open_cacheDir()
+                              stringByAppendingPathComponent:key]
+                             stringByAppendingPathExtension:@"png"];
+        UIImage *pngImg = img;
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            @try {
+                NSData *png = UIImagePNGRepresentation(pngImg);
+                if (png != nil) [png writeToFile:pngPath atomically:YES];
+            } @catch (NSException *ignored) { }
+        });
     } @catch (NSException *ignored) { }
 }
 
@@ -357,8 +383,21 @@ static UIImage *axs_open_cachedCardSnapshotForView(UIView *owner) {
     @try {
         if (owner == nil) return nil;
         NSString *key = axs_open_windowKeyForView(owner);
-        if (key == nil || axs_open_snapshotCache == nil) return nil;
+        if (key == nil) return nil;
         UIImage *img = axs_open_snapshotCache[key];
+        // .168: memory miss -> load the persisted snapshot from disk once.
+        if (img == nil) {
+            NSString *pngPath = [[axs_open_cacheDir()
+                                  stringByAppendingPathComponent:key]
+                                 stringByAppendingPathExtension:@"png"];
+            img = [UIImage imageWithContentsOfFile:pngPath];
+            if (img != nil) {
+                axs_open_snapshotCache[key] = img;
+                axs_dm_log(@"OPEN snapshot loaded from disk key=%@ %zux%zu", key,
+                           (size_t)CGImageGetWidth(img.CGImage),
+                           (size_t)CGImageGetHeight(img.CGImage));
+            }
+        }
         if (img == nil || img.CGImage == NULL) return nil;
         if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return nil;
         return img;
@@ -377,9 +416,12 @@ static UIImage *axs_open_captureVisibleCardCheap(UIView *card) {
     UIImage *shot = nil;
     @try {
         if (card == nil || card.hidden || card.window == nil) return nil;
+        // .168: device scale -- a 1x capture stretched across the 3x screen
+        // made the deposited corners soft, which read as a corner morph at
+        // the handoff. Card-size rasters are cheap (the dismiss capture does
+        // the same work on every close).
         UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
         fmt.opaque = NO;
-        fmt.scale = 1.0;
         UIGraphicsImageRenderer *r =
             [[UIGraphicsImageRenderer alloc] initWithBounds:card.bounds format:fmt];
         shot = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
@@ -398,18 +440,29 @@ static UIImage *axs_open_captureVisibleCardCheap(UIView *card) {
 // paint around the rounded card as a right-angle glow. Re-render the image
 // through a rounded-rect clip whose radius is read from the view's layer
 // tree (container layer first, then the largest subview radius).
+static void axs_dm_scanLayers(CALayer *layer, int depth, CGFloat *best, CGFloat *bgRadius) {
+    if (layer == nil || depth > 4) return;
+    @try {
+        CGFloat r = layer.cornerRadius;
+        if (r >= 1.0) {
+            if (r > *best) *best = r;
+            // the layer that actually paints the rounded card background is
+            // the one whose radius matches what the user sees on screen
+            if (layer.backgroundColor != NULL && *bgRadius < 1.0) *bgRadius = r;
+        }
+        for (CALayer *sub in layer.sublayers) {
+            axs_dm_scanLayers(sub, depth + 1, best, bgRadius);
+        }
+    } @catch (NSException *ignored) { }
+}
+
 static CGFloat axs_dm_cornerRadiusForView(UIView *view) {
     @try {
         if (view == nil) return 0.0;
-        CGFloat r = view.layer.cornerRadius;
-        if (r >= 1.0) return r;
-        for (UIView *sv in view.subviews) {
-            if (sv.layer.cornerRadius > r) r = sv.layer.cornerRadius;
-            for (UIView *ssv in sv.subviews) {
-                if (ssv.layer.cornerRadius > r) r = ssv.layer.cornerRadius;
-            }
-        }
-        return r;
+        CGFloat best = 0.0;
+        CGFloat bgRadius = 0.0;
+        axs_dm_scanLayers(view.layer, 0, &best, &bgRadius);
+        return (bgRadius >= 1.0) ? bgRadius : best;
     } @catch (NSException *ignored) {
         return 0.0;
     }
@@ -480,7 +533,13 @@ static BOOL axs_dm_cornersAreOpaque(UIImage *img) {
 // opaque despite the background clearing.
 static UIImage *axs_dm_fixSnapshotCorners(UIImage *img, UIView *refView) {
     if (img == nil || img.CGImage == NULL) return img;
-    if (!axs_dm_cornersAreOpaque(img)) return img;
+    BOOL opaque = axs_dm_cornersAreOpaque(img);
+    CGFloat radius = axs_dm_cornerRadiusForView(refView);
+    axs_dm_log(@"snapshot corners opaque=%d radius=%.1f %zux%zu",
+               opaque, radius,
+               (size_t)CGImageGetWidth(img.CGImage),
+               (size_t)CGImageGetHeight(img.CGImage));
+    if (!opaque) return img;
     return axs_dm_roundSnapshot(img, refView);
 }
 
