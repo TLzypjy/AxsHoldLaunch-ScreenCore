@@ -279,10 +279,6 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], texture2d<float> imag
         return float4(grain,1.0)*(roundDust*in.fade);\n\
     }\n\
     float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
-        float shape=mix(roundDust,1.0,in.dock);\n\
-        return col*(in.fade*shape);\n\
-    }\n\
-    float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
     float shape=mix(1.0,roundDust,in.breakage);\n\
     return texel*(in.fade*shape);\n\
 }\n";
