@@ -386,7 +386,54 @@ static UIImage *axs_open_captureVisibleCardCheap(UIView *card) {
         return nil;
     }
     if (shot != nil && axs_dm_imageIsBlank(shot)) return nil;
-    return shot;
+    return axs_dm_roundSnapshot(shot, card);
+}
+
+// .166: the floating container's own layer is square; the rounded corner
+// radius lives on an inner content layer. A raw snapshot therefore carries
+// square dark corners, which the GPU deposit tiles and the dissolve overlay
+// paint around the rounded card as a right-angle glow. Re-render the image
+// through a rounded-rect clip whose radius is read from the view's layer
+// tree (container layer first, then the largest subview radius).
+static CGFloat axs_dm_cornerRadiusForView(UIView *view) {
+    @try {
+        if (view == nil) return 0.0;
+        CGFloat r = view.layer.cornerRadius;
+        if (r >= 1.0) return r;
+        for (UIView *sv in view.subviews) {
+            if (sv.layer.cornerRadius > r) r = sv.layer.cornerRadius;
+            for (UIView *ssv in sv.subviews) {
+                if (ssv.layer.cornerRadius > r) r = ssv.layer.cornerRadius;
+            }
+        }
+        return r;
+    } @catch (NSException *ignored) {
+        return 0.0;
+    }
+}
+
+static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView) {
+    @try {
+        if (img == nil || img.CGImage == NULL) return img;
+        CGFloat radius = axs_dm_cornerRadiusForView(refView);
+        if (radius < 1.0) return img;
+        CGSize sz = img.size;
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        fmt.scale = img.scale;
+        UIGraphicsImageRenderer *r =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, sz.width, sz.height) format:fmt];
+        UIImage *out = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            UIBezierPath *clip =
+                [UIBezierPath bezierPathWithRoundedRect:CGRectMake(0, 0, sz.width, sz.height)
+                                           cornerRadius:radius];
+            [clip addClip];
+            [img drawInRect:CGRectMake(0, 0, sz.width, sz.height)];
+        }];
+        return out;
+    } @catch (NSException *ignored) {
+        return img;
+    }
 }
 
 // --- dissolve effect (GPU) --------------------------------------------------
@@ -400,7 +447,7 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         NSInteger style = axs_dm_style();
         CGFloat speedScale = axs_dm_speedScale();
         CGFloat density = axs_dm_densityScale();
-        UIImage *shot = axs_dm_snapshot(sourceView);
+        UIImage *shot = axs_dm_roundSnapshot(axs_dm_snapshot(sourceView), sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: snapshot failed");
             return NO;
@@ -724,7 +771,7 @@ static UIImage *axs_open_captureCardCheap(UIView *card) {
         shot = nil;
     }
     if (shot != nil && axs_dm_imageIsBlank(shot)) return nil;
-    return shot;
+    return axs_dm_roundSnapshot(shot, card);
 }
 
 // Retry on a low cadence: the hidden card's remote content can take a few
