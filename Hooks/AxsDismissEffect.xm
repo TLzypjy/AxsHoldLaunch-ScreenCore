@@ -386,7 +386,17 @@ static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img) {
         UIImage *pngImg = img;
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
             @try {
-                NSData *png = UIImagePNGRepresentation(pngImg);
+                // .170: encode at 2x -- a full 3x PNG encode competed with
+                // the dissolve animation and read as seconds of lag.
+                UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+                fmt.opaque = NO;
+                fmt.scale = 2.0;
+                UIGraphicsImageRenderer *r =
+                    [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, pngImg.size.width, pngImg.size.height) format:fmt];
+                UIImage *small = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx2) {
+                    [pngImg drawInRect:CGRectMake(0, 0, pngImg.size.width, pngImg.size.height)];
+                }];
+                NSData *png = UIImagePNGRepresentation(small);
                 if (png != nil) [png writeToFile:pngPath atomically:YES];
             } @catch (NSException *ignored) { }
         });
@@ -515,28 +525,45 @@ static void axs_dm_restoreViewBackgrounds(UIView *view, NSMutableArray *saved) {
 }
 
 // true-corner probe: are the four corners of the image opaque?
+// .170: sample four tiny corner TILES via CGImageCreateWithImageInRect --
+// the previous version re-rasterized the whole 1.4MP image just to read four
+// pixels, up to 3 captures per close cycle, which read as seconds of lag.
 static BOOL axs_dm_cornersAreOpaque(UIImage *img) {
     @try {
         if (img == nil || img.CGImage == NULL) return NO;
         CGImageRef cg = img.CGImage;
         size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
         if (w == 0 || h == 0) return NO;
+        size_t ts = 8;
+        if (ts > w) ts = w;
+        if (ts > h) ts = h;
+        CGRect rects[4] = {
+            CGRectMake(0, 0, (CGFloat)ts, (CGFloat)ts),
+            CGRectMake((CGFloat)(w - ts), 0, (CGFloat)ts, (CGFloat)ts),
+            CGRectMake(0, (CGFloat)(h - ts), (CGFloat)ts, (CGFloat)ts),
+            CGRectMake((CGFloat)(w - ts), (CGFloat)(h - ts), (CGFloat)ts, (CGFloat)ts),
+        };
         CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-        size_t bpr = w * 4;
-        NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
-        CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
-                                                 kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
-        if (ctx == NULL) { CGColorSpaceRelease(cs); return NO; }
-        CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
-        CGContextRelease(ctx);
-        CGColorSpaceRelease(cs);
-        const uint8_t *px = (const uint8_t *)[data bytes];
-        size_t pts[4][2] = {{2,2},{w-3,2},{2,h-3},{w-3,h-3}};
-        for (int i = 0; i < 4; i++) {
-            size_t x = pts[i][0], y = pts[i][1];
-            if (px[(y * w + x) * 4 + 3] > 8) return YES;
+        if (cs == NULL) return NO;
+        uint8_t tiles[4][64 * 4];
+        BOOL opaque = NO;
+        for (int i = 0; i < 4 && !opaque; i++) {
+            CGImageRef tile = CGImageCreateWithImageInRect(cg, rects[i]);
+            if (tile == NULL) { opaque = YES; break; }
+            CGContextRef ctx = CGBitmapContextCreate(tiles[i], ts, ts, 8, ts * 4, cs,
+                                                     kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+            if (ctx != NULL) {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)ts, (CGFloat)ts), tile);
+                CGContextRelease(ctx);
+                size_t c = ts / 2;
+                if (tiles[i][(c * ts + c) * 4 + 3] > 8) opaque = YES;
+            } else {
+                opaque = YES;
+            }
+            CGImageRelease(tile);
         }
-        return NO;
+        CGColorSpaceRelease(cs);
+        return opaque;
     } @catch (NSException *ignored) {
         return NO;
     }
@@ -969,28 +996,28 @@ static void axs_open_endWipeReveal(UIView *card) {
 }
 
 
-// blank probe: samples the alpha channel on a sparse grid
+// blank probe: samples the alpha channel on a sparse grid.
+// .170: draw into a tiny 64x64 buffer instead of re-rasterizing the whole
+// 1.4MP image (up to 3 captures per close cycle read as seconds of lag).
 static BOOL axs_dm_imageIsBlank(UIImage *img) {
     if (img == nil || img.CGImage == NULL) return YES;
     CGImageRef cg = img.CGImage;
     size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
     if (w == 0 || h == 0) return YES;
+    const size_t S = 64;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    size_t bpr = w * 4;
-    NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
-    CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
+    if (cs == NULL) return YES;
+    uint8_t px[S * S * 4];
+    CGContextRef ctx = CGBitmapContextCreate(px, S, S, 8, S * 4, cs,
                                              kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
     if (ctx == NULL) { CGColorSpaceRelease(cs); return YES; }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+    CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)S, (CGFloat)S), cg);
     CGContextRelease(ctx);
     CGColorSpaceRelease(cs);
-    const uint8_t *px = (const uint8_t *)[data bytes];
-    size_t step = ((w * h) / 256) + 1;
-    BOOL anyOpaque = NO;
-    for (size_t i = 0; i < w * h; i += step) {
-        if (px[i * 4 + 3] > 8) { anyOpaque = YES; break; }
+    for (size_t i = 0; i < S * S; i++) {
+        if (px[i * 4 + 3] > 8) return NO;
     }
-    return !anyOpaque;
+    return YES;
 }
 
 // .138: THE fix the reference tweak uses -- the floating window content is

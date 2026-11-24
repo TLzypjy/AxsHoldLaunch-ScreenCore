@@ -1,3 +1,13 @@
+beautify.170 变更（修复关闭后 2-3 秒卡顿）：
+- .167/.168 引入的三处截图每处都整图栅格化：cornersAreOpaque
+  为了读 4 个角像素重画 1.4MP 全图（每周期最多 3 次）、
+  imageIsBlank 同样全图重画；再加每周期 2-3 次 3x PNG 编码，
+  CPU 开销叠加在消散动画期间 = 关闭后两三秒卡顿。
+- cornersAreOpaque 改为 CGImageCreateWithImageInRect 裁 4 个
+  8x8 角块采样（近零开销）；imageIsBlank 改为 64x64 缩略缓冲；
+  磁盘 PNG 降为 2x 编码（后台队列）。
+- 版本升至 2.0.5+beautify.170，CI 断言同步。
+
 beautify.169 变更（缓存目录迁移）：
 - 快照缓存目录从 /var/mobile/Documents/sc-open-cache 迁移到
   /var/mobile/Library/Caches/sc-open-cache（标准缓存位置，不再
@@ -156,7 +166,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.169
+版本：2.0.5+beautify.170
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，
