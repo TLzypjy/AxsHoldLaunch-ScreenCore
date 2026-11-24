@@ -55,17 +55,16 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.156): REFERENCE-STYLE FINE DUST + CPU REVEAL.
-// The reference plugin does NOT turn particles into the window. It keeps every
-// grain as a 1.15-2.4px round colored sand dot, releases it from the lift point
-// on a per-cell clock, flies it down and back up into its OWN destination cell,
-// and DELETES the grain exactly when a CPU mask reveals that same cell of the
-// real card. .154 tried to make particles BE the window; because the hidden
-// card snapshot often failed, the fallback 128x128 gradient got docked as a
-// large rainbow board and then flashed into the real card. This version copies
-// the reference ALGORITHM (not its code): dust stays dust, card stays card,
-// both share one normalized clock and one integer-hash stagger, so there is
-// neither a white gap nor a gradient board. No screenshot is needed at all.
+// OPEN MODE (openMode=1, beautify.157): ALL-GPU REFERENCE REVEAL.\n\
+// Copied from the reference plugin's ALGORITHM (its own code stays its own):\n\
+// every grain rises out of a thin band along the BOTTOM edge of the screen,\n\
+// flies on a gentle S-curve into its own jittered cell and DIES at arrival;\n\
+// a second draw pass (openMode=2) deposits the REAL card texel for each cell\n\
+// gated by the SAME per-cell hash arrival clock, so the rising card edge and\n\
+// the dust front are literally the same front -- no gap, no CPU mask, no\n\
+// per-frame CAShapeLayer rebuild. The card snapshot is captured ASYNC and\n\
+// swapped in mid-flight (cardReady); the card view itself stays hidden until\n\
+// endWipeReveal hands over from the identical deposited image.\n\
 // NOTE: no // comments
 // are allowed INSIDE the string below -- the Logos preprocessor strips // to
 // EOL (including the trailing line-continuation backslash) and would break
@@ -131,17 +130,20 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
+        float2 hnoise = float2(float(h & 65535u)/65535.0,\n\
+                               float((h >> 16u) & 65535u)/65535.0);\n\
         float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
         float2 landing = (cell + 0.5 + jitter)/grid;\n\
-        float2 finger = float2(u.sourceX, u.sourceY);\n\
-        float ang = r*6.2831853;\n\
-        float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
+        // reference shader3: source is the viewport bottom band, never the finger.\n\
+        float2 src = float2(2.0 + hnoise.x*max(1.0, u.viewport.x - 4.0),\n\
+                            u.viewport.y - 2.0 - hnoise.y*min(16.0, u.viewport.y*0.025));\n\
         float2 dest = u.origin + landing*u.cardSize;\n\
         float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
-        float2 c1 = float2(mix(start.x, dest.x, 0.35), max(start.y, dest.y) + approach*1.5);\n\
+        float spread = (hnoise.x - 0.5)*min(u.viewport.x*0.32, 130.0);\n\
+        float2 c1 = src + float2(spread, -approach);\n\
         float2 c2 = dest + float2(0.0, approach);\n\
         float b = 1.0 - t;\n\
-        float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
+        float2 pos = b*b*b*src + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
         pos += (corner-0.5)*dustSize;\n\
         float born = step(departure, u.time);\n\
@@ -150,7 +152,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
         outO.uv=unit;\n\
         outO.local=corner;\n\
-        outO.fade=born*gone*(1.0-smoothstep(0.94,1.0,t));\n\
+        outO.fade=born*gone;\n\
         outO.breakage=0.0;\n\
         outO.dock=t;\n\
         outO.tint=axsPalette(r + hf*0.15);\n\
@@ -158,6 +160,31 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.noiseX=r;\n\
         outO.noiseY=r3;\n\
         return outO;\n\
+    }\n\
+    if (u.openMode == 2u) {\n\
+        // .157 deposited-card tile pass: same hash, same arrival clock as the\n\
+        // dust, so a cell opens exactly when its grain dies. Samples the real\n\
+        // card texture (swapped in by the async capture retry via cardReady).\n\
+        uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+        h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
+        float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
+        float order2 = 0.96*(1.0-unit.y) + 0.04*hf2;\n\
+        float arrival2 = 0.35 + 0.65*order2;\n\
+        float open = step(arrival2 - 0.006, u.time);\n\
+        float2 tile = u.cardSize/grid;\n\
+        float2 pos = u.origin + (cell + corner)*tile;\n\
+        DustVertex outT;\n\
+        outT.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
+        outT.uv=(cell+corner)/grid;\n\
+        outT.local=corner;\n\
+        outT.fade=open;\n\
+        outT.breakage=0.0;\n\
+        outT.dock=0.0;\n\
+        outT.tint=float3(0.0);\n\
+        outT.isOpen=2.0;\n\
+        outT.noiseX=hf2;\n\
+        outT.noiseY=hf2;\n\
+        return outT;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
     float len = length(rel); if (len < 1.0) len = 1.0;\n\
@@ -266,11 +293,16 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
 fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]]) {\n\
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
     float4 texel=image.sample(sampleImage,in.uv);\n\
+    if (in.isOpen > 1.5) {\n\
+        // .157 deposited tile: the real card texel for this exact cell.\n\
+        return texel*in.fade;\n\
+    }\n\
     if (in.isOpen > 0.5) {\n\
         float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));\n\
         float core=1.0-smoothstep(0.0,0.40,length(in.local-0.5));\n\
         float phase=u.seed + u.time*2.1;\n\
-        float3 grain=axsPalette(in.noiseX + phase*0.025);\n\
+        float3 texelC=texel.rgb/max(texel.a,0.001);\n\
+        float3 grain=mix(axsPalette(in.noiseX + phase*0.025), texelC, 0.35);\n\
         float sparkle=0.5+0.5*sin(phase*2.1+in.noiseY*6.2831853);\n\
         float glint=smoothstep(0.60,0.87,in.noiseY)*core*(0.15+0.30*sparkle);\n\
         grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
@@ -397,6 +429,9 @@ static NSMutableArray *sMsdActiveRenderers = nil;
 @property (nonatomic, assign) AXSMetalDustUniforms u;
 @property (nonatomic, assign) int grainCount;
 @property (nonatomic, assign) BOOL fadingOut;
+// .157: YES once the real card snapshot has been swapped in mid-flight;
+// gates the openMode=2 deposited-tile draw pass.
+@property (nonatomic, assign) BOOL cardReady;
 - (BOOL)startWithTexture:(id<MTLTexture>)tex
                   frame:(CGRect)frame
                viewport:(CGSize)viewport
@@ -481,6 +516,7 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     u.columns = cols;
     u.rows = rows;
     self.grainCount = (int)(cols * rows);
+    self.cardReady = NO;
     self.u = u;
 
     // .105: explicitly set the drawable pixel size. Without this the freshly
@@ -563,6 +599,19 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     [enc drawPrimitives:MTLPrimitiveTypeTriangle
             vertexStart:0 vertexCount:6
           instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+    // .157: deposited-card tile pass (open only, once the real texture has
+    // been swapped in). Same clock, same hash, same grid -- the card is
+    // painted on the GPU cell by cell, exactly where the dust dies.
+    if (_u.openMode == 1u && _cardReady) {
+        uint32_t savedOpen = _u.openMode;
+        _u.openMode = 2u;
+        [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle
+                vertexStart:0 vertexCount:6
+              instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+        _u.openMode = savedOpen;
+    }
     [enc endEncoding];
     [cb presentDrawable:drawable];
     [cb commit];
@@ -609,6 +658,13 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
         id<MTLTexture> newTex = axs_msd_makeTexture(img.CGImage, sMsdDevice);
         if (newTex == nil) return NO;
         self.texture = newTex;
+        // .157: only a REAL card capture (>=256px) enables the deposited-tile
+        // pass; the 128x128 sand placeholder never may.
+        if (self.u.openMode == 1u
+            && CGImageGetWidth(img.CGImage) >= 256
+            && CGImageGetHeight(img.CGImage) >= 256) {
+            self.cardReady = YES;
+        }
         return YES;
     } @catch (NSException *ignored) {
         return NO;
@@ -781,6 +837,11 @@ void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat dura
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
     if (renderer == NULL || img == nil) return NO;
     AXSMetalSandRenderer *r = (__bridge AXSMetalSandRenderer *)renderer;
+    // .157: the async capture retry may fire after cleanup released the
+    // renderer; pointer comparison only, no deref of a dead object.
+    if (sMsdActiveRenderers == nil || ![sMsdActiveRenderers containsObject:r]) {
+        return NO;
+    }
     return [r replaceTextureWithImage:img];
 }
 

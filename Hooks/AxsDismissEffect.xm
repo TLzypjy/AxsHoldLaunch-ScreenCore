@@ -574,151 +574,85 @@ static UIImage * __attribute__((unused)) axs_open_captureCardForAssembly(UIView 
     return nil;
 }
 
-// .155: the reference plugin's architecture -- the card is revealed by a
-// CPU mask whose per-cell gate is the SAME integer-hash order used by the
-// Metal dust shader. The shader deletes a grain the instant its cell opens,
-// so the visible card and the arriving dust share one edge with no gap.
-// The boundary is a per-column ragged line (bottom-up), not a flat rect.
+// .157: ALL-GPU open reveal (reference architecture). The CPU mask driver is
+// GONE: no CAShapeLayer, no CADisplayLink, no per-frame CGPath rebuild. The
+// card stays hidden for the whole animation while the Metal overlay paints
+// (a) fine dust rising from the screen-bottom band into each cell and (b)
+// deposited REAL card texels gated by the SAME per-cell hash arrival clock --
+// both in one Metal encoder, zero CPU work per frame. Only the card snapshot
+// is fetched asynchronously below and swapped into the renderer mid-flight.
 
-static uint32_t axs_open_cellHash(uint32_t x, uint32_t y) {
-    uint32_t h = x*73856093u ^ y*19349663u ^ 83492791u;
-    h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
-    return h;
+// Cheap 1x-scale capture of the card. The brief unhide + capture + re-hide
+// happens INSIDE one runloop turn through the ORIGINAL setHidden IMP, so no
+// CA commit can ever slip a native frame to the screen.
+static UIImage *axs_open_captureCardCheap(UIView *card) {
+    UIImage *shot = nil;
+    @try {
+        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
+            card.alpha = 1.0;
+            UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+            fmt.opaque = NO;
+            fmt.scale = 1.0;
+            UIGraphicsImageRenderer *r =
+                [[UIGraphicsImageRenderer alloc] initWithBounds:card.bounds format:fmt];
+            shot = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+                [card drawViewHierarchyInRect:card.bounds afterScreenUpdates:NO];
+            }];
+            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
+        }
+    } @catch (NSException *ignored) {
+        @try {
+            if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
+            }
+        } @catch (NSException *ignored2) { }
+        shot = nil;
+    }
+    if (shot != nil && axs_dm_imageIsBlank(shot)) return nil;
+    return shot;
 }
 
-@interface AXSOpenWipeDriver : NSObject
-@property (nonatomic, weak) UIView *card;
-@property (nonatomic, strong) CAShapeLayer *maskLayer;
-@property (nonatomic, strong) CADisplayLink *link;
-@property (nonatomic, assign) CFTimeInterval sharedStart;
-@property (nonatomic, assign) CGFloat duration;
-@property (nonatomic, assign) uint32_t columns;
-@property (nonatomic, assign) uint32_t rows;
-- (void)startWithCard:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0
-              columns:(uint32_t)cols rows:(uint32_t)rows;
-@end
-
-@implementation AXSOpenWipeDriver
-
-- (void)startWithCard:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0
-              columns:(uint32_t)cols rows:(uint32_t)rows {
+// Retry on a low cadence: the hidden card's remote content can take a few
+// frames to commit after the present starts. As soon as the capture is
+// non-blank it is swapped into the live renderer, which arms the GPU deposit
+// pass (cardReady). The renderer-pointer guard inside axs_metalReplaceTexture
+// makes late retries after cleanup harmless.
+static void axs_open_gpuTextureRetry(UIView *card, void *renderer, NSInteger triesLeft) {
     @try {
-        self.card = card;
-        self.duration = dur;
-        self.sharedStart = t0;
-        self.columns = cols;
-        self.rows = rows;
-        CGSize sz = card.bounds.size;
-        CAShapeLayer *ml = [CAShapeLayer layer];
-        ml.frame = CGRectMake(0, 0, sz.width, sz.height);
-        ml.fillColor = [UIColor whiteColor].CGColor;
-        // Zero-area path: the card is invisible on the first frame even though
-        // it is no longer hidden, so no native frame can ever flash through.
-        CGMutablePathRef p = CGPathCreateMutable();
-        CGPathMoveToPoint(p, NULL, 0, sz.height);
-        CGPathAddLineToPoint(p, NULL, sz.width, sz.height);
-        CGPathCloseSubpath(p);
-        ml.path = p;
-        CGPathRelease(p);
-        self.maskLayer = ml;
-        card.layer.mask = ml;
-        self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
-        [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+        if (renderer == NULL || card == nil || card.window == nil) return;
+        UIImage *shot = axs_open_captureCardCheap(card);
+        if (shot != nil) {
+            if (axs_metalReplaceTexture(renderer, shot)) {
+                axs_dm_log(@"OPEN gpu texture ready %zux%zu triesLeft=%ld",
+                           (size_t)CGImageGetWidth(shot.CGImage),
+                           (size_t)CGImageGetHeight(shot.CGImage), (long)triesLeft);
+            }
+            return;
+        }
+        if (triesLeft <= 1) {
+            axs_dm_log(@"OPEN gpu texture never captured, deposit stays off");
+            return;
+        }
+        __weak UIView *weakCard = card;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.033 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *c = weakCard;
+            if (c != nil) axs_open_gpuTextureRetry(c, renderer, triesLeft - 1);
+        });
     } @catch (NSException *ignored) { }
 }
 
-- (void)tick:(CADisplayLink *)link {
+// .157: final handoff -- the overlay has been showing the deposited real-card
+// image; unhiding the real card swaps identical pixels, then the overlay
+// fades out on its own. Idempotent and mask-free.
+static void axs_open_endWipeReveal(UIView *card) {
     @try {
-        UIView *card = self.card;
-        if (card == nil || card.window == nil || self.maskLayer == nil) { [self stop]; return; }
-        CFTimeInterval elapsed = CACurrentMediaTime() - self.sharedStart;
-        CGFloat raw = self.duration > 0 ? elapsed/self.duration : 1.0;
-        if (raw >= 1.0) {
-            card.layer.mask = nil;
-            self.maskLayer.path = nil;
-            [self stop];
-            return;
-        }
-        CGSize sz = card.bounds.size;
-        if (sz.width < 1 || sz.height < 1) { [self stop]; return; }
-        uint32_t cols = self.columns > 1 ? self.columns : 2;
-        uint32_t rows = self.rows > 1 ? self.rows : 2;
-        // Shader: order = .96*(1-unit.y) + .04*hash, arrival = .35 + .65*order.
-        // A cell is open when order <= (raw-.35)/.65. +.012 overlaps the mask
-        // one frame ahead of the grain fade, so no white seam can appear.
-        CGFloat progress = (raw - 0.35)/0.65 + 0.012;
-        if (progress < 0) progress = 0;
-        if (progress > 1) progress = 1;
-        float baseUnit = 1.0f - (float)progress;
-        uint32_t baseRow = (uint32_t)fmaxf(0.0f, floorf(baseUnit*(float)rows));
-        CGMutablePathRef path = CGPathCreateMutable();
-        CGPathMoveToPoint(path, NULL, 0, sz.height);
-        for (uint32_t i = 0; i < cols; i++) {
-            CGFloat x = cols > 1 ? (CGFloat)i/(CGFloat)(cols-1)*sz.width : 0;
-            uint32_t h = axs_open_cellHash(i, baseRow);
-            float hf = (float)(h & 0xffffu)/65535.0f;
-            float boundary = 1.0f - ((float)progress - 0.04f*hf)/0.96f;
-            if (boundary < 0.0f) boundary = 0.0f;
-            if (boundary > 1.0f) boundary = 1.0f;
-            CGPathAddLineToPoint(path, NULL, x, boundary*sz.height);
-        }
-        CGPathAddLineToPoint(path, NULL, sz.width, sz.height);
-        CGPathCloseSubpath(path);
-        self.maskLayer.path = path;
-        CGPathRelease(path);
-    } @catch (NSException *ignored) {
-        [self stop];
-    }
-}
-
-- (void)stop {
-    if (self.link != nil) {
-        [self.link invalidate];
-        self.link = nil;
-    }
-}
-
-- (void)dealloc {
-    [self stop];
-}
-@end
-
-static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePoint,
-                                     CFTimeInterval sharedStart,
-                                     uint32_t cols, uint32_t rows) {
-    @try {
-        (void)sourcePoint;
-        CGSize sz = card.bounds.size;
-        if (sz.width < 1 || sz.height < 1) return;
-        axs_open_interceptUntil = 0;
-        AXSOpenWipeDriver *driver = [AXSOpenWipeDriver new];
-        objc_setAssociatedObject(card, &axs_open_wipeDriverKey, driver,
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        // Install the empty mask BEFORE unhiding through the original IMP.
-        [driver startWithCard:card duration:dur sharedStart:sharedStart
-                      columns:cols rows:rows];
         card.alpha = 1.0;
         if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
             ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
         } else {
             card.hidden = NO;
-        }
-        axs_dm_log(@"OPEN reveal started cols=%u rows=%u sharedStart=%.3f",
-                   (unsigned)cols, (unsigned)rows, sharedStart);
-    } @catch (NSException *ignored) { }
-}
-
-// .146: final sweep -- drop the mask and stop the driver so glow + gestures
-// are fully restored. Idempotent: tick already clears the mask on completion.
-static void axs_open_endWipeReveal(UIView *card) {
-    @try {
-        card.alpha = 1.0;
-        card.hidden = NO;
-        AXSOpenWipeDriver *driver = objc_getAssociatedObject(card, &axs_open_wipeDriverKey);
-        if (driver != nil) {
-            [driver stop];
-            objc_setAssociatedObject(card, &axs_open_wipeDriverKey, nil,
-                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
         if (card.layer.mask != nil) card.layer.mask = nil;
     } @catch (NSException *ignored) { }
@@ -828,21 +762,6 @@ static UIImage * __attribute__((unused)) axs_open_captureAppContent(void) {
     return nil;
 }
 
-// .155: must match AxsMetalSand.xm grid math byte-for-byte so the CPU mask
-// cells and the Metal grain cells are the same grid.
-static void axs_open_gridForDensity(CGFloat density, CGRect frame, uint32_t *cols, uint32_t *rows) {
-    int particles = (int)lround(22000.0 * density);
-    if (particles < 200) particles = 200;
-    if (particles > 48000) particles = 48000;
-    CGFloat aspect = frame.size.height > 0.5 ? frame.size.width/frame.size.height : 1.0;
-    int c = (int)lround(sqrtf((float)particles*(float)aspect));
-    int r = (int)((particles + c - 1)/c);
-    if (c < 2) c = 2; if (c > 320) c = 320;
-    if (r < 2) r = 2; if (r > 320) r = 320;
-    *cols = (uint32_t)c;
-    *rows = (uint32_t)r;
-}
-
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
     @try {
@@ -897,11 +816,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             return;
         }
         // all fallback paths above already returned, so the assemble WILL run.
-        // .146: the card stays hidden while grains fly finger -> their own
-        // cells; then a noise-jagged mask reveals the real card top->bottom
-        // while each grain dissolves as it settles. No alpha fade -- the user
-        // rejects the "whole card floats in" look; this is a grain-by-grain
-        // reveal with a ragged, non-rectangular boundary.
+        // .157: the card stays hidden the WHOLE time; the Metal overlay draws
+        // both the dust and the deposited real-card texels (all GPU).
         @try {
             if (card.layer.mask != nil) card.layer.mask = nil;
             card.alpha = 1.0;
@@ -909,21 +825,27 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
                    duration, density, (long)polls, texKind,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .153: the mask now shares the Metal renderer's EXACT start clock.
-        // .152 scheduled the mask via dispatch_after(0.37*dur) and re-based its
-        // own start, so its raw lagged the shader's u.time by ~0.22*dur -- the
-        // card revealed after the grain front had already moved down (the
-        // lingering gap + "card appears before grains arrive"). Now we install
-        // the mask immediately with sharedStart = the same instant the renderer
-        // uses, so raw == u.time and both fronts advance in lockstep. raw<0.34
-        // gives p=0 (mask covers everything) so the card stays hidden until the
-        // first grains arrive at 0.30 -- no re-base, no dispatch delay.
-        __weak UIView *weakCard2 = card;
-        uint32_t revealCols = 2, revealRows = 2;
-        axs_open_gridForDensity(density, frame, &revealCols, &revealRows);
-        CFTimeInterval assemblyStart = axs_metalAssembleStartTime(renderer);
-        axs_open_startWipeReveal(card, duration, sourcePoint, assemblyStart,
-                                 revealCols, revealRows);
+        // .157: ALL-GPU reveal. The card stays hidden for the whole animation;
+        // the Metal overlay deposits real-card texels per cell with the same
+        // hash clock as the dust (openMode=2 pass). No CAShapeLayer mask, no
+        // per-frame CPU path rebuild. Disarm the intercept window, make the
+        // hidden state explicit through the ORIGINAL IMP, then start the async
+        // capture retry so the deposit pass gets the real texture mid-flight.
+        axs_open_interceptUntil = 0;
+        @try {
+            card.alpha = 1.0;
+            if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
+            } else {
+                card.hidden = YES;
+            }
+        } @catch (NSException *ignored) { }
+        __weak UIView *weakCardTex = card;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.016 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *c = weakCardTex;
+            if (c != nil) axs_open_gpuTextureRetry(c, renderer, 30);
+        });
         // Release the in-flight guard partway through so a genuine re-open can
         // still self-heal, and do the final safety sweep at overlay dissolve.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * 0.55 * NSEC_PER_SEC)),

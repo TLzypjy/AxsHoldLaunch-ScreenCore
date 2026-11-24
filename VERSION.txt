@@ -1,3 +1,22 @@
+beautify.157 变更（呼出全 GPU 化 + 对齐参考插件算法）：
+- 用户反馈 .156 效果不对且「CPU 引擎很卡」：log(45) + 逐帧分析确认
+  CPU 遮罩驱动（CADisplayLink 每帧重建 149 段 CGPath 的 CAShapeLayer）
+  是卡顿源，且粒子消散后浮窗延迟出现（明显空档）。
+- 参考 shader3 算法重构，呼出动画 100% GPU：
+  - 粒子源改为屏幕底部细带（<=16px，全宽），不是手指点；
+  - 飞行改为温和 S 曲线（c1=src+(spread,-approach)，
+    c2=dest+(0,approach)），不再深.loop，散布大幅收敛；
+  - 新增 openMode=2 deposited-tile 绘制 pass：同一 hash/时钟逐格
+    在 GPU 上画出真卡纹素，格子打开的瞬间=粒子消失的瞬间，无缝；
+  - 删除 AXSOpenWipeDriver/CAShapeLayer/CADisplayLink 全部 CPU 遮罩；
+    浮窗全程隐藏，动画结束由 endWipeReveal 用原始 IMP 无缝接管；
+  - 卡片截图改为异步重试（1x 廉价捕获，同 runloop 瞬时显隐，
+    每 33ms 一次最多 30 次），拿到后 replaceTexture 换入真纹理
+    （cardReady 门控 tile pass），远端内容晚提交也能自愈；
+  - 粒子颜色混入 35% 真卡纹素（参考 particleStyle 的 grainColor）。
+- 消散动画、滑条、开关、防循环、状态自愈不变。CI 断言重写。
+- 版本号升至 2.0.5+beautify.157。
+
 beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 - log(44) 显示 .155 的 Metal shader 编译失败：片元函数里用了
   u.seed/u.time 做 sparkle 相位，但片元阶段没有绑定 uniform 缓冲，
@@ -9,7 +28,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.156
+版本：2.0.5+beautify.157
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，
