@@ -55,20 +55,22 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.148): organic splash, modeled on the
-// reference video (4ca82c1d). Grains burst from the finger point and splash
-// OUTWARD along curved paths to per-grain RANDOM scatter targets inside the
-// card (dustHash rx/ry -- NOT the unit grid: grid targets made .146/.147
-// grains align into rows and columns, reading as a rigid rectangle). Begin
-// and span are per-grain random too, so arrival order is shuffled and the
-// cloud never forms a front. A small continuous wobble keeps the cloud alive.
-// The REAL card is revealed top->bottom by the noise-jagged mask; grains
-// above the reveal front (already-revealed area) are clipped, and whatever
-// remains near the bottom dissolves as the reveal completes. The window
-// itself is always the real (correct, sharp) card -- never a mosaic of
-// screenshot tiles. The grain texture is a generated rainbow gradient:
-// NO full-screen capture, which in .144 cut the home-screen clock into the
-// particles. NOTE: no // comments
+// OPEN MODE (openMode=1, beautify.150): two-stage finger-origin splash.
+// .148 had the right organic scatter but grains flew from finger -> card in
+// one short hop (span 0.30-0.48, fade-in 0.08s), so by the time they were
+// visible they were already INSIDE the card and it read as "grains coming
+// out of the card bottom, not my finger". Now: STAGE 1 (t<0.24) grains burst
+// OUTWARD from the finger point into a visible puff (burstR 22..126) and
+// linger there; STAGE 2 (t>0.18, staggered) they fly along curved paths to
+// per-grain RANDOM scatter targets inside the card (dustHash rx/ry -- never
+// the unit grid, which made .146/.147 a rigid rectangle). The reveal-front
+// clip fades IN with flightE so it never eats grains while they are still at
+// the finger. The REAL card is revealed top->bottom by the noise-jagged
+// mask; grains in the already-revealed area are clipped and the remainder
+// dissolves as the reveal completes. The window is always the real (sharp)
+// card, never a mosaic. Grain texture is a generated rainbow gradient --
+// NO full-screen capture, which in .144 cut the clock into the particles.
+// NOTE: no // comments
 // are allowed INSIDE the string below -- the Logos preprocessor strips // to
 // EOL (including the trailing line-continuation backslash) and would break
 // the multiline literal.
@@ -114,34 +116,39 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
         float angS = r*6.2831853;\n\
-        float radS = 4.0 + 30.0*r4;\n\
-        float2 startP = float2(u.sourceX,u.sourceY) + float2(cos(angS),sin(angS))*radS;\n\
+        float2 finger = float2(u.sourceX,u.sourceY);\n\
+        float2 burstDir = float2(cos(angS), sin(angS));\n\
+        float burstR = 22.0 + 104.0*r4;\n\
+        float burstT = clamp(u.time/0.24, 0.0, 1.0);\n\
+        float burstE = 1.0-(1.0-burstT)*(1.0-burstT);\n\
+        float2 burstP = finger + burstDir*burstR*burstE;\n\
         float rx = dustHash(noiseCell + 5.1);\n\
         float ry = dustHash(noiseCell + 8.3);\n\
         float rz = dustHash(noiseCell + 11.7);\n\
         float2 scatter = u.origin + float2(rx, ry) * u.cardSize;\n\
         scatter += (float2(rz, r3) - 0.5) * u.cardSize * 0.10;\n\
-        float begin = r2*0.22;\n\
-        float span = 0.30 + rz*0.18;\n\
-        float progress = clamp((u.time - begin)/span, 0.0, 1.0);\n\
-        float motion = 1.0-(1.0-progress)*(1.0-progress);\n\
-        float2 seg = scatter - startP;\n\
+        float flightBegin = 0.18 + r2*0.10;\n\
+        float flightSpan = 0.32 + rz*0.12;\n\
+        float flight = clamp((u.time - flightBegin)/flightSpan, 0.0, 1.0);\n\
+        float flightE = flight*flight*(3.0-2.0*flight);\n\
+        float2 seg = scatter - burstP;\n\
         float2 perp = normalize(float2(-seg.y, seg.x) + float2(0.0001, 0.0));\n\
-        float bow = (r - 0.5) * (0.30 + 0.35*r4) * length(seg);\n\
-        float2 p = startP + seg*motion + perp*bow*sin(motion*3.1415926);\n\
-        p += float2(sin(u.time*7.0 + r*41.0), cos(u.time*6.3 + r2*43.0)) * 3.5;\n\
+        float bow = (r - 0.5) * (0.25 + 0.30*r4) * length(seg);\n\
+        float2 p = burstP + seg*flightE + perp*bow*sin(flightE*3.1415926);\n\
+        p += float2(sin(u.time*7.0 + r*41.0), cos(u.time*6.3 + r2*43.0)) * 3.0;\n\
         float2 tileSizeO = u.cardSize/grid;\n\
         p += (corner-0.5)*tileSizeO*0.80;\n\
         float wave = clamp((u.time - 0.37)/0.51, 0.0, 1.0);\n\
         float waveE = smoothstep(0.0,1.0,wave);\n\
         float frontY = u.origin.y + waveE*u.cardSize.y;\n\
-        float belowFront = smoothstep(frontY-8.0, frontY+6.0, p.y);\n\
+        float frontClip = smoothstep(frontY-8.0, frontY+6.0, p.y);\n\
+        float belowFront = mix(1.0, frontClip, flightE);\n\
         float endFade = 1.0 - smoothstep(0.82, 0.99, waveE);\n\
         DustVertex outO;\n\
         outO.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
         outO.uv=fract(float2(r4, r3) + unit*0.35);\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.08,u.time) * belowFront * endFade;\n\
+        outO.fade=smoothstep(0.0,0.05,u.time) * belowFront * endFade;\n\
         outO.breakage=1.0;\n\
         return outO;\n\
     }\n\
