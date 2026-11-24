@@ -130,6 +130,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
+        float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
         float2 landing = (cell + 0.5 + jitter)/grid;\n\
         float2 finger = float2(u.sourceX, u.sourceY);\n\
         float ang = r*6.2831853;\n\
