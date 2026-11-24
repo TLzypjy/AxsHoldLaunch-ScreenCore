@@ -387,7 +387,7 @@ static UIImage *axs_open_captureVisibleCardCheap(UIView *card) {
         return nil;
     }
     if (shot != nil && axs_dm_imageIsBlank(shot)) return nil;
-    return axs_dm_roundSnapshot(shot, card);
+    return axs_dm_fixSnapshotCorners(shot, card);
 }
 
 // .166: the floating container's own layer is square; the rounded corner
@@ -411,6 +411,75 @@ static CGFloat axs_dm_cornerRadiusForView(UIView *view) {
     } @catch (NSException *ignored) {
         return 0.0;
     }
+}
+
+// .167: save + clear the view's square backgrounds so the rounded content
+// shape rasterizes with TRUE alpha corners (exact radius, no morphing at the
+// handoffs). Only square layers (cornerRadius < 1) are cleared; the rounded
+// background layers are left alone. Restore with axs_dm_restoreViewBackgrounds.
+static void axs_dm_clearViewBackgrounds(UIView *view, NSMutableArray *saved) {
+    @try {
+        if (view.backgroundColor != nil) {
+            [saved addObject:view.backgroundColor];
+            view.backgroundColor = nil;
+        } else {
+            [saved addObject:[NSNull null]];
+        }
+        if (view.layer.cornerRadius < 1.0 && view.layer.backgroundColor != NULL) {
+            [saved addObject:(__bridge id)view.layer.backgroundColor];
+            view.layer.backgroundColor = NULL;
+        } else {
+            [saved addObject:[NSNull null]];
+        }
+    } @catch (NSException *ignored) { }
+}
+
+static void axs_dm_restoreViewBackgrounds(UIView *view, NSMutableArray *saved) {
+    @try {
+        if (saved.count < 2) return;
+        id vbg = saved[0];
+        view.backgroundColor = (vbg == [NSNull null]) ? nil : (UIColor *)vbg;
+        id lbg = saved[1];
+        view.layer.backgroundColor = (lbg == [NSNull null])
+            ? NULL : (__bridge CGColorRef)lbg;
+    } @catch (NSException *ignored) { }
+}
+
+// true-corner probe: are the four corners of the image opaque?
+static BOOL axs_dm_cornersAreOpaque(UIImage *img) {
+    @try {
+        if (img == nil || img.CGImage == NULL) return NO;
+        CGImageRef cg = img.CGImage;
+        size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+        if (w == 0 || h == 0) return NO;
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        size_t bpr = w * 4;
+        NSMutableData *data = [NSMutableData dataWithLength:bpr * h];
+        CGContextRef ctx = CGBitmapContextCreate([data mutableBytes], w, h, 8, bpr, cs,
+                                                 kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+        if (ctx == NULL) { CGColorSpaceRelease(cs); return NO; }
+        CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg);
+        CGContextRelease(ctx);
+        CGColorSpaceRelease(cs);
+        const uint8_t *px = (const uint8_t *)[data bytes];
+        size_t pts[4][2] = {{2,2},{w-3,2},{2,h-3},{w-3,h-3}};
+        for (int i = 0; i < 4; i++) {
+            size_t x = pts[i][0], y = pts[i][1];
+            if (px[(y * w + x) * 4 + 3] > 8) return YES;
+        }
+        return NO;
+    } @catch (NSException *ignored) {
+        return NO;
+    }
+}
+
+// .167 final corner handling: true alpha corners win (exact radius); the
+// .166 radius clip is only the fallback for snapshots whose corners stayed
+// opaque despite the background clearing.
+static UIImage *axs_dm_fixSnapshotCorners(UIImage *img, UIView *refView) {
+    if (img == nil || img.CGImage == NULL) return img;
+    if (!axs_dm_cornersAreOpaque(img)) return img;
+    return axs_dm_roundSnapshot(img, refView);
 }
 
 static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView) {
@@ -448,7 +517,11 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         NSInteger style = axs_dm_style();
         CGFloat speedScale = axs_dm_speedScale();
         CGFloat density = axs_dm_densityScale();
-        UIImage *shot = axs_dm_roundSnapshot(axs_dm_snapshot(sourceView), sourceView);
+        NSMutableArray *savedBg = [NSMutableArray array];
+        axs_dm_clearViewBackgrounds(sourceView, savedBg);
+        UIImage *shot = axs_dm_snapshot(sourceView);
+        axs_dm_restoreViewBackgrounds(sourceView, savedBg);
+        shot = axs_dm_fixSnapshotCorners(shot, sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: snapshot failed");
             return NO;
@@ -772,7 +845,7 @@ static UIImage *axs_open_captureCardCheap(UIView *card) {
         shot = nil;
     }
     if (shot != nil && axs_dm_imageIsBlank(shot)) return nil;
-    return axs_dm_roundSnapshot(shot, card);
+    return axs_dm_fixSnapshotCorners(shot, card);
 }
 
 // Retry on a low cadence: the hidden card's remote content can take a few
@@ -1141,6 +1214,13 @@ static void axs_open_becameVisible(UIView *v) {
             sourceKind = @"last-lift";
         }
         axs_dm_log(@"OPEN source point %@ (%@)", NSStringFromCGPoint(sourcePoint), sourceKind);
+        // .167: fill the per-window cache BEFORE hiding -- the first ever
+        // open of a window has no snapshot yet, so its deposit pass had
+        // nothing to paint and the card only popped in after the dust.
+        @try {
+            UIImage *preShot = axs_open_captureVisibleCardCheap(card);
+            if (preShot != nil) axs_open_cacheCardSnapshot(card, preShot);
+        } @catch (NSException *ignored) { }
         // .122: hide from frame 0 (invisible). The native present animation is
         // NOT intercepted -- it still runs and its completions still fire, but
         // the addAnimation hook clamps its duration to 0.01s so it finishes
