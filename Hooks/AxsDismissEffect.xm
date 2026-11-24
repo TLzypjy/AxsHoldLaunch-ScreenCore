@@ -280,6 +280,44 @@ static UIImage *axs_dm_snapshot(UIView *view) {
     return img;
 }
 
+// .158: the card's remote (cross-process) content cannot be rasterized while
+// the card is hidden -- the open-time capture retries all came back blank
+// (log(46): "gpu texture never captured, deposit stays off"), so the GPU
+// deposit pass never had real texels and the card popped in only after the
+// dust finished. The card IS fully capturable while visible (the dismiss
+// snapshot succeeds on every single close), so keep the latest visible-card
+// snapshot around and reuse it as the deposit texture at the next open.
+// Refresh points: every dismiss (texture creation) and 0.35s after every
+// open completes (the card is visible again by then).
+static UIImage *axs_open_cachedCardSnapshot = nil;
+static void axs_open_cacheCardSnapshot(UIImage *img) {
+    if (img == nil || img.CGImage == NULL) return;
+    if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return;
+    axs_open_cachedCardSnapshot = img;
+}
+
+static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
+
+// .158: cheap 1x-scale capture of a VISIBLE card (no unhide games needed).
+static UIImage *axs_open_captureVisibleCardCheap(UIView *card) {
+    UIImage *shot = nil;
+    @try {
+        if (card == nil || card.hidden || card.window == nil) return nil;
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        fmt.scale = 1.0;
+        UIGraphicsImageRenderer *r =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:card.bounds format:fmt];
+        shot = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [card drawViewHierarchyInRect:card.bounds afterScreenUpdates:NO];
+        }];
+    } @catch (NSException *ignored) {
+        return nil;
+    }
+    if (shot != nil && axs_dm_imageIsBlank(shot)) return nil;
+    return shot;
+}
+
 // --- dissolve effect (GPU) --------------------------------------------------
 // beautify.112: ONE GPU path for every style. Snapshot the card, hand it to
 // the unified Metal renderer (style + density select the motion model and the
@@ -296,6 +334,10 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
             axs_dm_log(@"emit: snapshot failed");
             return NO;
         }
+        // .158: the card is fully visible here -- cache the snapshot for the
+        // next open's GPU deposit texture (open-time capture of a hidden card
+        // is impossible with cross-process content).
+        axs_open_cacheCardSnapshot(shot);
         CGFloat duration = axs_dm_styleBaseDuration(style) * speedScale;
         BOOL played = axs_metalSandPlay(shot, sourceFrameInWindow, duration,
                                         (uint32_t)style, density);
@@ -792,13 +834,21 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .155: the open shader no longer samples a texture -- dust is drawn
-        // purely from axsPalette, and the real card is revealed by the CPU
-        // mask. A tiny sand texture only satisfies the shared pipeline's
-        // texture binding; no hidden-card snapshot (which kept failing) and
-        // no full-screen capture (which cut the clock into grains) is needed.
-        UIImage *tex = axs_open_sandTexture();
-        NSString *texKind = @"reference-dust";
+        // .157: the deposit pass needs the real card texels. .158: a hidden
+        // card cannot be rasterized (cross-process content), so seed the
+        // texture with the cached visible-card snapshot from the last
+        // dismiss/open; the async retry below still tries a fresh capture and
+        // swaps it in mid-flight when one ever succeeds. The sand texture is
+        // only the last-resort placeholder (dust color stays palette-driven).
+        UIImage *tex = nil;
+        NSString *texKind = nil;
+        UIImage *cachedCard = axs_open_cachedCardSnapshot;
+        if (cachedCard != nil && cachedCard.CGImage != NULL
+            && CGImageGetWidth(cachedCard.CGImage) >= 256) {
+            tex = cachedCard;
+            texKind = @"cached-card";
+        }
+        if (tex == nil) { tex = axs_open_sandTexture(); texKind = @"reference-dust"; }
         if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
         if (tex == nil) {
             axs_dm_log(@"OPEN texture unavailable, native card restored");
@@ -845,6 +895,23 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCardTex;
             if (c != nil) axs_open_gpuTextureRetry(c, renderer, 30);
+        });
+        // .158: 0.35s after the open finished the card is visible again --
+        // grab a fresh snapshot (cheap 1x) so the NEXT open deposits current
+        // content, not the stale cached one.
+        __weak UIView *weakCardCache = card;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     (int64_t)((duration + 0.35) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *c = weakCardCache;
+            if (c == nil) return;
+            UIImage *fresh = axs_open_captureVisibleCardCheap(c);
+            if (fresh != nil) {
+                axs_open_cacheCardSnapshot(fresh);
+                axs_dm_log(@"OPEN cached card snapshot refreshed %zux%zu",
+                           (size_t)CGImageGetWidth(fresh.CGImage),
+                           (size_t)CGImageGetHeight(fresh.CGImage));
+            }
         });
         // Release the in-flight guard partway through so a genuine re-open can
         // still self-heal, and do the final safety sweep at overlay dissolve.

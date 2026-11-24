@@ -1,3 +1,15 @@
+beautify.158 变更（修复呼出 deposit 无纹理→浮窗最后直接出现）：
+- log(46) 显示每次呼出都是 "OPEN gpu texture never captured, deposit
+  stays off"：浮窗隐藏时跨进程远端内容无法离屏栅格化，30 次异步
+  截图全部空白，GPU deposit 一直没有真纹素，粒子飞完浮窗直接出现。
+- 消散动画时浮窗可见、截图每次都成功——新增可见态快照缓存：
+  - 每次消散截图成功时缓存（axs_open_cacheCardSnapshot）；
+  - 每次呼出完成 0.35s 后（浮窗重新可见）再抓一次 1x 廉价快照刷新；
+  - 呼出启动时优先用缓存当 deposit 纹理（texKind=cached-card），
+    粒子飞行途中逐格显示的就是上次的内容；飞行中若新截图成功仍
+    会 replaceTexture 实时换入。
+- Metal 侧不变。CI 断言补缓存链路。版本升至 2.0.5+beautify.158。
+
 beautify.157 变更（呼出全 GPU 化 + 对齐参考插件算法）：
 - 用户反馈 .156 效果不对且「CPU 引擎很卡」：log(45) + 逐帧分析确认
   CPU 遮罩驱动（CADisplayLink 每帧重建 149 段 CGPath 的 CAShapeLayer）
@@ -28,7 +40,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.157
+版本：2.0.5+beautify.158
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，
