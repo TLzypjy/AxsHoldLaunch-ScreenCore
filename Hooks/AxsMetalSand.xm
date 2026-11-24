@@ -520,6 +520,11 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     if (openMode == 1u && tex.width >= 256 && tex.height >= 256) {
         self.cardReady = YES;
     }
+    if (openMode == 1u) {
+        axs_msd_log(@"OPEN start tex=%lux%lu cardReady=%d",
+                    (unsigned long)tex.width, (unsigned long)tex.height,
+                    self.cardReady ? 1 : 0);
+    }
     self.u = u;
 
     // .105: explicitly set the drawable pixel size. Without this the freshly
@@ -605,7 +610,22 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     // .157: deposited-card tile pass (open only, once the real texture has
     // been swapped in). Same clock, same hash, same grid -- the card is
     // painted on the GPU cell by cell, exactly where the dust dies.
-    if (_u.openMode == 1u && _cardReady) {
+    // .171: gate on the TEXTURE SIZE itself, not the cardReady flag -- the
+    // flag depends on arming order across startWithTexture/replaceTexture and
+    // one missed arming silently disabled the whole reveal (only dust). The
+    // sand placeholder is 128px, any real capture is >=256px.
+    BOOL tilesReady = (_u.openMode == 1u
+                       && self.texture != nil
+                       && self.texture.width >= 256
+                       && self.texture.height >= 256);
+    if (tilesReady) {
+        static BOOL loggedOnce = NO;
+        if (!loggedOnce) {
+            loggedOnce = YES;
+            axs_msd_log(@"OPEN deposit tiles drawing tex=%lux%lu cardReady=%d",
+                        (unsigned long)self.texture.width,
+                        (unsigned long)self.texture.height, _cardReady);
+        }
         uint32_t savedOpen = _u.openMode;
         _u.openMode = 2u;
         [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
