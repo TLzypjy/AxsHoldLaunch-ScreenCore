@@ -1,3 +1,14 @@
+beautify.172 变更（合并为单次 draw：粒子到位即原地成为真卡纹素）：
+- log58 诊断确认：第二次 draw（tile pass）在设备上执行但渲染不可见
+  （deposit tiles drawing 已打印、粒子正常），而粒子 draw 一直正常。
+- 按参考插件行为合并为单次 draw：粒子到达时原地从 1.15~2.4px 圆点
+  膨胀为整格并交叉渐变为真卡纹素（"each small grain becomes its
+  destination texels; native real icon is revealed only on cleanup"）。
+  粒子画出来 = 浮窗画出来，第二次 draw 及其失联模式不复存在。
+- 删除 openMode==2u 分支、片元 >1.5 分支与 renderOnce 第二次 draw；
+  cardReady 不再参与渲染门控（仅保留用于诊断）。
+- 版本升至 2.0.5+beautify.172，CI 断言同步。
+
 beautify.171 变更（deposit 门控改纹理尺寸 + 诊断日志）：
 - log57：texture=cached-card 全部正常但用户看不到浮窗显现。源码中
   cardReady 装配与 tile pass 均完好、shader 与 .168（正常）完全一致，
@@ -178,7 +189,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.171
+版本：2.0.5+beautify.172
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，

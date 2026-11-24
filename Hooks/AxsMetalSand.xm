@@ -145,43 +145,23 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)\n\
                  * u.cardSize.x*0.05*(1.0-t);\n\
         float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
-        pos += (corner-0.5)*dustSize;\n\
+        float2 tileSize = u.cardSize/grid;\n\
+        float dock = smoothstep(arrival - 0.03, arrival - 0.004, u.time);\n\
+        float2 size = mix(dustSize, tileSize, dock);\n\
+        pos += (corner-0.5)*size;\n\
         float born = step(departure, u.time);\n\
-        float gone = 1.0 - step(arrival - 0.006, u.time);\n\
         DustVertex outO;\n\
         outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
-        outO.uv=unit;\n\
+        outO.uv=(cell + mix(float2(0.5), corner, dock))/grid;\n\
         outO.local=corner;\n\
-        outO.fade=born*gone;\n\
+        outO.fade=born;\n\
         outO.breakage=0.0;\n\
-        outO.dock=t;\n\
+        outO.dock=dock;\n\
         outO.tint=axsPalette(r + hf*0.15);\n\
         outO.isOpen=1.0;\n\
         outO.noiseX=r;\n\
         outO.noiseY=r3;\n\
         return outO;\n\
-    }\n\
-    if (u.openMode == 2u) {\n\
-        uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
-        h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
-        float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = 0.96*unit.y + 0.04*hf2;\n\
-        float arrival2 = 0.35 + 0.65*order2;\n\
-        float open = step(arrival2 - 0.006, u.time);\n\
-        float2 tile = u.cardSize/grid;\n\
-        float2 pos = u.origin + (cell + corner)*tile;\n\
-        DustVertex outT;\n\
-        outT.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
-        outT.uv=(cell+corner)/grid;\n\
-        outT.local=corner;\n\
-        outT.fade=open;\n\
-        outT.breakage=0.0;\n\
-        outT.dock=0.0;\n\
-        outT.tint=float3(0.0);\n\
-        outT.isOpen=2.0;\n\
-        outT.noiseX=hf2;\n\
-        outT.noiseY=hf2;\n\
-        return outT;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
     float len = length(rel); if (len < 1.0) len = 1.0;\n\
@@ -290,9 +270,6 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
 fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]]) {\n\
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
     float4 texel=image.sample(sampleImage,in.uv);\n\
-    if (in.isOpen > 1.5) {\n\
-        return texel*in.fade;\n\
-    }\n\
     if (in.isOpen > 0.5) {\n\
         float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));\n\
         float core=1.0-smoothstep(0.0,0.40,length(in.local-0.5));\n\
@@ -304,7 +281,9 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms
         grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
         float impact=smoothstep(0.88,0.985,in.dock)*(1.0-smoothstep(0.985,1.0,in.dock));\n\
         grain+=axsPalette(in.noiseX)*impact*0.22;\n\
-        return float4(grain,1.0)*(roundDust*in.fade);\n\
+        float shape=mix(roundDust, 1.0, in.dock);\n\
+        float4 col=mix(float4(grain,1.0), texel, in.dock);\n\
+        return col*(shape*in.fade);\n\
     }\n\
     float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
     float shape=mix(1.0,roundDust,in.breakage);\n\
@@ -610,31 +589,6 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     // .157: deposited-card tile pass (open only, once the real texture has
     // been swapped in). Same clock, same hash, same grid -- the card is
     // painted on the GPU cell by cell, exactly where the dust dies.
-    // .171: gate on the TEXTURE SIZE itself, not the cardReady flag -- the
-    // flag depends on arming order across startWithTexture/replaceTexture and
-    // one missed arming silently disabled the whole reveal (only dust). The
-    // sand placeholder is 128px, any real capture is >=256px.
-    BOOL tilesReady = (_u.openMode == 1u
-                       && self.texture != nil
-                       && self.texture.width >= 256
-                       && self.texture.height >= 256);
-    if (tilesReady) {
-        static BOOL loggedOnce = NO;
-        if (!loggedOnce) {
-            loggedOnce = YES;
-            axs_msd_log(@"OPEN deposit tiles drawing tex=%lux%lu cardReady=%d",
-                        (unsigned long)self.texture.width,
-                        (unsigned long)self.texture.height, _cardReady);
-        }
-        uint32_t savedOpen = _u.openMode;
-        _u.openMode = 2u;
-        [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
-        [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
-        [enc drawPrimitives:MTLPrimitiveTypeTriangle
-                vertexStart:0 vertexCount:6
-              instanceCount:(NSUInteger)(_u.columns * _u.rows)];
-        _u.openMode = savedOpen;
-    }
     [enc endEncoding];
     [cb presentDrawable:drawable];
     [cb commit];
