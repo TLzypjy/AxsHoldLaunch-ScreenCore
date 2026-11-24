@@ -1,6 +1,15 @@
+beautify.156 变更（修复 .155 呼出/消散全部无动画）：
+- log(44) 显示 .155 的 Metal shader 编译失败：片元函数里用了
+  u.seed/u.time 做 sparkle 相位，但片元阶段没有绑定 uniform 缓冲，
+  报 "use of undeclared identifier 'u'"，引擎直接 unavailable，
+  呼出与消散都退回原生无动画。
+- 修复：片元函数签名加 constant DustUniforms& u [[buffer(0)]]，
+  渲染编码器补 setFragmentBytes 传入同一份 uniforms；算法不变。
+- CI 新增两条编译关键断言（片元绑定 + setFragmentBytes）。
+
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.155
+版本：2.0.5+beautify.156
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，

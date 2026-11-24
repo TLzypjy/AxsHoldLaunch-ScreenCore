@@ -55,7 +55,7 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.155): REFERENCE-STYLE FINE DUST + CPU REVEAL.
+// OPEN MODE (openMode=1, beautify.156): REFERENCE-STYLE FINE DUST + CPU REVEAL.
 // The reference plugin does NOT turn particles into the window. It keeps every
 // grain as a 1.15-2.4px round colored sand dot, releases it from the lift point
 // on a per-cell clock, flies it down and back up into its OWN destination cell,
@@ -263,7 +263,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     out.isOpen=0.0;\n\
     return out;\n\
 }\n\
-fragment float4 nlDustFragment(DustVertex in [[stage_in]], texture2d<float> image [[texture(0)]]) {\n\
+fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]]) {\n\
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
     float4 texel=image.sample(sampleImage,in.uv);\n\
     if (in.isOpen > 0.5) {\n\
@@ -554,6 +554,10 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     if (enc == nil) return NO;
     [enc setRenderPipelineState:sMsdPipeline];
     [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+    // .156: the open fragment reads u.seed/u.time for the sparkle phase;
+    // without this binding the whole shader failed to compile and BOTH
+    // open and dissolve fell back to "no effect".
+    [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     [enc setFragmentTexture:self.texture atIndex:0];
     // 6 vertices = one quad; one instance per grain. ONE draw call for all.
     [enc drawPrimitives:MTLPrimitiveTypeTriangle
