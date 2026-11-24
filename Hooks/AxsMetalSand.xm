@@ -55,16 +55,16 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.157): ALL-GPU REFERENCE REVEAL.\n\
-// Copied from the reference plugin's ALGORITHM (its own code stays its own):\n\
-// every grain rises out of a thin band along the BOTTOM edge of the screen,\n\
-// flies on a gentle S-curve into its own jittered cell and DIES at arrival;\n\
-// a second draw pass (openMode=2) deposits the REAL card texel for each cell\n\
-// gated by the SAME per-cell hash arrival clock, so the rising card edge and\n\
-// the dust front are literally the same front -- no gap, no CPU mask, no\n\
-// per-frame CAShapeLayer rebuild. The card snapshot is captured ASYNC and\n\
-// swapped in mid-flight (cardReady); the card view itself stays hidden until\n\
-// endWipeReveal hands over from the identical deposited image.\n\
+// OPEN MODE (openMode=1, beautify.157): ALL-GPU REFERENCE REVEAL.
+// Copied from the reference plugin's ALGORITHM (its own code stays its own):
+// every grain rises out of a thin band along the BOTTOM edge of the screen,
+// flies on a gentle S-curve into its own jittered cell and DIES at arrival;
+// a second draw pass (openMode=2) deposits the REAL card texel for each cell
+// gated by the SAME per-cell hash arrival clock, so the rising card edge and
+// the dust front are literally the same front -- no gap, no CPU mask, no
+// per-frame CAShapeLayer rebuild. The card snapshot is captured ASYNC and
+// swapped in mid-flight (cardReady); the card view itself stays hidden until
+// endWipeReveal hands over from the identical deposited image.
 // NOTE: no // comments
 // are allowed INSIDE the string below -- the Logos preprocessor strips // to
 // EOL (including the trailing line-continuation backslash) and would break
@@ -134,7 +134,6 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
                                float((h >> 16u) & 65535u)/65535.0);\n\
         float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
         float2 landing = (cell + 0.5 + jitter)/grid;\n\
-        // reference shader3: source is the viewport bottom band, never the finger.\n\
         float2 src = float2(2.0 + hnoise.x*max(1.0, u.viewport.x - 4.0),\n\
                             u.viewport.y - 2.0 - hnoise.y*min(16.0, u.viewport.y*0.025));\n\
         float2 dest = u.origin + landing*u.cardSize;\n\
@@ -162,9 +161,6 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         return outO;\n\
     }\n\
     if (u.openMode == 2u) {\n\
-        // .157 deposited-card tile pass: same hash, same arrival clock as the\n\
-        // dust, so a cell opens exactly when its grain dies. Samples the real\n\
-        // card texture (swapped in by the async capture retry via cardReady).\n\
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
@@ -294,7 +290,6 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
     float4 texel=image.sample(sampleImage,in.uv);\n\
     if (in.isOpen > 1.5) {\n\
-        // .157 deposited tile: the real card texel for this exact cell.\n\
         return texel*in.fade;\n\
     }\n\
     if (in.isOpen > 0.5) {\n\
