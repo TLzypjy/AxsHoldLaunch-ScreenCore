@@ -137,10 +137,13 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
         float2 dest = u.origin + landing*u.cardSize;\n\
         float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
-        float2 c1 = float2(mix(start.x, dest.x, 0.35), max(start.y, dest.y) + approach*1.5);\n\
-        float2 c2 = dest + float2(0.0, approach);\n\
+        float2 c1 = float2(mix(start.x, dest.x, 0.30) + (r2-0.5)*u.cardSize.x*0.55,\n\
+                           max(start.y, dest.y) + approach*(0.7 + 1.5*r2));\n\
+        float2 c2 = dest + float2((r-0.5)*u.cardSize.x*0.45, approach*(0.4 + 1.0*r3));\n\
         float b = 1.0 - t;\n\
         float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
+        pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)\n\
+                 * u.cardSize.x*0.05*(1.0-t);\n\
         float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
         pos += (corner-0.5)*dustSize;\n\
         float born = step(departure, u.time);\n\
@@ -627,13 +630,18 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
         [self renderOnce];
         if (done) {
             if (self.u.openMode == 1u && !self.fadingOut) {
-                // .129: open assemble -- fade the converged particle cloud out
-                // over 0.18s so the real card appearing beneath it is masked
+                // .129/.165: open assemble -- the real card unhides at +0.05s
+                // (endWipeReveal). The overlay fade must start only AFTER that
+                // handoff: fading first let the card pop through a nearly
+                // transparent overlay, which read as a flash after the dust.
                 self.fadingOut = YES;
-                self.link.paused = YES;   // freeze the last frame while fading
+                self.link.paused = YES;   // freeze the deposited frame
                 UIView *ov = self.overlay;
-                [UIView animateWithDuration:0.18 animations:^{ ov.alpha = 0.0; }
-                                 completion:^(BOOL finished){ [self cleanup]; }];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    [UIView animateWithDuration:0.18 animations:^{ ov.alpha = 0.0; }
+                                     completion:^(BOOL finished){ [self cleanup]; }];
+                });
                 return;
             }
             [self cleanup];

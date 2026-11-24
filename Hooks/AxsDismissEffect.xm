@@ -1071,7 +1071,9 @@ static void axs_open_becameVisible(UIView *v) {
         UIView *card = v;
         axs_open_interceptUntil = CACurrentMediaTime() + 3.0;
         CGFloat density = axs_open_density();
-        CGFloat duration = 0.85 / axs_open_speedScale();
+        // .165: the flight + reveal read too fast at the default speed;
+        // the base duration goes 0.85s -> 1.15s (speed slider still scales).
+        CGFloat duration = 1.15 / axs_open_speedScale();
         // .149: own the card for the whole assemble+reveal+cleanup window
         axs_open_openActiveUntil = CACurrentMediaTime() + duration + 0.3;
         CGRect cardFrame = [card convertRect:card.bounds toView:nil];
