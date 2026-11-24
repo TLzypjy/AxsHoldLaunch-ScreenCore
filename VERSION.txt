@@ -1,6 +1,34 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.150
+版本：2.0.5+beautify.151
+
+beautify.151 变更（粒子紧贴浮窗下边缘、随浮窗一起往下，消除中间白色空隙）：
+- 用户反馈（两张对比图 + 两个视频）：参考视频里彩色粒子紧贴黑色浮窗下边缘、
+  跟着浮窗一起从上往下推进；我们的效果里浮窗边缘（大块平滑波浪）和下方粒子带
+  之间空了一段白色间隙，粒子没贴着边缘走。
+- 根因（逐帧 + 代码对齐）：
+  1) shader openMode=1 的粒子目标是"撒满整张浮窗"的随机散点 rx/ry∈[0,1]，
+     波前裁剪只保留下方 → 粒子铺在浮窗下半整片，不在边缘形成紧贴的一条带；
+  2) 真卡 mask 的揭示边界推进范围是 -ov + p*(h+2ov)（即 [-40, h+40]），
+     shader 波前是 origin + waveE*h（即 [0, h]），两者范围与起点都不同，
+     且 mask 用低频大波浪 sin(fx*17.3/41.7/83.1) 振幅 30pt；于是 mask 边缘
+     停在粒子带上沿之上，中间露出白色空隙，边缘形状也不像参考的细碎方块。
+- 本次改动：
+  1) shader：粒子 STAGE2 目标改为"紧贴揭示波前下方的一条窄带"
+     target = (origin.x + rx*W, frontY + 5 + ry*30)，frontY = origin.y +
+     waveE*h + n*amp；粒子飞行终点随 frontY 逐帧下移 → 粒子跟着浮窗一起往下。
+     保留手指爆开、错峰、弧线、wobble、已显现区裁剪、末尾淡出。
+  2) 波前噪声统一：shader 与 AXSOpenWipeDriver mask 用同一套公式——
+     cellX=floor(clamp(rx,0..0.9999)*26)、n=sin(cellX*2.399)*0.6+
+     sin(cellX*5.137+1.3)*0.4、amp=min(h*0.045,20)、边界=origin+waveE*h+n*amp。
+     26 个 quantization cell 产生参考图的细碎方块锯齿（不再是平滑大波浪）。
+     mask 去掉 -ov/+2ov 外扩（顶部保护保留），range 与 shader 逐字一致。
+  3) 两者时间同源：mask 在 gatherAt=0.37*dur 后以 revealSpan=0.51*dur 推进，
+     p=smoothstep(raw)；shader wave=(t-0.37)/0.51、waveE=smoothstep(wave)，
+     同一时刻 p==waveE，边界与粒子带严格同步、无空隙。
+- 断言：26-cell 方块噪声/相位/amp、frontY 同公式、窄带 target、mask range 对齐
+  必须存在；整卡散点 scatter、外扩 mask range、旧大波浪边缘全部禁止。
+- 保留 .150 手指爆开、.149 状态自愈、.146 参差 mask、.145 沙粒纹理、原生替换。
 
 beautify.150 变更（粒子改为"手指处爆开驻留 → 再飞向浮窗"两阶段）：
 - .149 反馈（视频 c8f5d7 / 日志 39）：粒子看着从浮窗底部冒出，而非手指抬起处。经逐帧与日志对齐，source point（last-lift，如 UIKit {352,479}）与红手指位置一致，起点数据正确；根因是 .148 shader 粒子从手指到浮窗单段飞行仅 0.30~0.48s、淡入仅 0.08s，肉眼可见时粒子已在浮窗内，再加波前裁剪上半部，观感如"从浮窗底冒出"。

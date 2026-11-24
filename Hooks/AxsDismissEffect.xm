@@ -590,26 +590,29 @@ static UIImage *axs_open_sandTexture(void) {
             [self stop];
             return;
         }
-        // .147: smoothstep matches the shader's waveE so the grains that get
-        // clipped at frontY vanish exactly where the real card is revealed.
+        // .151: the real-card reveal front uses the EXACT same formula/range
+        // as the shader grain band (origin + waveE*h + n*amp, no -ov/+2ov
+        // widening). Otherwise the mask edge sits above the grain band and a
+        // white gap opens between the card and the particles. waveE here is
+        // smoothstep(raw) == shader smoothstep(wave); p is that same eased
+        // fraction, so edge and grains advance in lockstep.
         CGFloat p = raw * raw * (3.0 - 2.0 * raw);
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) { [self stop]; return; }
         CGFloat ov = 40.0;
-        const int N = 24;
-        CGFloat amp = MIN(sz.height * 0.055, 30.0);
+        const int N = 78;                       // 26 cells x 3 samples/cell
+        CGFloat amp = MIN(sz.height * 0.045, 20.0);
         CGMutablePathRef path = CGPathCreateMutable();
         CGPathMoveToPoint(path, NULL, -ov, -ov - 4.0);
         CGPathAddLineToPoint(path, NULL, sz.width + ov, -ov - 4.0);
-        // right -> left so the polygon is consistent; y is a noise-jagged front
+        // right -> left; quantized per-cell noise (same 26 cells / 2.399,5.137
+        // phases as the shader) gives the fine square-tooth edge of the ref.
         for (int i = N - 1; i >= 0; i--) {
             CGFloat fx = (CGFloat)i / (CGFloat)(N - 1);
             CGFloat x = fx * sz.width;
-            float n = sinf(fx * 17.3f + 0.7f) * 0.50f
-                    + sinf(fx * 41.7f + 2.1f) * 0.30f
-                    + sinf(fx * 83.1f + 4.3f) * 0.20f;
-            float wob = 0.78f + 0.22f * sinf((float)elapsed * 2.6f + fx * 9.0f);
-            CGFloat y = -ov + p * (sz.height + 2.0 * ov) + n * amp * wob;
+            float cellX = floorf(fminf(fmaxf((float)fx, 0.0f), 0.9999f) * 26.0f);
+            float n = sinf(cellX * 2.399f) * 0.60f + sinf(cellX * 5.137f + 1.3f) * 0.40f;
+            CGFloat y = p * sz.height + n * amp;
             CGPathAddLineToPoint(path, NULL, x, y);
         }
         CGPathCloseSubpath(path);
