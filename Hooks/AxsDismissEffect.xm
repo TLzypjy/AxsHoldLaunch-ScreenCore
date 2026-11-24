@@ -302,11 +302,25 @@ static NSString *axs_open_cacheDir(void) {
     static NSString *dir = nil;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
-        dir = @"/var/mobile/Documents/sc-open-cache";
-        [[NSFileManager defaultManager] createDirectoryAtPath:dir
-                                  withIntermediateDirectories:YES
-                                                   attributes:nil
-                                                        error:NULL];
+        dir = @"/var/mobile/Library/Caches/sc-open-cache";
+        NSFileManager *fm = [NSFileManager defaultManager];
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:NULL];
+        // .169: migrate any snapshots stored under the old Documents path so
+        // nothing is lost when upgrading from .168.
+        NSString *oldDir = @"/var/mobile/Documents/sc-open-cache";
+        NSArray *old = [fm contentsOfDirectoryAtPath:oldDir error:NULL];
+        for (NSString *f in old) {
+            if (![f.pathExtension isEqualToString:@"png"]) continue;
+            NSString *dst = [dir stringByAppendingPathComponent:f];
+            if (![fm fileExistsAtPath:dst]) {
+                [fm moveItemAtPath:[oldDir stringByAppendingPathComponent:f]
+                            toPath:dst
+                             error:NULL];
+            }
+        }
+        if ([old count] == 0 || [fm contentsOfDirectoryAtPath:oldDir error:NULL].count == 0) {
+            [fm removeItemAtPath:oldDir error:NULL];
+        }
     });
     return dir;
 }
