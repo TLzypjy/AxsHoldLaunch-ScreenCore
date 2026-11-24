@@ -850,7 +850,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // still self-heal, and do the final safety sweep at overlay dissolve.
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * 0.55 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            UIView *c = weakCard2;
+            UIView *c = weakCardTex;
             if (c != nil) {
                 axs_open_assembleInFlight = NO;
                 axs_open_armSelfRestore();
