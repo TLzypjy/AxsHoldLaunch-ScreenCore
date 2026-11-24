@@ -55,21 +55,23 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.153): the mask now shares the renderer's
-// EXACT start clock. .152 paced grains and mask by similar formulas but
-// launched the mask via dispatch_after(0.37*dur) with a RE-BASED start, so the
-// mask's raw lagged the shader's u.time by ~0.22*dur: the card revealed AFTER
-// the grain front moved away (gap + "card appears before grains arrive").
-// Now raw == u.time (same sharedStart) and both use wave=clamp((t-0.34)/0.60)
-// -> smoothstep. Grains arrive from 0.28 (just before the edge starts at 0.34).
-// The reveal edge is now CHAOTIC: per-cell height = base (sin 2.399/5.137)
-// + time-varying jitter (sin(cellX*7.7 + t*11)*0.55), byte-identical in the
-// mask driver, with amp=min(h*0.062,26) and 26 teeth. STAGE 1 finger burst
-// (t<0.20) kept; STAGE 2 each grain has its own staggered arriveAt and flies
-// to a THIN band below the moving front (frontY+2..16, 22000 grains), then
-// dissolves in 0.22s so the cloud is replenished at the CURRENT front.
-// Grain texture is a generated rainbow gradient -- NO full-screen capture
-// (which in .144 cut the clock into the particles).
+// OPEN MODE (openMode=1, beautify.154): PARTICLE == WINDOW (inspired by the
+// reference plugin's algorithm, reimplemented here in our own code). The old
+// .151-.153 design had TWO layers -- colored grains flying to a "front band"
+// plus a separate noise-mask revealing the real card -- and every frame the
+// two had to be aligned; any drift opened a white GAP. Now there is ONE layer:
+// the grain texture IS the real card snapshot (captured in AxsDismissEffect).
+// Each grain owns one grid cell, bursts outward from the finger, then flies on
+// a cubic Bezier to its OWN cell. Per-cell integer hash gives a stable, chaotic
+// stagger (arriveAt=0.16+order*0.62). On arrival `dock` grows the grain from a
+// small round dot to a full tile and crossfades its flight color (axsPalette,
+// cyan->blue->purple->pink->orange) to the REAL snapshot texel at that cell --
+// so the settled grains literally paint the floating window, edge and all.
+// No separate mask, no second layer, no gap. The real card view stays hidden
+// until endWipeReveal (duration+0.05), when it takes over from the identical
+// settled image as the overlay fades -- a seamless handoff, never a "flash in".
+// ONE clock (u.time) drives everything. Only the card is rasterized, never the
+// full screen, so the clock can never be cut into grains (.144).
 // NOTE: no // comments
 // are allowed INSIDE the string below -- the Logos preprocessor strips // to
 // EOL (including the trailing line-continuation backslash) and would break
@@ -97,9 +99,20 @@ struct DustVertex {\n\
     float2 local;\n\
     float fade;\n\
     float breakage;\n\
+    float dock;\n\
+    float3 tint;\n\
+    float isOpen;\n\
 };\n\
 float dustHash(float2 v) {\n\
     return fract(sin(dot(v, float2(127.1,311.7))) * 43758.5453);\n\
+}\n\
+float3 axsPalette(float p) {\n\
+    p = fract(p) * 5.0;\n\
+    if (p < 1.0) return mix(float3(0.10,0.86,0.94), float3(0.25,0.45,0.98), p);\n\
+    if (p < 2.0) return mix(float3(0.25,0.45,0.98), float3(0.68,0.28,0.98), p-1.0);\n\
+    if (p < 3.0) return mix(float3(0.68,0.28,0.98), float3(0.98,0.30,0.68), p-2.0);\n\
+    if (p < 4.0) return mix(float3(0.98,0.30,0.68), float3(1.00,0.68,0.22), p-3.0);\n\
+    return mix(float3(1.00,0.68,0.22), float3(0.10,0.86,0.94), p-4.0);\n\
 }\n\
 vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[instance_id]],\n\
                               constant DustUniforms& u [[buffer(0)]]) {\n\
@@ -115,46 +128,38 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     float r3 = dustHash(noiseCell + 72.3);\n\
     float r4 = dustHash(noiseCell + 43.7);\n\
     if (u.openMode == 1u) {\n\
-        float rx = dustHash(noiseCell + 5.1);\n\
-        float ry = dustHash(noiseCell + 8.3);\n\
-        float rz = dustHash(noiseCell + 11.7);\n\
-        float angS = r*6.2831853;\n\
-        float2 finger = float2(u.sourceX,u.sourceY);\n\
-        float2 burstDir = float2(cos(angS), sin(angS));\n\
-        float burstR = 18.0 + 74.0*r4;\n\
-        float burstT = clamp(u.time/0.20, 0.0, 1.0);\n\
-        float burstE = 1.0-(1.0-burstT)*(1.0-burstT);\n\
-        float2 burstP = finger + burstDir*burstR*burstE;\n\
-        float wave = clamp((u.time - 0.34)/0.60, 0.0, 1.0);\n\
-        float waveE = smoothstep(0.0, 1.0, wave);\n\
-        float cellX = floor(clamp(rx,0.0,0.9999)*26.0);\n\
-        float base = sin(cellX*2.399)*0.60 + sin(cellX*5.137+1.3)*0.40;\n\
-        float jitter = sin(cellX*7.7 + u.time*11.0)*0.55;\n\
-        float n = base + jitter;\n\
-        float amp = min(u.cardSize.y*0.062, 26.0);\n\
-        float frontY = u.origin.y + waveE*u.cardSize.y + n*amp;\n\
-        float arriveAt = 0.28 + r2*0.46;\n\
-        float flightSpan = 0.18 + rz*0.12;\n\
-        float flight = clamp((u.time - (arriveAt - flightSpan))/flightSpan, 0.0, 1.0);\n\
-        float flightE = flight*flight*(3.0-2.0*flight);\n\
-        float bandY = frontY + 2.0 + ry*14.0;\n\
-        float2 target = float2(u.origin.x + rx*u.cardSize.x, bandY);\n\
-        float2 seg = target - burstP;\n\
-        float2 perp = normalize(float2(-seg.y, seg.x) + float2(0.0001, 0.0));\n\
-        float bow = (r - 0.5) * (0.18 + 0.22*r4) * length(seg);\n\
-        float2 p = burstP + seg*flightE + perp*bow*sin(flightE*3.1415926);\n\
-        p += float2(sin(u.time*6.0 + r*41.0), cos(u.time*5.4 + r2*43.0)) * 1.6;\n\
-        float2 tileSizeO = u.cardSize/grid;\n\
-        p += (corner-0.5)*tileSizeO*1.05;\n\
-        float belowFront = smoothstep(frontY-10.0, frontY+4.0, p.y);\n\
-        float dissolve = 1.0 - smoothstep(arriveAt, arriveAt+0.22, u.time);\n\
-        float endFade = 1.0 - smoothstep(0.92, 1.0, u.time);\n\
+        uint h = uint(cell.x)*92837111u ^ uint(cell.y)*689287499u ^ 0x9e3779b9u;\n\
+        h ^= h >> 15u; h *= 0x85ebca6bu; h ^= h >> 13u;\n\
+        float hf = (float)(h & 0xffffu)/65535.0;\n\
+        float order = clamp(unit.y*0.92 + hf*0.08, 0.0, 1.0);\n\
+        float arriveAt = 0.16 + order*0.62;\n\
+        float flight = 0.30;\n\
+        float t = clamp((u.time - (arriveAt - flight))/flight, 0.0, 1.0);\n\
+        float te = t*t*(3.0-2.0*t);\n\
+        float ang = r*6.2831853;\n\
+        float2 finger = float2(u.sourceX, u.sourceY);\n\
+        float burstR = 16.0 + 70.0*r4;\n\
+        float2 start = finger + float2(cos(ang), sin(ang))*burstR;\n\
+        float2 dest = u.origin + unit*u.cardSize;\n\
+        float approach = clamp(u.cardSize.y*0.20, 50.0, 130.0);\n\
+        float2 c1 = start + float2((r-0.5)*burstR*1.2, -approach*0.5);\n\
+        float2 c2 = dest - float2(0.0, approach);\n\
+        float b = 1.0 - te;\n\
+        float2 pos = b*b*b*start + 3.0*b*b*te*c1 + 3.0*b*te*te*c2 + te*te*te*dest;\n\
+        float dock = smoothstep(0.82, 1.0, te);\n\
+        float2 dustSize = float2(mix(1.6, 3.0, r3));\n\
+        float2 tileSize = u.cardSize/grid;\n\
+        float2 size = mix(dustSize, tileSize, dock);\n\
+        pos += (corner-0.5)*size;\n\
         DustVertex outO;\n\
-        outO.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
-        outO.uv=fract(float2(r4, r3) + unit*0.35);\n\
+        outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
+        outO.uv=(cell+corner)/grid;\n\
         outO.local=corner;\n\
-        outO.fade=smoothstep(0.0,0.04,u.time) * flightE * belowFront * dissolve * endFade;\n\
-        outO.breakage=1.0;\n\
+        outO.fade=smoothstep(0.0,0.04,u.time);\n\
+        outO.breakage=0.0;\n\
+        outO.dock=dock;\n\
+        outO.tint=axsPalette(r + hf*0.15);\n\
+        outO.isOpen=1.0;\n\
         return outO;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
@@ -256,14 +261,24 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     else fade = 1.0-motion;\n\
     out.fade=fade;\n\
     out.breakage=(u.style == 8u) ? burst : 0.0;\n\
+    out.dock=0.0;\n\
+    out.tint=float3(0.0);\n\
+    out.isOpen=0.0;\n\
     return out;\n\
 }\n\
 fragment float4 nlDustFragment(DustVertex in [[stage_in]], texture2d<float> image [[texture(0)]]) {\n\
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
-    float4 color=image.sample(sampleImage,in.uv);\n\
+    float4 texel=image.sample(sampleImage,in.uv);\n\
+    if (in.isOpen > 0.5) {\n\
+        float4 flying=float4(in.tint,1.0);\n\
+        float4 col=mix(flying,texel,in.dock);\n\
+        float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
+        float shape=mix(roundDust,1.0,in.dock);\n\
+        return col*(in.fade*shape);\n\
+    }\n\
     float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
     float shape=mix(1.0,roundDust,in.breakage);\n\
-    return color*(in.fade*shape);\n\
+    return texel*(in.fade*shape);\n\
 }\n";
 
 // C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 56 bytes.

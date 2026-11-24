@@ -541,6 +541,37 @@ static UIImage *axs_open_sandTexture(void) {
     }
 }
 
+// .154: capture the REAL card as the particle texture. The shader now makes
+// each grain a fragment of this image and docks it into its own grid cell, so
+// the settled grains literally assemble the floating window -- no second mask
+// layer, hence no gap. Only the card itself is rasterized (never the full
+// screen), so the home-screen clock can never be cut into the grains (.144).
+static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
+static UIImage *axs_open_captureCardForAssembly(UIView *card) {
+    UIImage *shot = nil;
+    @try {
+        if (card.layer.mask != nil) card.layer.mask = nil;
+        // A hidden view still rasterizes its layer tree into an offscreen
+        // context via drawViewHierarchyInRect, so try that first (zero risk of
+        // leaking a native frame to screen).
+        shot = axs_dm_snapshot(card);
+    } @catch (NSException *ignored) { shot = nil; }
+    if (shot != nil && !axs_dm_imageIsBlank(shot)) return shot;
+    // Fallback: briefly unhide through the ORIGINAL setHidden IMP (bypassing
+    // our hook) inside the same runloop turn, capture, then re-hide before any
+    // screen commit -- no native frame can slip through.
+    @try {
+        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
+            card.alpha = 1.0;
+            shot = axs_dm_snapshot(card);
+            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
+        }
+    } @catch (NSException *ignored) { shot = nil; }
+    if (shot != nil && !axs_dm_imageIsBlank(shot)) return shot;
+    return nil;
+}
+
 // .146: the real card is revealed top->bottom by a NOISE-JAGGED mask driven
 // by a CADisplayLink, not by a flat rectangle. A flat growing rect made every
 // mid frame a hard-edged rectangle sliding down ("too board-like"). Here the
@@ -549,6 +580,9 @@ static UIImage *axs_open_sandTexture(void) {
 // the shader grains that now fly to their own cells instead of a single line.
 // The driver is retained on the card via association and stops itself when the
 // wave completes or the card leaves the window, so gesture/glow stay intact.
+// .154: kept for source compatibility but NO LONGER applied to the card -- the
+// docked grains themselves ARE the window, so a separate reveal layer would
+// double-draw and reopen the gap. The card stays hidden until endWipeReveal.
 
 @interface AXSOpenWipeDriver : NSObject
 @property (nonatomic, weak) UIView *card;
@@ -557,6 +591,9 @@ static UIImage *axs_open_sandTexture(void) {
 @property (nonatomic, assign) CFTimeInterval start;
 @property (nonatomic, assign) CFTimeInterval sharedStart;
 @property (nonatomic, assign) CGFloat duration;
+// .154: idle anchor -- keeps the driver alive for endWipeReveal's timing but
+// installs NO mask (docked grains assemble the window themselves).
+- (void)startWithCardIdle:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0;
 @end
 
 @implementation AXSOpenWipeDriver
@@ -566,22 +603,17 @@ static UIImage *axs_open_sandTexture(void) {
 // dispatch and re-based its own start, so raw lagged u.time by ~0.22*duration
 // -> the card revealed after the grain front had moved (gap + "card first").
 - (void)startWithCard:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0 {
+    [self startWithCardIdle:card duration:dur sharedStart:t0];
+}
+
+// .154: idle anchor. The mask no longer drives the reveal (docked grains do),
+// so this only records the shared clock and keeps the driver object retained.
+- (void)startWithCardIdle:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0 {
     @try {
         self.card = card;
         self.duration = dur;
         self.sharedStart = t0;
         self.start = t0;
-        CAShapeLayer *ml = [CAShapeLayer layer];
-        ml.frame = card.bounds;
-        ml.fillColor = [UIColor whiteColor].CGColor;
-        ml.strokeColor = nil;
-        CGMutablePathRef empty = CGPathCreateMutable(); // empty => fully masked at t=0
-        ml.path = empty;
-        CGPathRelease(empty);
-        self.maskLayer = ml;
-        card.layer.mask = ml;
-        self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
-        [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
     } @catch (NSException *ignored) { }
 }
 
@@ -656,14 +688,20 @@ static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePo
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) return;
         axs_open_interceptUntil = 0;
+        // .154: the card stays HIDDEN for the whole assemble. The docked
+        // grains ARE the window (they sample the real card texture). No mask
+        // reveal -- that second layer was the gap source. endWipeReveal (at
+        // duration+0.05) makes the real card visible exactly when the overlay
+        // fades, a content-identical seamless handoff -- never a "flash in".
         card.alpha = 1.0;
-        card.hidden = NO;
         if (card.layer.mask != nil) card.layer.mask = nil;
         if (dur <= 0) return;
         AXSOpenWipeDriver *driver = [AXSOpenWipeDriver new];
         objc_setAssociatedObject(card, &axs_open_wipeDriverKey, driver,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [driver startWithCard:card duration:dur sharedStart:sharedStart];
+        // .154: do not install the mask on the card; keep the driver only as a
+        // timing anchor. See startWithCardIdle below.
+        [driver startWithCardIdle:card duration:dur sharedStart:sharedStart];
     } @catch (NSException *ignored) { }
 }
 
@@ -817,14 +855,16 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .145: grains are COLORED SAND, not pieces of the screen. .144 cut
-        // the full _UIScenePresentationView into grains, which is why the
-        // home-screen clock flew up with them. A generated rainbow gradient
-        // is cheap, deterministic and 100% sand -- no screen capture at all.
-        UIImage *tex = axs_open_sandTexture();
-        NSString *texKind = tex ? @"color-sand" : @"scene-presentation";
-        // defensive fallbacks only -- the generated gradient never fails;
-        // kept so the legacy capture/bg helpers stay referenced (no -Wunused)
+        // .154: PARTICLE == WINDOW. Capture the real card so each docked grain
+        // shows its true cell and the settled grains assemble the floating
+        // window itself -- this removes the second reveal layer (and the gap).
+        // Only the card is rasterized, never the full screen, so the clock is
+        // never cut in (.144). Color comes from the shader's axsPalette while
+        // in flight; the texture supplies the settled real-window pixels.
+        UIImage *tex = axs_open_captureCardForAssembly(card);
+        NSString *texKind = tex ? @"card-snapshot" : @"color-sand-fallback";
+        // defensive fallbacks (also keep legacy helpers referenced: no -Wunused)
+        if (tex == nil) tex = axs_open_sandTexture();
         if (tex == nil) tex = axs_open_captureAppContent();
         if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
         if (tex == nil) {

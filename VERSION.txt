@@ -1,6 +1,23 @@
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.153
+版本：2.0.5+beautify.154
+
+beautify.154 变更（架构重构：粒子就是浮窗，参考插件算法、自有实现）：
+- 用户提供参考插件 com.ms.openparticleanimation 0.3.67 的 deb 与实现视频，
+  要求"只参考思路、不照搬代码"。逆向其 8 段 Metal shader 后发现核心差异：
+  它的粒子本身就是浮窗的碎片——每颗粒子采样浮窗真实纹理的一个格子，
+  飞到目标格后 dock 放大成整格并显示真实纹素，粒子拼出来就是浮窗，
+  从根上没有"粒子层 + 独立遮罩层"两层对齐的空隙问题。
+- 重构 openMode=1（自有代码实现该思想）：
+  - 纹理由彩虹渐变改为真卡截图（只截 card 本身，非全屏，不会切进时钟）；
+  - 每颗粒子用整数 hash 得到稳定错乱的到达顺序 arriveAt=0.16+order*0.62；
+  - 手指抬起处爆开后走三次贝塞尔飞向自己的格子 dest=origin+unit*cardSize；
+  - 到达 dock=smoothstep(0.82,1,te)：小圆沙粒放大到整格 tileSize，
+    颜色从 shader 内生成的彩虹(axsPalette)交叉淡入真卡该格纹素；
+  - 移除独立的 CAShapeLayer 揭示遮罩（空隙根源），真卡 view 在拼图完成后
+    由 endWipeReveal 无缝接管（内容相同，不是整体闪现）；
+  - 单一时钟 u.time 驱动，消散动画、状态自愈、设置项完全不变。
+- 校验：新 shader 语义断言 117 条本地全过；旧两层架构文本全部禁断。
 
 beautify.153 变更（共享时钟彻底消除空隙、边缘参差错乱、更密）：
 - 用户反馈（视频 ff3a8d + 截图 + log(40)）：粒子还没飞到浮窗浮窗就开始显现，
