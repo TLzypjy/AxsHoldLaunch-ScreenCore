@@ -289,11 +289,22 @@ static UIImage *axs_dm_snapshot(UIView *view) {
 // snapshot around and reuse it as the deposit texture at the next open.
 // Refresh points: every dismiss (texture creation) and 0.35s after every
 // open completes (the card is visible again by then).
-static UIImage *axs_open_cachedCardSnapshot = nil;
-static void axs_open_cacheCardSnapshot(UIImage *img) {
-    if (img == nil || img.CGImage == NULL) return;
+// .160: the cache is PER-CONTAINER (associated object on the view itself).
+// A single global slot made opening another app's window deposit the
+// previously closed window's content; the same SCFloatingContainerView
+// instance cycles dismiss -> open, so its own cache always holds its own
+// last-visible pixels.
+static char axs_open_cachedSnapshotKey;
+static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img) {
+    if (owner == nil || img == nil || img.CGImage == NULL) return;
     if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return;
-    axs_open_cachedCardSnapshot = img;
+    objc_setAssociatedObject(owner, &axs_open_cachedSnapshotKey, img,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static UIImage *axs_open_cachedCardSnapshotForView(UIView *owner) {
+    if (owner == nil) return nil;
+    return objc_getAssociatedObject(owner, &axs_open_cachedSnapshotKey);
 }
 
 static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
@@ -334,10 +345,11 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
             axs_dm_log(@"emit: snapshot failed");
             return NO;
         }
-        // .158: the card is fully visible here -- cache the snapshot for the
-        // next open's GPU deposit texture (open-time capture of a hidden card
-        // is impossible with cross-process content).
-        axs_open_cacheCardSnapshot(shot);
+        // .158/.160: the card is fully visible here -- cache the snapshot on
+        // THIS container for its own next open's GPU deposit texture
+        // (open-time capture of a hidden card is impossible with
+        // cross-process content).
+        axs_open_cacheCardSnapshot(sourceView, shot);
         CGFloat duration = axs_dm_styleBaseDuration(style) * speedScale;
         BOOL played = axs_metalSandPlay(shot, sourceFrameInWindow, duration,
                                         (uint32_t)style, density);
@@ -842,7 +854,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // only the last-resort placeholder (dust color stays palette-driven).
         UIImage *tex = nil;
         NSString *texKind = nil;
-        UIImage *cachedCard = axs_open_cachedCardSnapshot;
+        UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);
         if (cachedCard != nil && cachedCard.CGImage != NULL
             && CGImageGetWidth(cachedCard.CGImage) >= 256) {
             tex = cachedCard;
@@ -907,7 +919,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             if (c == nil) return;
             UIImage *fresh = axs_open_captureVisibleCardCheap(c);
             if (fresh != nil) {
-                axs_open_cacheCardSnapshot(fresh);
+                axs_open_cacheCardSnapshot(c, fresh);
                 axs_dm_log(@"OPEN cached card snapshot refreshed %zux%zu",
                            (size_t)CGImageGetWidth(fresh.CGImage),
                            (size_t)CGImageGetHeight(fresh.CGImage));
