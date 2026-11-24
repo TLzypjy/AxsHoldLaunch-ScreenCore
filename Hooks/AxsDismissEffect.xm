@@ -555,16 +555,22 @@ static UIImage *axs_open_sandTexture(void) {
 @property (nonatomic, strong) CAShapeLayer *maskLayer;
 @property (nonatomic, strong) CADisplayLink *link;
 @property (nonatomic, assign) CFTimeInterval start;
+@property (nonatomic, assign) CFTimeInterval sharedStart;
 @property (nonatomic, assign) CGFloat duration;
 @end
 
 @implementation AXSOpenWipeDriver
 
-- (void)startWithCard:(UIView *)card duration:(CGFloat)dur {
+// .153: sharedStart is the Metal renderer's own start clock, so raw here is
+// byte-identical to the shader's u.time. .152 started the mask via a delayed
+// dispatch and re-based its own start, so raw lagged u.time by ~0.22*duration
+// -> the card revealed after the grain front had moved (gap + "card first").
+- (void)startWithCard:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0 {
     @try {
         self.card = card;
         self.duration = dur;
-        self.start = CACurrentMediaTime();
+        self.sharedStart = t0;
+        self.start = t0;
         CAShapeLayer *ml = [CAShapeLayer layer];
         ml.frame = card.bounds;
         ml.fillColor = [UIColor whiteColor].CGColor;
@@ -583,38 +589,43 @@ static UIImage *axs_open_sandTexture(void) {
     @try {
         UIView *card = self.card;
         if (card == nil || card.window == nil) { [self stop]; return; }
-        CGFloat elapsed = CACurrentMediaTime() - self.start;
+        // .153: raw is based on the SHARED clock (same as shader u.time), not
+        // a locally re-based start. This is the real cause of the lingering
+        // gap: .152 launched the mask via dispatch_after(gatherAt) and re-timed
+        // it, so raw lagged u.time by ~0.22*duration and the card revealed
+        // after the grain front had moved away. Now raw == u.time exactly.
+        CGFloat elapsed = CACurrentMediaTime() - self.sharedStart;
         CGFloat raw = self.duration > 0 ? elapsed / self.duration : 1.0;
         if (raw >= 1.0) {
             card.layer.mask = nil;
             [self stop];
             return;
         }
-        // .152: the real-card reveal front must use the EXACT same wave as
-        // the shader grain band. .151 used smoothstep(raw) here but the shader
-        // used smoothstep((t-0.30)/0.62), so the mask edge ran ahead of the
-        // grain front and a white GAP opened between card and particles.
-        // Now both use wave=clamp((raw-0.30)/0.62,0,1) then smoothstep -> the
-        // card edge and the grain band advance in lockstep, no gap.
-        CGFloat wave = (raw - 0.30)/0.62;
+        // Both the card edge and the grain band use the SAME wave from the
+        // SAME raw. Start 0.34 (grains begin arriving at 0.30) so the first
+        // grains land just before the card edge starts moving down.
+        CGFloat wave = (raw - 0.34)/0.60;
         if (wave < 0.0) wave = 0.0;
         if (wave > 1.0) wave = 1.0;
         CGFloat p = wave * wave * (3.0 - 2.0 * wave);
         CGSize sz = card.bounds.size;
         if (sz.width < 1 || sz.height < 1) { [self stop]; return; }
         CGFloat ov = 40.0;
-        const int N = 78;                       // 26 cells x 3 samples/cell
-        CGFloat amp = MIN(sz.height * 0.045, 20.0);
+        const int N = 104;                      // 26 cells x 4 samples/cell
+        CGFloat amp = MIN(sz.height * 0.062, 26.0);
         CGMutablePathRef path = CGPathCreateMutable();
         CGPathMoveToPoint(path, NULL, -ov, -ov - 4.0);
         CGPathAddLineToPoint(path, NULL, sz.width + ov, -ov - 4.0);
-        // right -> left; quantized per-cell noise (same 26 cells / 2.399,5.137
-        // phases as the shader) gives the fine square-tooth edge of the ref.
+        // right -> left. Per-cell height = base + time-varying jitter so the
+        // teeth are UNEVEN and keep churning (user: "edge should be chaotic,
+        // not fixed"). Formula is byte-identical to the shader frontY noise.
         for (int i = N - 1; i >= 0; i--) {
             CGFloat fx = (CGFloat)i / (CGFloat)(N - 1);
             CGFloat x = fx * sz.width;
             float cellX = floorf(fminf(fmaxf((float)fx, 0.0f), 0.9999f) * 26.0f);
-            float n = sinf(cellX * 2.399f) * 0.60f + sinf(cellX * 5.137f + 1.3f) * 0.40f;
+            float base = sinf(cellX * 2.399f) * 0.60f + sinf(cellX * 5.137f + 1.3f) * 0.40f;
+            float jitter = sinf(cellX * 7.7f + (float)raw * 11.0f) * 0.55f;
+            float n = base + jitter;
             CGFloat y = p * sz.height + n * amp;
             CGPathAddLineToPoint(path, NULL, x, y);
         }
@@ -638,7 +649,8 @@ static UIImage *axs_open_sandTexture(void) {
 }
 @end
 
-static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePoint) {
+static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePoint,
+                                     CFTimeInterval sharedStart) {
     @try {
         (void)sourcePoint;
         CGSize sz = card.bounds.size;
@@ -651,7 +663,7 @@ static void axs_open_startWipeReveal(UIView *card, CGFloat dur, CGPoint sourcePo
         AXSOpenWipeDriver *driver = [AXSOpenWipeDriver new];
         objc_setAssociatedObject(card, &axs_open_wipeDriverKey, driver,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        [driver startWithCard:card duration:dur];
+        [driver startWithCard:card duration:dur sharedStart:sharedStart];
     } @catch (NSException *ignored) { }
 }
 
@@ -843,42 +855,33 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
                    duration, density, (long)polls, texKind,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .146: grains fly to their own cells and begin dissolving from the
-        // top at t~0.37. The noise-jagged mask starts there and sweeps down to
-        // t~0.88, so the card is revealed exactly as the sand settles. Overlay
-        // dissolves at t=1.0+0.18.
+        // .153: the mask now shares the Metal renderer's EXACT start clock.
+        // .152 scheduled the mask via dispatch_after(0.37*dur) and re-based its
+        // own start, so its raw lagged the shader's u.time by ~0.22*dur -- the
+        // card revealed after the grain front had already moved down (the
+        // lingering gap + "card appears before grains arrive"). Now we install
+        // the mask immediately with sharedStart = the same instant the renderer
+        // uses, so raw == u.time and both fronts advance in lockstep. raw<0.34
+        // gives p=0 (mask covers everything) so the card stays hidden until the
+        // first grains arrive at 0.30 -- no re-base, no dispatch delay.
         __weak UIView *weakCard2 = card;
-        CGFloat gatherAt = duration * 0.37;
-        CGFloat revealSpan = duration * 0.51;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(gatherAt * NSEC_PER_SEC)),
+        CFTimeInterval assemblyStart = CACurrentMediaTime();
+        axs_open_startWipeReveal(card, duration, sourcePoint, assemblyStart);
+        // Release the in-flight guard partway through so a genuine re-open can
+        // still self-heal, and do the final safety sweep at overlay dissolve.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * 0.55 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCard2;
-            if (c == nil) return;
-            @try {
-                if (c.window == nil) {
-                    axs_open_assembleInFlight = NO;
-                    axs_open_armSelfRestore();
-                    c.alpha = 1.0;
-                    c.hidden = NO;
-                    return;
-                }
+            if (c != nil) {
                 axs_open_assembleInFlight = NO;
                 axs_open_armSelfRestore();
-                axs_open_startWipeReveal(c, revealSpan, sourcePoint);
-                // final safety sweep at overlay dissolve: leave the card fully
-                // opaque + mask-free (also keeps endWipeReveal referenced)
-                __weak UIView *weakCard3 = c;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((revealSpan + 0.05) * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    UIView *c3 = weakCard3;
-                    if (c3 != nil) axs_open_endWipeReveal(c3);
-                });
-            } @catch (NSException *ignored) {
-                axs_open_assembleInFlight = NO;
-                c.hidden = NO;
-                c.alpha = 1.0;
-                if (c.layer.mask != nil) c.layer.mask = nil;
             }
+        });
+        __weak UIView *weakCard3 = card;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((duration + 0.05) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            UIView *c3 = weakCard3;
+            if (c3 != nil) axs_open_endWipeReveal(c3);
         });
         return;
     } @catch (NSException *ignored) {

@@ -55,20 +55,19 @@ static void axs_msd_log(NSString *format, ...) {
 // Timelines per style (T0, seconds at speed=1) are mirrored 1:1 in
 // AxsDismissEffect.xm axs_dm_styleBaseDuration(); begin/span below are
 // fractions of T0 so the speed slider keeps working unchanged.
-// OPEN MODE (openMode=1, beautify.152): grains stream CONTINUOUSLY to the
-// reveal front. .151 still had a white GAP and the cloud slid down as ONE
-// block: two causes. (a) the AXSOpenWipeDriver mask eased front as
-// smoothstep(raw) while the shader used smoothstep((t-0.30)/0.62), so the
-// mask edge ran AHEAD of the grain band; (b) every grain's flight finished
-// near t=0.6, piling them all at the top before the card moved. Now BOTH the
-// mask and the shader use wave=clamp((t-0.30)/0.62,0,1)->smoothstep, so the
-// edges lock with no gap. STAGE 1 (t<0.20) grains burst OUTWARD at the finger;
-// STAGE 2 each grain has its OWN arriveAt=0.30+r2*0.48 (staggered across the
-// whole reveal) and flies to a THIN band hugging BELOW the moving front
-// (frontY+2..16, denser 22000 grains). Grains that arrive dissolve within
-// 0.22s, so the cloud is continuously replenished at the CURRENT front
-// instead of sliding down as a fixed block. frontY uses the SAME quantized
-// 26-cell noise (cellX 2.399/5.137, amp=min(h*0.045,20)) as the mask edge.
+// OPEN MODE (openMode=1, beautify.153): the mask now shares the renderer's
+// EXACT start clock. .152 paced grains and mask by similar formulas but
+// launched the mask via dispatch_after(0.37*dur) with a RE-BASED start, so the
+// mask's raw lagged the shader's u.time by ~0.22*dur: the card revealed AFTER
+// the grain front moved away (gap + "card appears before grains arrive").
+// Now raw == u.time (same sharedStart) and both use wave=clamp((t-0.34)/0.60)
+// -> smoothstep. Grains arrive from 0.28 (just before the edge starts at 0.34).
+// The reveal edge is now CHAOTIC: per-cell height = base (sin 2.399/5.137)
+// + time-varying jitter (sin(cellX*7.7 + t*11)*0.55), byte-identical in the
+// mask driver, with amp=min(h*0.062,26) and 26 teeth. STAGE 1 finger burst
+// (t<0.20) kept; STAGE 2 each grain has its own staggered arriveAt and flies
+// to a THIN band below the moving front (frontY+2..16, 22000 grains), then
+// dissolves in 0.22s so the cloud is replenished at the CURRENT front.
 // Grain texture is a generated rainbow gradient -- NO full-screen capture
 // (which in .144 cut the clock into the particles).
 // NOTE: no // comments
@@ -126,13 +125,15 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float burstT = clamp(u.time/0.20, 0.0, 1.0);\n\
         float burstE = 1.0-(1.0-burstT)*(1.0-burstT);\n\
         float2 burstP = finger + burstDir*burstR*burstE;\n\
-        float wave = clamp((u.time - 0.30)/0.62, 0.0, 1.0);\n\
+        float wave = clamp((u.time - 0.34)/0.60, 0.0, 1.0);\n\
         float waveE = smoothstep(0.0, 1.0, wave);\n\
         float cellX = floor(clamp(rx,0.0,0.9999)*26.0);\n\
-        float n = sin(cellX*2.399)*0.60 + sin(cellX*5.137+1.3)*0.40;\n\
-        float amp = min(u.cardSize.y*0.045, 20.0);\n\
+        float base = sin(cellX*2.399)*0.60 + sin(cellX*5.137+1.3)*0.40;\n\
+        float jitter = sin(cellX*7.7 + u.time*11.0)*0.55;\n\
+        float n = base + jitter;\n\
+        float amp = min(u.cardSize.y*0.062, 26.0);\n\
         float frontY = u.origin.y + waveE*u.cardSize.y + n*amp;\n\
-        float arriveAt = 0.30 + r2*0.48;\n\
+        float arriveAt = 0.28 + r2*0.46;\n\
         float flightSpan = 0.18 + rz*0.12;\n\
         float flight = clamp((u.time - (arriveAt - flightSpan))/flightSpan, 0.0, 1.0);\n\
         float flightE = flight*flight*(3.0-2.0*flight);\n\
