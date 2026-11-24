@@ -126,7 +126,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = 0.96*(1.0-unit.y) + 0.04*hf;\n\
+        float order = 0.96*unit.y + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
@@ -162,7 +162,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = 0.96*(1.0-unit.y) + 0.04*hf2;\n\
+        float order2 = 0.96*unit.y + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
         float open = step(arrival2 - 0.006, u.time);\n\
         float2 tile = u.cardSize/grid;\n\
