@@ -141,7 +141,6 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 c2 = dest + float2(0.0, approach);\n\
         float b = 1.0 - t;\n\
         float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
-        float2 pos = b*b*b*src + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
         pos += (corner-0.5)*dustSize;\n\
         float born = step(departure, u.time);\n\
