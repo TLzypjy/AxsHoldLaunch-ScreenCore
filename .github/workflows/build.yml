@@ -612,7 +612,7 @@ jobs:
           # docked grains assemble the window themselves, so NO mask is applied
           # to the card (a second reveal layer reopened the gap).
           grep -Fq "@interface AXSOpenWipeDriver : NSObject" Hooks/AxsDismissEffect.xm || { echo "wipe driver class missing"; exit 1; }
-          grep -Fq "- (void)startWithCardIdle:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0;" Hooks/AxsDismissEffect.xm || { echo "idle driver anchor missing"; exit 1; }
+          grep -Fq "startWithCardIdle:(UIView *)card duration:(CGFloat)dur sharedStart:(CFTimeInterval)t0" Hooks/AxsDismissEffect.xm || { echo "idle driver anchor missing"; exit 1; }
           grep -Fq "[driver startWithCardIdle:card duration:dur sharedStart:sharedStart];" Hooks/AxsDismissEffect.xm || { echo "idle driver not started"; exit 1; }
           grep -Fq "card.hidden = NO;" Hooks/AxsDismissEffect.xm || { echo "final card restore missing"; exit 1; }
           grep -Fq "axs_open_interceptUntil = 0" Hooks/AxsDismissEffect.xm || { echo "intercept disarm missing"; exit 1; }
