@@ -488,9 +488,7 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
                openMode:(uint32_t)openMode
              sourcePoint:(CGPoint)sourcePoint
              sourceRect:(CGRect)sourceRect
-            cornerRadius:(CGFloat)cornerRadius {
-    self.texture = tex;
-    self.textureB = texB;
+            cornerRadius:(CGFloat)cornerRadius;
     self.duration = dur;
     self.overlay = win;
     self.metalLayer = (CAMetalLayer *)view.layer;
