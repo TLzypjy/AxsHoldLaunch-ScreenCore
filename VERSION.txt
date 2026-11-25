@@ -1,3 +1,14 @@
+beautify.181 变更（圆角处直边 + texel alpha 不透明度 + 快速关开）：
+- 角落直边：dock 中途格子是方形，圆角处方格直边露出。形状改为
+  保持圆形直到 dock 70%→100% 才展开（corner 处 texel alpha=0
+  自动透明），直边消失。
+- docked 不透明度改为 max(texel.a, 0.92)：内部 1.0 全不透明
+  （交接与真卡一致，消除"圆角变"的不透明度差），四角 texel.a=0。
+- 快速关→开：recent-assemble 守卫增加 dismissedSinceAssemble
+  （消散释放 assembled 时置位，允许守卫窗口内的真实重开动画）；
+  quick-toggle 窗口 0.4→0.15s。
+- 版本升至 2.0.5+beautify.181，CI 断言同步。
+
 beautify.180 变更（角半径取最大 + 防双聚合硬守卫）：
 - 角落直边：圆角半径探测取"第一个带背景的圆角图层"，可能小于
   最外层可见圆角 → 裁切残留直角。改为取最大 bgRadius（最外层）。
@@ -282,7 +293,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.180
+版本：2.0.5+beautify.181
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，

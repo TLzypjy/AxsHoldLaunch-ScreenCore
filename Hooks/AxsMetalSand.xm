@@ -281,10 +281,10 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms
         grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
         float impact=smoothstep(0.88,0.985,in.dock)*(1.0-smoothstep(0.985,1.0,in.dock));\n\
         grain+=axsPalette(in.noiseX)*impact*0.22;\n\
-        float shape=mix(roundDust, 1.0, in.dock);\n\
+        float shape=mix(roundDust, 1.0, smoothstep(0.7, 1.0, in.dock));\n\
         float ta = max(texel.a, 0.001);\n\
         float3 tileCol = (texel.a > 0.02) ? (texel.rgb/ta) : grain;\n\
-        float4 col = mix(float4(grain,1.0), float4(tileCol, 0.92), in.dock);\n\
+        float4 col = mix(float4(grain,1.0), float4(tileCol, max(texel.a, 0.92)), in.dock);\n\
         return col*(shape*in.fade);\n\
     }\n\
     float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\

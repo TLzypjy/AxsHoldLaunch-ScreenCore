@@ -702,6 +702,7 @@ static void axs_open_armSelfRestore(void) {
 static CFAbsoluteTime axs_open_openActiveUntil = 0;
 static CFAbsoluteTime axs_open_lastAssembleStart = -1e9;
 static CGFloat axs_open_lastAssembleDur = 0.0;
+static BOOL axs_open_dismissedSinceAssemble = NO;
 // .116: last finger-lift position (ARC menu tap), tracked via UIWindow sendEvent
 static CGPoint axs_open_lastTouchUp = {-1, -1};
 static CFAbsoluteTime axs_open_lastTouchUpAt = 0;
@@ -1261,12 +1262,16 @@ static void axs_open_becameVisible(UIView *v) {
         // assemble is running, it is STALE (a dismissal path missed its
         // release). Skipping then eats a genuine open -- no particles, card
         // pops in. Release the stale flag and fall through to accept.
-        // .180: hard guard against double aggregation -- any candidate within
-        // a recent assemble window is skipped regardless of flag state.
-        if (CACurrentMediaTime() - axs_open_lastAssembleStart < axs_open_lastAssembleDur + 0.6) {
+        // .180/.181: hard guard against double aggregation -- candidates within
+        // a recent assemble window are skipped UNLESS a genuine dismiss happened
+        // since (a dismiss releases the assembled flag and must not swallow the
+        // next open's animation).
+        if (!axs_open_dismissedSinceAssemble &&
+            CACurrentMediaTime() - axs_open_lastAssembleStart < axs_open_lastAssembleDur + 0.6) {
             axs_dm_log(@"OPEN candidate skipped (recent assemble)");
             return;
         }
+        axs_open_dismissedSinceAssemble = NO;
         if (axs_open_isAssembled(v)) {
             CFAbsoluteTime nowA = CACurrentMediaTime();
             if (!axs_open_assembleInFlight && nowA > axs_open_openActiveUntil) {
@@ -1307,7 +1312,7 @@ static void axs_open_becameVisible(UIView *v) {
         CFAbsoluteTime nowT = CACurrentMediaTime();
         NSNumber *gone = objc_getAssociatedObject(v, &axs_open_goneKey);
         CGFloat goneAt = gone ? [gone doubleValue] : -1e9;
-        if (nowT - goneAt < 0.4) {
+        if (nowT - goneAt < 0.15) {
             axs_dm_log(@"OPEN candidate skipped (quick toggle %.2fs)", nowT - goneAt);
             return;
         }
@@ -1601,6 +1606,9 @@ static void axs_dm_trigger(NSString *tag) {
                 // stayed "assembled" and every repeated present during the
                 // dismiss was ignored.
                 axs_open_setAssembled(container, NO);
+                // .181: a genuine dismiss happened -- allow the next open's
+                // animation even inside the recent-assemble window.
+                axs_open_dismissedSinceAssemble = YES;
                 container.hidden = NO;
             } @catch (NSException *ignored) { }
         });
