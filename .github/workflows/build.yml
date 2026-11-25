@@ -610,6 +610,7 @@ jobs:
           grep -Fq "float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));" Hooks/AxsMetalSand.xm || { echo "round dust shape missing"; exit 1; }
           grep -Fq "CFTimeInterval axs_metalAssembleStartTime(void *renderer)" Hooks/AxsMetalSand.xm || { echo "shared renderer clock accessor missing"; exit 1; }
           grep -Fq "OPEN start tex=" Hooks/AxsMetalSand.xm || { echo "open start diagnostic log missing"; exit 1; }
+          grep -Fq "texture probe open=" Hooks/AxsMetalSand.xm || { echo "texture readback probe missing"; exit 1; }
           grep -Fq "@property (nonatomic, assign) BOOL cardReady;" Hooks/AxsMetalSand.xm || { echo "cardReady property missing"; exit 1; }
           grep -Fq "self.cardReady = NO;" Hooks/AxsMetalSand.xm || { echo "cardReady reset missing"; exit 1; }
           grep -Fq "if (openMode == 1u && tex.width >= 256 && tex.height >= 256) {" Hooks/AxsMetalSand.xm || { echo "initial-texture cardReady arming missing"; exit 1; }
