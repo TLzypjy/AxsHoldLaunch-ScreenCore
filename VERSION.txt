@@ -1,3 +1,17 @@
+beautify.188 变更（新增壁纸擦除呼出动画，与经典动画可切换）：
+- 用户要求：保留当前 .168 动画，另按"截图背景→真浮窗垫底→粒子擦掉截图"
+  方案新增一套动画，并可在设置里切换。
+- 呼出样式开关 splitBeautifyOpenStyle（0=经典聚合[默认]，1=壁纸擦除）：
+  设置面板加"呼出动画样式"选择行（中英文本地化）。
+- Metal 层：.168 shader 原样保留为 AXS_MSD_SHADER_CLASSIC，.182 稳定版
+  shader 原样加入为 AXS_MSD_SHADER_COVER；双 pipeline 编译，
+  axs_msd_setCoverMode 按样式选管线；cover pass 先画壁纸（逐格淡出），
+  再画粒子；经典 pass 顺序不变。消散动画与 style 0-8 完全不受影响。
+- DismissEffect 层：仅移植 .182 架构专属部分（captureWallpaper /
+  revealLive / accept 抓壁纸 / pollStep 真卡垫底 / endWipeReveal 分支），
+  所有改动由 coverStyle/revealLive 门控，经典路径逐字节不变；
+  .169/.170/.175/.176/.177/.180/.181 的改动均未带回。
+- 版本升至 2.0.5+beautify.188，CI 断言同步。
 beautify.187 变更（纯 .168 + 仅缓存目录迁移）：
 - 用户要求"这一次只迁移目录看一下"：在纯 .168（.186）基础上仅应用
   .169 的缓存目录迁移——快照缓存移到 /var/mobile/Library/Caches/

@@ -69,7 +69,8 @@ static void axs_msd_log(NSString *format, ...) {
 // are allowed INSIDE the string below -- the Logos preprocessor strips // to
 // EOL (including the trailing line-continuation backslash) and would break
 // the multiline literal.
-static NSString * const AXS_MSD_SHADER = @"\
+// .188: CLASSIC .168 open shader (deposit cached card texels). Kept byte-identical.
+static NSString * const AXS_MSD_SHADER_CLASSIC = @"\
 #include <metal_stdlib>\n\
 using namespace metal;\n\
 struct DustUniforms {\n\
@@ -311,6 +312,250 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms
     return texel*(in.fade*shape);\n\
 }\n";
 
+// .188: COVER .182 open shader (wallpaper cover fades per cell, real card beneath).
+// Copied verbatim from .182 stable -- only the openMode=1/2 branches differ.
+static NSString * const AXS_MSD_SHADER_COVER = @"\
+#include <metal_stdlib>\n\
+using namespace metal;\n\
+struct DustUniforms {\n\
+    float2 viewport;\n\
+    float2 origin;\n\
+    float2 cardSize;\n\
+    uint columns;\n\
+    uint rows;\n\
+    float time;\n\
+    float distance;\n\
+    float seed;\n\
+    uint style;\n\
+    uint openMode;\n\
+    float sourceX;\n\
+    float sourceY;\n\
+};\n\
+struct DustVertex {\n\
+    float4 position [[position]];\n\
+    float2 uv;\n\
+    float2 local;\n\
+    float fade;\n\
+    float breakage;\n\
+    float dock;\n\
+    float3 tint;\n\
+    float isOpen;\n\
+    float noiseX;\n\
+    float noiseY;\n\
+};\n\
+float dustHash(float2 v) {\n\
+    return fract(sin(dot(v, float2(127.1,311.7))) * 43758.5453);\n\
+}\n\
+float3 axsPalette(float p) {\n\
+    p = fract(p) * 5.0;\n\
+    if (p < 1.0) return mix(float3(0.10,0.86,0.94), float3(0.25,0.45,0.98), p);\n\
+    if (p < 2.0) return mix(float3(0.25,0.45,0.98), float3(0.68,0.28,0.98), p-1.0);\n\
+    if (p < 3.0) return mix(float3(0.68,0.28,0.98), float3(0.98,0.30,0.68), p-2.0);\n\
+    if (p < 4.0) return mix(float3(0.98,0.30,0.68), float3(1.00,0.68,0.22), p-3.0);\n\
+    return mix(float3(1.00,0.68,0.22), float3(0.10,0.86,0.94), p-4.0);\n\
+}\n\
+vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[instance_id]],\n\
+                              constant DustUniforms& u [[buffer(0)]]) {\n\
+    const float2 corners[6] = {float2(0,0),float2(1,0),float2(0,1),\n\
+                              float2(1,0),float2(1,1),float2(0,1)};\n\
+    float2 cell = float2(instanceID % u.columns, instanceID / u.columns);\n\
+    float2 grid = float2(u.columns, u.rows);\n\
+    float2 unit = (cell+0.5)/grid;\n\
+    float2 corner = corners[vertexID];\n\
+    float2 noiseCell = cell + float2(u.seed, u.seed*0.371);\n\
+    float r = dustHash(noiseCell);\n\
+    float r2 = dustHash(noiseCell + 19.7);\n\
+    float r3 = dustHash(noiseCell + 72.3);\n\
+    float r4 = dustHash(noiseCell + 43.7);\n\
+    if (u.openMode == 1u) {\n\
+        uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+        h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
+        float hf = (float)(h & 0xffffu)/65535.0;\n\
+        float order = 0.96*unit.y + 0.04*hf;\n\
+        float arrival = 0.35 + 0.65*order;\n\
+        float departure = arrival - 0.35;\n\
+        float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
+        float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
+        float2 landing = (cell + 0.5 + jitter)/grid;\n\
+        float2 tile = u.cardSize/grid;\n\
+        float dock = smoothstep(arrival - 0.03, arrival - 0.004, u.time);\n\
+        float2 finger = float2(u.sourceX, u.sourceY);\n\
+        float ang = r*6.2831853;\n\
+        float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
+        float2 dest = u.origin + landing*u.cardSize;\n\
+        float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
+        float2 c1 = float2(mix(start.x, dest.x, 0.30) + (r2-0.5)*u.cardSize.x*0.55,\n\
+                           max(start.y, dest.y) + approach*(0.7 + 1.5*r2));\n\
+        float2 c2 = dest + float2((r-0.5)*u.cardSize.x*0.45, approach*(0.4 + 1.0*r3));\n\
+        float b = 1.0 - t;\n\
+        float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
+        pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)\n\
+                 * u.cardSize.x*0.05*(1.0-t);\n\
+        float2 size = float2(mix(1.15, 2.4, r3));\n\
+        pos += (corner-0.5)*size;\n\
+        float born = step(departure, u.time);\n\
+        DustVertex outO;\n\
+        outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
+        outO.uv=landing;\n\
+        outO.local=corner;\n\
+        outO.fade=born*(1.0-dock);\n\
+        outO.breakage=0.0;\n\
+        outO.dock=dock;\n\
+        outO.tint=axsPalette(r + hf*0.15);\n\
+        outO.isOpen=1.0;\n\
+        outO.noiseX=r;\n\
+        outO.noiseY=r3;\n\
+        return outO;\n\
+    }\n\
+    if (u.openMode == 2u) {\n\
+        uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+        h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
+        float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
+        float order2 = 0.96*unit.y + 0.04*hf2;\n\
+        float arrival2 = 0.35 + 0.65*order2;\n\
+        float dock = smoothstep(arrival2 - 0.03, arrival2 - 0.004, u.time);\n\
+        float2 tile = u.cardSize/grid;\n\
+        float2 pos = u.origin + (cell + corner)*tile;\n\
+        float2 uvS = pos/u.viewport;\n\
+        DustVertex outT;\n\
+        outT.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
+        outT.uv=uvS;\n\
+        outT.local=corner;\n\
+        outT.fade=1.0;\n\
+        outT.breakage=0.0;\n\
+        outT.dock=dock;\n\
+        outT.tint=float3(0.0);\n\
+        outT.isOpen=2.0;\n\
+        outT.noiseX=0.0;\n\
+        outT.noiseY=0.0;\n\
+        return outT;\n\
+    }\n\
+    float2 rel = (unit-0.5)*u.cardSize;\n\
+    float len = length(rel); if (len < 1.0) len = 1.0;\n\
+    float2 dirOut = rel/len;\n\
+    float2 dirIn = -dirOut;\n\
+    float begin; float span;\n\
+    float dx; float dy; float spinEnd; float scEnd;\n\
+    int easeMode = 0;\n\
+    if (u.style == 8u) {\n\
+        begin = (unit.x + 1.0-unit.y)*0.18 + r*0.025;\n\
+        span  = 0.56 + 0.035*r2;\n\
+    } else if (u.style == 1u) {\n\
+        dx = (r-0.5)*100.0;\n\
+        dy = 80.0+140.0*r2;\n\
+        spinEnd = (r3-0.5)*1.8;\n\
+        scEnd = 0.35+0.30*r4;\n\
+        begin = r4*0.15/1.20;\n\
+        span = 1.05/1.20;\n\
+        easeMode = 1;\n\
+    } else if (u.style == 2u) {\n\
+        float pull = len + 20.0+60.0*r;\n\
+        float tang = 90.0+70.0*r2;\n\
+        dx = dirIn.x*pull - dirIn.y*tang;\n\
+        dy = dirIn.y*pull + dirIn.x*tang;\n\
+        spinEnd = (r3-0.5)*6.0;\n\
+        scEnd = 0.0;\n\
+        begin = unit.y*0.18/1.03;\n\
+        span = 0.85/1.03;\n\
+    } else if (u.style == 3u) {\n\
+        float dist = len + 160.0+120.0*r2;\n\
+        dx = dirOut.x*dist;\n\
+        dy = dirOut.y*dist;\n\
+        spinEnd = 0.0;\n\
+        scEnd = 0.2;\n\
+        begin = (len/320.0)/1.83;\n\
+        span = 0.70/1.83;\n\
+    } else if (u.style == 4u) {\n\
+        dx = (r-0.5)*90.0;\n\
+        dy = -(60.0+110.0*r2);\n\
+        spinEnd = (r3-0.5)*1.0;\n\
+        scEnd = 0.15+0.25*r4;\n\
+        begin = r4*0.30/1.55;\n\
+        span = 1.25/1.55;\n\
+    } else if (u.style == 5u) {\n\
+        dx = 0.0; dy = 0.0; spinEnd = 0.0; scEnd = 1.0;\n\
+        begin = r*0.70/0.88;\n\
+        span = 0.18/0.88;\n\
+    } else if (u.style == 6u) {\n\
+        dx = (uint(cell.y) % 2u == 0u) ? 16.0 : -16.0;\n\
+        dy = 0.0; spinEnd = 0.0; scEnd = 1.0;\n\
+        begin = unit.y*0.60/0.85;\n\
+        span = 0.25/0.85;\n\
+    } else if (u.style == 7u) {\n\
+        dx = cos(r*6.2831853)*(120.0+180.0*r2);\n\
+        dy = sin(r*6.2831853)*(120.0+180.0*r2)+90.0;\n\
+        spinEnd = (r3-0.5)*5.2;\n\
+        scEnd = 0.25+0.25*r4;\n\
+        begin = r4*0.08/1.03;\n\
+        span = 0.95/1.03;\n\
+        easeMode = 1;\n\
+    } else {\n\
+        dx = cos(r*6.2831853)*(100.0+220.0*r2);\n\
+        dy = sin(r*6.2831853)*(100.0+220.0*r2)-40.0;\n\
+        spinEnd = (r3-0.5)*2.0;\n\
+        scEnd = 0.12;\n\
+        begin = r4*0.12/0.87;\n\
+        span = 0.75/0.87;\n\
+    }\n\
+    float progress = clamp((u.time-begin)/span, 0.0, 1.0);\n\
+    float burst = smoothstep(0.0,0.18,progress);\n\
+    float motion;\n\
+    if (easeMode == 1) motion = progress*progress;\n\
+    else if (easeMode == 0) motion = 1.0-(1.0-progress)*(1.0-progress);\n\
+    else motion = pow(progress,1.12);\n\
+    float dxm; float dym; float shrink; float angle;\n\
+    if (u.style == 8u) {\n\
+        dxm = (0.62 + 1.05*r)*u.distance*motion + (r2-0.5)*u.distance*0.40*motion;\n\
+        dym = -(0.45 + 1.05*r2)*u.distance*motion + sin(progress*7.0+r3*6.283)*u.distance*0.13*motion;\n\
+        shrink = mix(1.0, mix(0.24,0.56,r3), smoothstep(0.01,0.65,progress));\n\
+        angle = (r3-0.5)*4.8*motion;\n\
+    } else {\n\
+        dxm = dx*motion;\n\
+        dym = dy*motion;\n\
+        shrink = mix(1.0, scEnd, motion);\n\
+        angle = spinEnd*motion;\n\
+    }\n\
+    float2 tileSize = u.cardSize/grid;\n\
+    float2 delta = (corner-0.5)*tileSize*shrink;\n\
+    float c=cos(angle),s=sin(angle);\n\
+    delta=float2(c*delta.x-s*delta.y,s*delta.x+c*delta.y);\n\
+    float2 p = u.origin + unit*u.cardSize + delta + float2(dxm,dym);\n\
+    DustVertex out;\n\
+    out.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
+    out.uv=(cell+corner)/grid;\n\
+    out.local=corner;\n\
+    float fade;\n\
+    if (u.style == 8u) fade = 1.0-smoothstep(0.32+0.20*r2,1.0,progress);\n\
+    else fade = 1.0-motion;\n\
+    out.fade=fade;\n\
+    out.breakage=(u.style == 8u) ? burst : 0.0;\n\
+    out.dock=0.0;\n\
+    out.tint=float3(0.0);\n\
+    out.isOpen=0.0;\n\
+    return out;\n\
+}\n\
+fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]]) {\n\
+    constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
+    float4 texel=image.sample(sampleImage,in.uv);\n\
+    if (in.isOpen > 1.5) {\n\
+        return texel*(1.0-in.dock)*in.fade;\n\
+    }\n\
+    if (in.isOpen > 0.5) {\n\
+        float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));\n\
+        float core=1.0-smoothstep(0.0,0.40,length(in.local-0.5));\n\
+        float phase=u.seed + u.time*2.1;\n\
+        float3 texelC=texel.rgb/max(texel.a,0.001);\n\
+        float3 grain=mix(axsPalette(in.noiseX + phase*0.025), texelC, 0.35);\n\
+        float sparkle=0.5+0.5*sin(phase*2.1+in.noiseY*6.2831853);\n\
+        float glint=smoothstep(0.60,0.87,in.noiseY)*core*(0.15+0.30*sparkle);\n\
+        grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
+        return float4(grain,1.0)*(roundDust*in.fade);\n\
+    }\n\
+    float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
+    float shape=mix(1.0,roundDust,in.breakage);\n\
+    return texel*(in.fade*shape);\n\
+}\n";
+
 // C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 56 bytes.
 typedef struct {
     float viewport[2];
@@ -342,6 +587,11 @@ static id<MTLDevice> sMsdDevice = nil;
 // missing selector returns NO cleanly instead of throwing into UIView fallback.
 static id<MTLCommandQueue> sMsdQueue = nil;
 static id<MTLRenderPipelineState> sMsdPipeline = nil;
+// .188: second pipeline for the wallpaper-cover open style (.182 shader).
+static id<MTLRenderPipelineState> sMsdPipelineCover = nil;
+static BOOL sMsdCoverMode = NO;   // 1 = wallpaper-cover style, 0 = classic .168
+void axs_msd_setCoverMode(BOOL on);   // called from AxsDismissEffect before assemble
+void axs_msd_setCoverMode(BOOL on) { sMsdCoverMode = on; }
 static BOOL sMsdTried = NO;
 
 static NSString *sMsdFailReason = nil;   // .114: survives log rotation
@@ -363,8 +613,20 @@ static BOOL axs_msd_ensurePipeline(void) {
             axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
+        // .188: build a pipeline from each shader source. Classic MUST compile
+        // (dismiss + classic open depend on it). Cover is optional: if it fails,
+        // the wallpaper style falls back to native instead of killing dismiss.
+        MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+        pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+        pd.colorAttachments[0].blendingEnabled = YES;
+        pd.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
+        pd.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+        pd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
+        pd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
+
+        // --- classic (.168) ---
         NSError *err = nil;
-        id<MTLLibrary> lib = [sMsdDevice newLibraryWithSource:AXS_MSD_SHADER
+        id<MTLLibrary> lib = [sMsdDevice newLibraryWithSource:AXS_MSD_SHADER_CLASSIC
                                                       options:nil error:&err];
         if (lib == nil) {
             sMsdFailReason = [NSString stringWithFormat:@"shader compile FAILED: %@", [err localizedDescription]];
@@ -377,17 +639,8 @@ static BOOL axs_msd_ensurePipeline(void) {
             axs_msd_log(@"metal functions missing vf=%d ff=%d", vf != nil, ff != nil);
             return NO;
         }
-        MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
         pd.vertexFunction = vf;
         pd.fragmentFunction = ff;
-        pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-        // CG bitmap pixels are premultiplied -> one / oneMinusSourceAlpha
-        pd.colorAttachments[0].blendingEnabled = YES;
-        pd.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorOne;
-        pd.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-        pd.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorOne;
-        pd.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-
         NSError *pe = nil;
         sMsdPipeline = [sMsdDevice newRenderPipelineStateWithDescriptor:pd error:&pe];
         if (sMsdPipeline == nil) {
@@ -395,7 +648,30 @@ static BOOL axs_msd_ensurePipeline(void) {
             axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
-        axs_msd_log(@"metal compiled OK pipeline ready");
+        // --- cover (.182 wallpaper) ---
+        NSError *err2 = nil;
+        id<MTLLibrary> lib2 = [sMsdDevice newLibraryWithSource:AXS_MSD_SHADER_COVER
+                                                       options:nil error:&err2];
+        if (lib2 == nil) {
+            axs_msd_log(@"cover shader compile FAILED: %@ (wallpaper style unavailable)",
+                        [err2 localizedDescription]);
+        } else {
+            id<MTLFunction> vf2 = [lib2 newFunctionWithName:@"nlDustVertex"];
+            id<MTLFunction> ff2 = [lib2 newFunctionWithName:@"nlDustFragment"];
+            if (vf2 == nil || ff2 == nil) {
+                axs_msd_log(@"cover shader functions missing vf=%d ff=%d", vf2 != nil, ff2 != nil);
+            } else {
+                pd.vertexFunction = vf2;
+                pd.fragmentFunction = ff2;
+                NSError *pe2 = nil;
+                sMsdPipelineCover = [sMsdDevice newRenderPipelineStateWithDescriptor:pd error:&pe2];
+                if (sMsdPipelineCover == nil) {
+                    axs_msd_log(@"cover pipeline FAILED: %@ (wallpaper style unavailable)",
+                                [pe2 localizedDescription]);
+                }
+            }
+        }
+        axs_msd_log(@"metal compiled OK pipeline ready cover=%d", sMsdPipelineCover != nil);
         return YES;
     } @catch (NSException *e) {
         sMsdFailReason = [NSString stringWithFormat:@"ensurePipeline EXCEPTION %@", [e reason]];
@@ -591,29 +867,54 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     if (cb == nil) return NO;
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
     if (enc == nil) return NO;
-    [enc setRenderPipelineState:sMsdPipeline];
+    // .188: wallpaper-cover style uses the .182 pipeline and its pass order
+    // (cover tiles FIRST, dust LAST); classic .168 keeps its original order.
+    BOOL coverPass = sMsdCoverMode && _u.openMode == 1u && sMsdPipelineCover != nil;
+    [enc setRenderPipelineState:coverPass ? sMsdPipelineCover : sMsdPipeline];
     [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     // .156: the open fragment reads u.seed/u.time for the sparkle phase;
     // without this binding the whole shader failed to compile and BOTH
     // open and dissolve fell back to "no effect".
     [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     [enc setFragmentTexture:self.texture atIndex:0];
-    // 6 vertices = one quad; one instance per grain. ONE draw call for all.
-    [enc drawPrimitives:MTLPrimitiveTypeTriangle
-            vertexStart:0 vertexCount:6
-          instanceCount:(NSUInteger)(_u.columns * _u.rows)];
-    // .157: deposited-card tile pass (open only, once the real texture has
-    // been swapped in). Same clock, same hash, same grid -- the card is
-    // painted on the GPU cell by cell, exactly where the dust dies.
-    if (_u.openMode == 1u && _cardReady) {
-        uint32_t savedOpen = _u.openMode;
-        _u.openMode = 2u;
-        [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
-        [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+    if (coverPass) {
+        // .182: COVER pass first -- paint the wallpaper back over the card
+        // region, fading out cell by cell as dust arrives; the REAL card is
+        // visible beneath and is progressively uncovered.
+        if (self.texture != nil && self.texture.width >= 256 && self.texture.height >= 256) {
+            uint32_t savedOpen = _u.openMode;
+            _u.openMode = 2u;
+            [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+            [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle
+                    vertexStart:0 vertexCount:6
+                  instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+            _u.openMode = savedOpen;
+            [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+            [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        }
+        // Dust LAST: grains fly in and fade at arrival (the cover does the reveal).
         [enc drawPrimitives:MTLPrimitiveTypeTriangle
                 vertexStart:0 vertexCount:6
               instanceCount:(NSUInteger)(_u.columns * _u.rows)];
-        _u.openMode = savedOpen;
+    } else {
+        // 6 vertices = one quad; one instance per grain. ONE draw call for all.
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle
+                vertexStart:0 vertexCount:6
+              instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+        // .157: deposited-card tile pass (open only, once the real texture has
+        // been swapped in). Same clock, same hash, same grid -- the card is
+        // painted on the GPU cell by cell, exactly where the dust dies.
+        if (_u.openMode == 1u && _cardReady) {
+            uint32_t savedOpen = _u.openMode;
+            _u.openMode = 2u;
+            [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+            [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle
+                    vertexStart:0 vertexCount:6
+                  instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+            _u.openMode = savedOpen;
+        }
     }
     [enc endEncoding];
     [cb presentDrawable:drawable];
