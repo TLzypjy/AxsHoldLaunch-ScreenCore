@@ -1,3 +1,20 @@
+beautify.193 变更（只读探测包：定位悬浮球真实 UIView 与 TOJB hook 点）：
+- 背景：分析参考插件 com.ms.openparticleanimation 0.3.67 后确认——它不是"截屏"，
+  而是 hook TrollOpenJB 的托盘激活回调，直接拿悬浮球的真实 UIView，对该 view 做
+  snapshotViewAfterScreenUpdates + drawViewHierarchyInRect 取真像素，当 source/icon
+  纹理；真浮窗 view 当 windowImage 纹理。四条 UIKit 全屏截屏路全失败的根因是截错了
+  对象（系统合成屏幕像素用户态读不到），不是 API 问题。
+- 本版为纯日志探测，不动任何动画逻辑、不动 .192 的 CGDisplay/ownership：
+  1) 运行时枚举所有 TOJB*/Troll* 类名及其方法名+typeEncoding
+     （PROBE TOJB CLASS / PROBE TOJB METHOD），用于下一版精确 hook 悬浮球点击。
+  2) 复用已有 sendEvent: hook，在 touchesBegan dump 命中 view 的 superview 链
+     （PROBE TOUCH# / PROBE CHAIN），悬浮球必在该链中。
+  3) 对 <=180pt 的候选 view 做 snapshot+离屏渲染，打印像素与 layer.contents
+     （PROBE mini-capture ... hierarchy= image= pixels=），验证能否拿到真图标像素。
+  4) 每 5 次触摸采样一次，避免日志刷屏；全部 @try 包裹，只写 axs_dm_log。
+- 待实测：从日志确定悬浮球 view 的类名+尺寸+hierarchy/image/pixels 结果，再据此做
+  正式的 source=悬浮球 / target=真浮窗 双纹理呼出效果。
+
 beautify.192 变更（E 方案：CGDisplay 显示层截屏 + 修正循环根因—检查顺序）：
 - 用户实测 .191（log72）：截图仍回退经典（src=snapshotOffscreen 0 次，
   12 次 no composited screen image）；约 2s 循环呼出依然存在。用户确认装的是 .191。

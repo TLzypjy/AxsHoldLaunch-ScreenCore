@@ -1799,6 +1799,111 @@ static void axs_open_installAnimationHook(void) {
     [axs_dm_hooked addObject:@"OPEN:addAnimation"];
 }
 
+// ===========================================================================
+// beautify.193 -- READ-ONLY PROBE. No animation logic is touched.
+// Goal: prove we can grab the floating-icon's REAL UIView at tap time and
+// snapshot its true pixels (the reference plugin does exactly this via its
+// tray-capture callback). Two zero-risk strategies:
+//   1) On every touch, dump the hit-view's superview chain (the floating icon
+//      is guaranteed to be in that chain) + the full TOJB class/method map.
+//   2) For each candidate view, snapshot it and offscreen-render it, then log
+//      pixel size + layer.contents class -- the same "mini-capture hierarchy
+//      image pixels" probe the reference plugin logs.
+// Everything is wrapped in @try and only writes to axs_dm_log.
+// ===========================================================================
+
+static BOOL axs_probe_done = NO;
+static NSInteger axs_probe_touchSeq = 0;
+
+// Strategy 1a: enumerate every TOJB* class and its methods once.
+static void axs_probe_dumpTOJBClasses(void) {
+    if (axs_probe_done) return;
+    axs_probe_done = YES;
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) {
+        axs_dm_log(@"PROBE TOJB class list empty");
+        return;
+    }
+    Class *classes = (Class *)calloc((size_t)count, sizeof(Class));
+    if (classes == NULL) return;
+    count = objc_getClassList(classes, count);
+    axs_dm_log(@"PROBE TOJB scan classes=%d", count);
+    int tojbClasses = 0;
+    for (int i = 0; i < count; i++) {
+        Class cls = classes[i];
+        const char *cname = class_getName(cls);
+        if (cname == NULL) continue;
+        if (strstr(cname, "TOJB") == NULL && strstr(cname, "Troll") == NULL) continue;
+        tojbClasses++;
+        unsigned int mcount = 0;
+        Method *methods = class_copyMethodList(cls, &mcount);
+        axs_dm_log(@"PROBE TOJB CLASS %s methods=%u", cname, mcount);
+        for (unsigned int j = 0; j < mcount; j++) {
+            SEL sel = method_getName(methods[j]);
+            const char *enc = method_getTypeEncoding(methods[j]);
+            axs_dm_log(@"PROBE TOJB METHOD %s | %s", sel ? sel_getName(sel) : "?", enc ? enc : "?");
+        }
+        if (methods != NULL) free(methods);
+    }
+    free(classes);
+    axs_dm_log(@"PROBE TOJB done tojbClasses=%d", tojbClasses);
+}
+
+// Snapshot + offscreen render ONE candidate view, log pixel evidence.
+static void axs_probe_captureView(UIView *v, NSString *label) {
+    if (v == nil) return;
+    CGRect bounds = [v bounds];
+    int hierarchyOK = 0, imageOK = 0;
+    CGSize pixels = CGSizeZero;
+    NSString *contentsClass = @"?";
+    @try {
+        UIView *snap = [v snapshotViewAfterScreenUpdates:YES];
+        hierarchyOK = (snap != nil) ? 1 : 0;
+    } @catch (NSException *ignored) { }
+    @try {
+        UIGraphicsBeginImageContextWithOptions(bounds.size, NO, 0.0);
+        [v drawViewHierarchyInRect:bounds afterScreenUpdates:YES];
+        UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+        UIGraphicsEndImageContext();
+        if (img != nil && img.CGImage != nil) {
+            imageOK = 1;
+            pixels = CGSizeMake((CGFloat)CGImageGetWidth(img.CGImage),
+                                (CGFloat)CGImageGetHeight(img.CGImage));
+        }
+    } @catch (NSException *ignored) { }
+    @try {
+        id contents = v.layer.contents;
+        contentsClass = contents != nil ? NSStringFromClass([contents class]) : @"nil";
+    } @catch (NSException *ignored) { }
+    axs_dm_log(@"PROBE mini-capture %@ class=%@ frame=%@ hierarchy=%d image=%d pixels=%zux%zu layerContents=%@",
+               label, NSStringFromClass([v class]), NSStringFromCGRect([v frame]),
+               hierarchyOK, imageOK, (size_t)pixels.width, (size_t)pixels.height, contentsClass);
+}
+
+// Dump the touch view's superview chain; snapshot each candidate up to 6 deep.
+static void axs_probe_dumpTouchChain(UIView *touchView) {
+    axs_probe_touchSeq++;
+    if (axs_probe_touchSeq % 5 != 1) return;   // throttle: only 1 in 5 taps
+    axs_dm_log(@"PROBE TOUCH#%ld hitView=%@", (long)axs_probe_touchSeq,
+               touchView != nil ? NSStringFromClass([touchView class]) : @"nil");
+    UIView *cur = touchView;
+    int depth = 0;
+    while (cur != nil && depth < 6) {
+        @try {
+            axs_dm_log(@"PROBE CHAIN[%d] class=%@ frame=%@ alpha=%.2f hidden=%d",
+                       depth, NSStringFromClass([cur class]),
+                       NSStringFromCGRect([cur frame]), [cur alpha], [cur isHidden]);
+            // capture only compact views (icon-sized), skip full-screen containers
+            CGRect f = [cur frame];
+            if (f.size.width > 0 && f.size.width <= 180 && f.size.height > 0 && f.size.height <= 180) {
+                axs_probe_captureView(cur, [NSString stringWithFormat:@"CHAIN[%d]", depth]);
+            }
+        } @catch (NSException *ignored) { }
+        cur = [cur superview];
+        depth++;
+    }
+}
+
 static IMP axs_open_orig_sendEvent = NULL;
 static void axs_open_sendEvent(id self, SEL _cmd, UIEvent *event) {
     if (axs_open_orig_sendEvent != NULL) {
@@ -1814,6 +1919,9 @@ static void axs_open_sendEvent(id self, SEL _cmd, UIEvent *event) {
         if ([t phase] == UITouchPhaseBegan) {
             axs_open_touchBeganPos = loc;
             axs_open_touchBeganAt = CACurrentMediaTime();
+            // .193: read-only probe -- dump hit view chain + capture icon pixels
+            axs_probe_dumpTOJBClasses();
+            axs_probe_dumpTouchChain(touchView);
         } else if ([t phase] == UITouchPhaseEnded) {
             axs_open_lastTouchUp = loc;
             axs_open_lastTouchUpAt = CACurrentMediaTime();
