@@ -1170,17 +1170,18 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         UIImage *tex = nil;
         NSString *texKind = nil;
         BOOL useCover = axs_open_coverStyle() && axs_open_wallpaperShot != nil;
-        if (useCover) {
-            // .188: the WALLPAPER is the cover texture -- it fades out per cell
-            // as dust arrives, uncovering the REAL card beneath.
-            tex = axs_open_wallpaperShot;
-            texKind = @"wallpaper";
-        }
-        UIImage *cachedCard = useCover ? nil : axs_open_cachedCardSnapshotForView(card);
+        UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);
         if (cachedCard != nil && cachedCard.CGImage != NULL
             && CGImageGetWidth(cachedCard.CGImage) >= 256) {
             tex = cachedCard;
             texKind = @"cached-card";
+        }
+        if (useCover) {
+            // .188: the WALLPAPER is the cover texture -- it fades out per cell
+            // as dust arrives, uncovering the REAL card beneath. Applied after
+            // the cached-card fallback so the classic path stays byte-identical.
+            tex = axs_open_wallpaperShot;
+            texKind = @"wallpaper";
         }
         if (tex == nil) { tex = axs_open_sandTexture(); texKind = @"reference-dust"; }
         if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
