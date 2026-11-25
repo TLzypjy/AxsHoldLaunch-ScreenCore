@@ -713,12 +713,16 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
     // silently killing the deposit reveal.
     @try {
         if (td.storageMode == MTLStorageModeShared) {
-            uint8_t smp[4 * 4 * 4];
-            [tex getBytes:smp bytesPerRow:4 * 4 * 4
+            // .175 CRITICAL FIX: the buffer must hold bytesPerRow * rows.
+            // The old 48-byte buffer was overwritten with 4 rows * 48 bytes
+            // (192 bytes), smashing the stack canary -> SIGABRT -> respring
+            // on every open (SpringBoard-2026-11-25-171832.ips).
+            uint8_t smp[4 * 48];
+            [tex getBytes:smp bytesPerRow:48
               fromRegion:MTLRegionMake2D(w / 2, h / 2, 4, 4) mipmapLevel:0];
             axs_msd_log(@"texture upload %lux%lu alpha %d %d %d %d",
                         (unsigned long)w, (unsigned long)h,
-                        smp[3], smp[19], smp[35], smp[51]);
+                        smp[3], smp[51], smp[99], smp[147]);
         }
     } @catch (NSException *ignored) { }
     return tex;

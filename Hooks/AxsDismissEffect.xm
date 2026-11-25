@@ -432,9 +432,11 @@ static UIImage *axs_open_cachedCardSnapshotForView(UIView *owner) {
 
 static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
 static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView);   // defined later in this file
-static UIImage *axs_dm_fixSnapshotCorners(UIImage *img, UIView *refView);   // defined later in this file
 
 
+static CGFloat axs_dm_cornerRadiusForView(UIView *view);   // defined later
+static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView);   // defined later
+static UIImage *axs_dm_fixSnapshotCorners(UIImage *img, UIView *refView);   // defined later
 // .158: cheap 1x-scale capture of a VISIBLE card (no unhide games needed).
 static UIImage *axs_open_captureVisibleCardCheap(UIView *card) {
     UIImage *shot = nil;
@@ -490,38 +492,6 @@ static CGFloat axs_dm_cornerRadiusForView(UIView *view) {
     } @catch (NSException *ignored) {
         return 0.0;
     }
-}
-
-// .167: save + clear the view's square backgrounds so the rounded content
-// shape rasterizes with TRUE alpha corners (exact radius, no morphing at the
-// handoffs). Only square layers (cornerRadius < 1) are cleared; the rounded
-// background layers are left alone. Restore with axs_dm_restoreViewBackgrounds.
-static void axs_dm_clearViewBackgrounds(UIView *view, NSMutableArray *saved) {
-    @try {
-        if (view.backgroundColor != nil) {
-            [saved addObject:view.backgroundColor];
-            view.backgroundColor = nil;
-        } else {
-            [saved addObject:[NSNull null]];
-        }
-        if (view.layer.cornerRadius < 1.0 && view.layer.backgroundColor != NULL) {
-            [saved addObject:(__bridge id)view.layer.backgroundColor];
-            view.layer.backgroundColor = NULL;
-        } else {
-            [saved addObject:[NSNull null]];
-        }
-    } @catch (NSException *ignored) { }
-}
-
-static void axs_dm_restoreViewBackgrounds(UIView *view, NSMutableArray *saved) {
-    @try {
-        if (saved.count < 2) return;
-        id vbg = saved[0];
-        view.backgroundColor = (vbg == [NSNull null]) ? nil : (UIColor *)vbg;
-        id lbg = saved[1];
-        view.layer.backgroundColor = (lbg == [NSNull null])
-            ? NULL : (__bridge CGColorRef)lbg;
-    } @catch (NSException *ignored) { }
 }
 
 // true-corner probe: are the four corners of the image opaque?
@@ -619,11 +589,11 @@ static BOOL axs_dm_emitParticlesFromView(UIView *sourceView, CGRect sourceFrameI
         NSInteger style = axs_dm_style();
         CGFloat speedScale = axs_dm_speedScale();
         CGFloat density = axs_dm_densityScale();
-        NSMutableArray *savedBg = [NSMutableArray array];
-        axs_dm_clearViewBackgrounds(sourceView, savedBg);
-        UIImage *shot = axs_dm_snapshot(sourceView);
-        axs_dm_restoreViewBackgrounds(sourceView, savedBg);
-        shot = axs_dm_fixSnapshotCorners(shot, sourceView);
+        // .175: DO NOT clear the container backgrounds -- the rounded dark
+        // background IS the card content; clearing it made the texture nearly
+        // transparent (probe: alpha 0 0 0 133) and the reveal vanished.
+        // Capture as-is and clip the square corners with the measured radius.
+        UIImage *shot = axs_dm_fixSnapshotCorners(axs_dm_snapshot(sourceView), sourceView);
         if (shot == nil || shot.CGImage == nil) {
             axs_dm_log(@"emit: snapshot failed");
             return NO;
