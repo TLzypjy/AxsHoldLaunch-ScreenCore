@@ -1274,7 +1274,7 @@ static void axs_open_becameVisible(UIView *v) {
         // genuine open assemble instead of silently eating it.
         if (axs_open_selfRestore) {
             axs_open_selfRestore = NO;
-            if (CACurrentMediaTime() - axs_open_selfRestoreAt > 0.6) {
+            if (CACurrentMediaTime() - axs_open_selfRestoreAt > 0.15) {
                 axs_dm_log(@"OPEN orphaned self-restore flag released, re-assembling");
             } else {
                 axs_dm_log(@"OPEN candidate skipped (self restore)");

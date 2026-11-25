@@ -131,11 +131,14 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
         float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
-        float2 landing = (cell + 0.5 + jitter)/grid;\n\
+        float2 landing = (cell + 0.5 + jitter)/grid;
+        float2 tile = u.cardSize/grid;
+        float dock = smoothstep(arrival - 0.03, arrival - 0.004, u.time);\n\
         float2 finger = float2(u.sourceX, u.sourceY);\n\
         float ang = r*6.2831853;\n\
         float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
-        float2 dest = u.origin + landing*u.cardSize;\n\
+        float2 dest = mix(u.origin + landing*u.cardSize,
+                          u.origin + (cell + 0.5)*tile, dock);\n\
         float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
         float2 c1 = float2(mix(start.x, dest.x, 0.30) + (r2-0.5)*u.cardSize.x*0.55,\n\
                            max(start.y, dest.y) + approach*(0.7 + 1.5*r2));\n\
@@ -144,10 +147,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)\n\
                  * u.cardSize.x*0.05*(1.0-t);\n\
-        float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
-        float2 tileSize = u.cardSize/grid;\n\
-        float dock = smoothstep(arrival - 0.03, arrival - 0.004, u.time);\n\
-        float2 size = mix(dustSize, tileSize, dock);\n\
+        float2 size = mix(dustSize, tile, dock);\n\
         pos += (corner-0.5)*size;\n\
         float born = step(departure, u.time);\n\
         DustVertex outO;\n\
