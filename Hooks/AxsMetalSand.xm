@@ -156,7 +156,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 c2 = dest - float2(0.0, approach);\n\
         float b = 1.0 - ta;\n\
         p = b*b*b*p + 3.0*b*b*ta*c1 + 3.0*b*ta*ta*c2 + ta*ta*ta*dest;\n\
-        float2 size = mix(float2(mix(1.15, 2.4, r3)), u.cardSize/grid, dock);\n\
+        float2 tile = u.cardSize/grid;
+        float2 dustSize = float2(mix(1.15, 2.4, r3));
+        float2 size = mix(dustSize, tile, dock);\n\
         float angle = ((r3-0.5)*4.8*motion + sin(phase*0.43 + r*6.2831853)*0.35) * (burst*(1.0-dock));\n\
         float ca = cos(angle); float sa = sin(angle);\n\
         float2 lc = corner - 0.5;\n\
@@ -285,39 +287,39 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     out.isOpen=0.0;\n\
     return out;\n\
 }\n\
-fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]], texture2d<float> imageB [[texture(1)]]) {\n\
-    constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
-    float4 texA=image.sample(sampleImage, (u.openMode == 0u) ? in.uv : in.srcUv);\n\
-    float4 texB=imageB.sample(sampleImage, in.uv);\n\
-    float4 texel=(u.openMode == 0u) ? texA : texB;\n\
+fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> texIcon [[texture(0)]], texture2d<float> texCard [[texture(1)]]) {\n\
+    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);\n\
+    float4 texA  = texIcon.sample(s, in.srcUv);\n\
+    float4 texB  = texCard.sample(s, in.uv);\n\
+    float4 texel = mix(texA, texB, in.dock);\n\
+    float3 texelC = texB.rgb / max(texB.a, 0.001);\n\
     if (u.openMode == 0u) {\n\
         float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
         float shape=mix(1.0,roundDust,in.breakage);\n\
         return texel*(in.fade*shape);\n\
     }\n\
-    float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));\n\
-    float core=1.0-smoothstep(0.0,0.40,length(in.local-0.5));\n\
-    float phase=u.seed + u.time*2.1;\n\
-    float texW=0.10*smoothstep(0.5,0.95,in.dock);\n\
-    float3 texelC=texelB.rgb/max(texelB.a,0.001);\n\
-    float3 grain=mix(axsPalette(in.noiseX + phase*0.025), texelC, texW);\n\
-    float sparkle=0.5+0.5*sin(phase*2.1+in.noiseY*6.2831853);\n\
-    float glint=step(0.94,in.noiseY)*core*(0.15+0.30*sparkle);\n\
-    grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
-    float4 icon=mix(texelA, texelB, in.dock);\n\
-    float4 color=mix(float4(grain,1.0), icon, smoothstep(0.15,0.75,in.dock));\n\
-    float radius=min(max(0.0,u.cornerRadius), min(u.cardSize.x,u.cardSize.y)*0.5);\n\
-    float2 q=abs(in.uv*u.cardSize - u.cardSize*0.5) - (u.cardSize*0.5 - radius);\n\
-    float sd=length(max(q,float2(0.0))) + min(max(q.x,q.y),0.0) - radius;\n\
-    float aa=clamp(fwidth(sd),0.35,2.0);\n\
-    float rmask=1.0-smoothstep(-aa,aa,sd);\n\
-    float maskW=smoothstep(0.6,0.9,in.dock);\n\
-    float cm=mix(1.0,rmask,maskW);\n\
-    color.rgb*=cm;\n\
-    color.a*=cm;\n\
-    float alphaF=(1.0-smoothstep(0.40,0.50,length(in.local-0.5)))*in.fade;\n\
-    return float4(color.rgb*alphaF, color.a*alphaF);\n\
+    if (in.isOpen > 0.5) {\n\
+        float roundDust = 1.0 - smoothstep(0.40, 0.50, length(in.local - 0.5));\n\
+        float core = 1.0 - smoothstep(0.0, 0.40, length(in.local - 0.5));\n\
+        float phase = u.seed + u.time * 2.1;\n\
+        float texW = 0.10 * smoothstep(0.5, 0.95, in.dock);\n\
+        float3 grain = mix(axsPalette(in.noiseX + phase * 0.025), texelC, texW);\n\
+        float sparkle = 0.5 + 0.5 * sin(phase * 2.1 + in.noiseY * 6.2831853);\n\
+        float glint = smoothstep(0.60, 0.87, in.noiseY) * core * (0.15 + 0.30 * sparkle);\n\
+        grain = mix(grain, axsPalette(in.noiseY + 0.37 * in.noiseX), glint);\n\
+        float alpha = roundDust * in.fade;\n\
+        return float4(grain * alpha, alpha);\n\
+    }\n\
+    float radius = min(max(0.0, u.cornerRadius), min(u.cardSize.x, u.cardSize.y) * 0.5);\n\
+    float2 q = abs(in.uv * u.cardSize - u.cardSize * 0.5) - (u.cardSize * 0.5 - radius);\n\
+    float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;\n\
+    float aa = clamp(fwidth(sd), 0.35, 2.0);\n\
+    float mask = 1.0 - smoothstep(-aa, aa, sd);\n\
+    mask = mix(1.0, mask, smoothstep(0.6, 0.95, in.dock));\n\
+    float alpha = texel.a * in.fade * mask;\n\
+    return float4(texel.rgb, texel.a) * (in.fade * mask);\n\
 }\n\
+\n\
 \n";
 
 // C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 56 bytes.
@@ -381,8 +383,12 @@ static BOOL axs_msd_ensurePipeline(void) {
         id<MTLLibrary> lib = [sMsdDevice newLibraryWithSource:AXS_MSD_SHADER
                                                       options:nil error:&err];
         if (lib == nil) {
-            sMsdFailReason = [NSString stringWithFormat:@"shader compile FAILED: %@", [err localizedDescription]];
+            // .184: never silently fail -- print the full compiler error (with
+            // program_source line/column) and fall back to native immediately.
+            sMsdFailReason = [NSString stringWithFormat:@"shader compile FAILED: %@",
+                              err.localizedDescription ?: @"unknown"];
             axs_msd_log(@"%@", sMsdFailReason);
+            axs_msd_log(@"shader compile FAILED -> native fallback");
             return NO;
         }
         id<MTLFunction> vf = [lib newFunctionWithName:@"nlDustVertex"];
@@ -409,7 +415,7 @@ static BOOL axs_msd_ensurePipeline(void) {
             axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
-        axs_msd_log(@"metal compiled OK pipeline ready");
+        axs_msd_log(@"shader compiled OK pipeline ready functions=vertex,fragment textures=2");
         return YES;
     } @catch (NSException *e) {
         sMsdFailReason = [NSString stringWithFormat:@"ensurePipeline EXCEPTION %@", [e reason]];
