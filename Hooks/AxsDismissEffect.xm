@@ -441,32 +441,6 @@ static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img) {
     } @catch (NSException *ignored) { }
 }
 
-static UIImage *axs_open_cachedCardSnapshotForView(UIView *owner) {
-    @try {
-        if (owner == nil) return nil;
-        NSString *key = axs_open_windowKeyForView(owner);
-        if (key == nil) return nil;
-        UIImage *img = axs_open_snapshotCache[key];
-        // .168: memory miss -> load the persisted snapshot from disk once.
-        if (img == nil) {
-            NSString *pngPath = [[axs_open_cacheDir()
-                                  stringByAppendingPathComponent:key]
-                                 stringByAppendingPathExtension:@"png"];
-            img = [UIImage imageWithContentsOfFile:pngPath];
-            if (img != nil) {
-                axs_open_snapshotCache[key] = img;
-                axs_dm_log(@"OPEN snapshot loaded from disk key=%@ %zux%zu", key,
-                           (size_t)CGImageGetWidth(img.CGImage),
-                           (size_t)CGImageGetHeight(img.CGImage));
-            }
-        }
-        if (img == nil || img.CGImage == NULL) return nil;
-        if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return nil;
-        return img;
-    } @catch (NSException *ignored) {
-        return nil;
-    }
-}
 
 static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
 static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView);   // defined later in this file
