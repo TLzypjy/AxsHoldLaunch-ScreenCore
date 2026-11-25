@@ -701,6 +701,32 @@ static void axs_open_armSelfRestore(void) {
 // particles instead of popping the card in with no animation.
 static CFAbsoluteTime axs_open_openActiveUntil = 0;
 static CFAbsoluteTime axs_open_lastAssembleStart = -1e9;
+static BOOL axs_open_revealLive = NO;
+static UIImage *axs_open_wallpaperShot = nil;
+
+// .182: capture the screen state while the card is hidden -- this becomes
+// the WALLPAPER COVER texture: the overlay paints it back over the card
+// region cell by cell and fades each cell as the dust arrives, so the REAL
+// card (fresh content) is progressively uncovered beneath the overlay.
+static UIImage *axs_open_captureWallpaper(void) {
+    @try {
+        UIView *snap = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
+        if (snap == nil || snap.bounds.size.width < 100) return nil;
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.scale = 1.0;
+        fmt.opaque = YES;
+        UIGraphicsImageRenderer *r =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:snap.bounds format:fmt];
+        UIImage *img = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [snap drawViewHierarchyInRect:snap.bounds afterScreenUpdates:NO];
+        }];
+        if (img == nil || img.CGImage == NULL) return nil;
+        if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return nil;
+        return img;
+    } @catch (NSException *ignored) {
+        return nil;
+    }
+}
 static CGFloat axs_open_lastAssembleDur = 0.0;
 static BOOL axs_open_dismissedSinceAssemble = NO;
 // .116: last finger-lift position (ARC menu tap), tracked via UIWindow sendEvent
@@ -999,11 +1025,8 @@ static void axs_open_gpuTextureRetry(UIView *card, void *renderer, NSInteger tri
 static void axs_open_endWipeReveal(UIView *card) {
     @try {
         card.alpha = 1.0;
-        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
-        } else {
-            card.hidden = NO;
-        }
+        // .182: the card has been visible beneath the cover since the accept
+        // (unhidden through the ORIGINAL IMP) -- nothing to unhide here.
         if (card.layer.mask != nil) card.layer.mask = nil;
         // .177: the handoff unhide fires becameVisible ~1.7s after accept --
         // past the original ownership window, so the "stale assembled flag
@@ -1157,12 +1180,14 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // only the last-resort placeholder (dust color stays palette-driven).
         UIImage *tex = nil;
         NSString *texKind = nil;
-        UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);
-        if (cachedCard != nil && cachedCard.CGImage != NULL
-            && CGImageGetWidth(cachedCard.CGImage) >= 256
-            && axs_dm_centerHasContent(cachedCard)) {
-            tex = cachedCard;
-            texKind = @"cached-card";
+        // .182: the WALLPAPER is the texture -- the cover pass paints it back
+        // over the card region and fades it out per cell as the dust arrives,
+        // uncovering the REAL card beneath (fresh content, real corners).
+        UIImage *wallpaper = axs_open_wallpaperShot;
+        if (wallpaper != nil && wallpaper.CGImage != NULL
+            && CGImageGetWidth(wallpaper.CGImage) >= 256) {
+            tex = wallpaper;
+            texKind = @"wallpaper";
         }
         if (tex == nil) { tex = axs_open_sandTexture(); texKind = @"reference-dust"; }
         if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
@@ -1191,6 +1216,16 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
                    duration, density, (long)polls, texKind,
                    NSStringFromCGPoint(sourcePoint), sourceKind);
+        // .182: the real card is VISIBLE beneath the cover overlay from now
+        // on (unhidden through the ORIGINAL IMP so our own hook does not
+        // re-enter); the cover hides it until each cell is revealed.
+        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
+        } else if (axs_open_orig_setHidden == (IMP)1) {
+            struct objc_super sup = { (id)card, class_getSuperclass(object_getClass(card)) };
+            ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&sup, @selector(setHidden:), NO);
+        }
+        axs_open_revealLive = YES;
         // .157: ALL-GPU reveal. The card stays hidden for the whole animation;
         // the Metal overlay deposits real-card texels per cell with the same
         // hash clock as the dust (openMode=2 pass). No CAShapeLayer mask, no
@@ -1349,13 +1384,9 @@ static void axs_open_becameVisible(UIView *v) {
             sourceKind = @"last-lift";
         }
         axs_dm_log(@"OPEN source point %@ (%@)", NSStringFromCGPoint(sourcePoint), sourceKind);
-        // .167: fill the per-window cache BEFORE hiding -- the first ever
-        // open of a window has no snapshot yet, so its deposit pass had
-        // nothing to paint and the card only popped in after the dust.
-        @try {
-            UIImage *preShot = axs_open_captureVisibleCardCheap(card);
-            if (preShot != nil) axs_open_cacheCardSnapshot(card, preShot);
-        } @catch (NSException *ignored) { }
+        // .182: the pre-hide card capture is gone -- the reveal no longer
+        // paints cached card texels at all (the real card is uncovered
+        // beneath the wallpaper cover instead).
         // .122: hide from frame 0 (invisible). The native present animation is
         // NOT intercepted -- it still runs and its completions still fire, but
         // the addAnimation hook clamps its duration to 0.01s so it finishes
@@ -1364,6 +1395,19 @@ static void axs_open_becameVisible(UIView *v) {
         // the poll uses weak captures only (see axs_open_pollStep) -- no
         // block-copy of strong view captures anywhere.
         card.hidden = YES;
+        // .182: capture the screen WITHOUT the card (the hide commits inside
+        // snapshotViewAfterScreenUpdates:YES) -- the cover texture for the
+        // new reveal architecture. Failure falls back to the native present.
+        UIImage *wall = axs_open_captureWallpaper();
+        if (wall == nil) {
+            axs_dm_log(@"OPEN skipped (wallpaper capture failed)");
+            axs_open_assembleInFlight = NO;
+            axs_open_armSelfRestore();
+            card.hidden = NO;
+            return;
+        }
+        axs_open_wallpaperShot = wall;
+        axs_open_revealLive = NO;
         axs_open_assembleInFlight = YES;
         // .144: mark the card as owned from the FIRST frame. Every later
         // visibility event (our reveal, overlay cleanup, repeated present)
@@ -1391,7 +1435,7 @@ static void axs_open_setHidden(id self, SEL _cmd, BOOL hidden) {
     // safe inside the UIKit stack (proven by .119). This removes every
     // visible native-animation frame; the async flow continues below.
     if (axs_open_assembleInFlight && !axs_open_selfRestore
-        && axs_open_enabled()) {
+        && axs_open_enabled() && !axs_open_revealLive) {
         axs_open_markGone(v);
         if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
             ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(self, _cmd, YES);
@@ -1609,6 +1653,7 @@ static void axs_dm_trigger(NSString *tag) {
                 // .181: a genuine dismiss happened -- allow the next open's
                 // animation even inside the recent-assemble window.
                 axs_open_dismissedSinceAssemble = YES;
+                axs_open_revealLive = NO;
                 container.hidden = NO;
             } @catch (NSException *ignored) { }
         });

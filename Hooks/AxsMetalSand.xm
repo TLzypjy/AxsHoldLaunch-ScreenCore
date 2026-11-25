@@ -137,8 +137,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 finger = float2(u.sourceX, u.sourceY);\n\
         float ang = r*6.2831853;\n\
         float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
-        float2 dest = mix(u.origin + landing*u.cardSize,\n\
-                          u.origin + (cell + 0.5)*tile, dock);\n\
+        float2 dest = u.origin + landing*u.cardSize;\n\
         float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
         float2 c1 = float2(mix(start.x, dest.x, 0.30) + (r2-0.5)*u.cardSize.x*0.55,\n\
                            max(start.y, dest.y) + approach*(0.7 + 1.5*r2));\n\
@@ -147,14 +146,14 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)\n\
                  * u.cardSize.x*0.05*(1.0-t);\n\
-        float2 size = mix(float2(mix(1.15, 2.4, r3)), tile, dock);\n\
+        float2 size = float2(mix(1.15, 2.4, r3));\n\
         pos += (corner-0.5)*size;\n\
         float born = step(departure, u.time);\n\
         DustVertex outO;\n\
         outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
-        outO.uv=(cell + mix(float2(0.5), corner, dock))/grid;\n\
+        outO.uv=landing;\n\
         outO.local=corner;\n\
-        outO.fade=born;\n\
+        outO.fade=born*(1.0-dock);\n\
         outO.breakage=0.0;\n\
         outO.dock=dock;\n\
         outO.tint=axsPalette(r + hf*0.15);\n\
@@ -162,6 +161,29 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.noiseX=r;\n\
         outO.noiseY=r3;\n\
         return outO;\n\
+    }\n\
+    if (u.openMode == 2u) {\n\
+        uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+        h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
+        float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
+        float order2 = 0.96*unit.y + 0.04*hf2;\n\
+        float arrival2 = 0.35 + 0.65*order2;\n\
+        float dock = smoothstep(arrival2 - 0.03, arrival2 - 0.004, u.time);\n\
+        float2 tile = u.cardSize/grid;\n\
+        float2 pos = u.origin + (cell + corner)*tile;\n\
+        float2 uvS = pos/u.viewport;\n\
+        DustVertex outT;\n\
+        outT.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
+        outT.uv=uvS;\n\
+        outT.local=corner;\n\
+        outT.fade=1.0;\n\
+        outT.breakage=0.0;\n\
+        outT.dock=dock;\n\
+        outT.tint=float3(0.0);\n\
+        outT.isOpen=2.0;\n\
+        outT.noiseX=0.0;\n\
+        outT.noiseY=0.0;\n\
+        return outT;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
     float len = length(rel); if (len < 1.0) len = 1.0;\n\
@@ -270,6 +292,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
 fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]]) {\n\
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
     float4 texel=image.sample(sampleImage,in.uv);\n\
+    if (in.isOpen > 1.5) {\n\
+        return texel*(1.0-in.dock)*in.fade;\n\
+    }\n\
     if (in.isOpen > 0.5) {\n\
         float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));\n\
         float core=1.0-smoothstep(0.0,0.40,length(in.local-0.5));\n\
@@ -279,13 +304,7 @@ fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms
         float sparkle=0.5+0.5*sin(phase*2.1+in.noiseY*6.2831853);\n\
         float glint=smoothstep(0.60,0.87,in.noiseY)*core*(0.15+0.30*sparkle);\n\
         grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
-        float impact=smoothstep(0.88,0.985,in.dock)*(1.0-smoothstep(0.985,1.0,in.dock));\n\
-        grain+=axsPalette(in.noiseX)*impact*0.22;\n\
-        float shape=mix(roundDust, 1.0, smoothstep(0.7, 1.0, in.dock));\n\
-        float ta = max(texel.a, 0.001);\n\
-        float3 tileCol = (texel.a > 0.02) ? (texel.rgb/ta) : grain;\n\
-        float4 col = mix(float4(grain,1.0), float4(tileCol, max(texel.a, 0.92)), in.dock);\n\
-        return col*(shape*in.fade);\n\
+        return float4(grain,1.0)*(roundDust*in.fade);\n\
     }\n\
     float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
     float shape=mix(1.0,roundDust,in.breakage);\n\
@@ -584,6 +603,22 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     // open and dissolve fell back to "no effect".
     [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     [enc setFragmentTexture:self.texture atIndex:0];
+    // .182: the WALLPAPER COVER pass -- every cell paints the screen state
+    // captured while the card was hidden; the cover fades out cell by cell
+    // as the dust arrives, progressively uncovering the REAL card beneath.
+    if (_u.openMode == 1u && self.texture != nil
+        && self.texture.width >= 256 && self.texture.height >= 256) {
+        uint32_t savedOpen = _u.openMode;
+        _u.openMode = 2u;
+        [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle
+                vertexStart:0 vertexCount:6
+              instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+        _u.openMode = savedOpen;
+        [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+    }
     // 6 vertices = one quad; one instance per grain. ONE draw call for all.
     [enc drawPrimitives:MTLPrimitiveTypeTriangle
             vertexStart:0 vertexCount:6
