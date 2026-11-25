@@ -110,7 +110,7 @@ check "dylib has no UIView CPU emit path" sh -c "test \$({ strings -a '$DYLIB_DI
 # beautify.106/.107: Metal command queue fix (buffer comes from the queue)
 check "dylib has Metal cleanup log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'metal sand cleaned grains='"
 # beautify.104: GPU Metal fine-sand engine markers
-check "dylib has Metal shader compile log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'metal compiled OK pipeline ready'"
+check "dylib has Metal shader compile log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'shader compiled OK pipeline ready'"
 check "dylib has Metal unified start log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'metal started open='"
 # beautify.184: ARC-open assemble animation markers
 check "dylib has openParticle assemble entry" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN openParticle grains='"
