@@ -808,21 +808,48 @@ static CGFloat axs_open_density(void) {
 // .188: capture the screen state while the card is hidden -- this becomes the
 // COVER texture: the overlay paints it back over the card region and fades it
 // out per cell as dust arrives, uncovering the REAL card beneath (fresh content).
-static UIImage *axs_open_captureWallpaper(void) {
+static UIImage *axs_open_captureWallpaper(UIView *card) {
     @try {
-        UIView *snap = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
-        if (snap == nil || snap.bounds.size.width < 100) return nil;
+        UIWindow *win = card.window;
+        if (win == nil) return nil;
+        CGRect frame = [card convertRect:card.bounds toView:win];
+        if (frame.size.width < 40.0 || frame.size.height < 40.0) return nil;
+        CGFloat radius = axs_dm_cornerRadiusForView(card);
+        // .189: draw the real WINDOW instead of re-rendering a private
+        // snapshotView (which rasterized to pure black on iOS).
         UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.scale = 1.0;
-        fmt.opaque = YES;
+        fmt.scale = [UIScreen mainScreen].scale;
+        fmt.opaque = NO;
         UIGraphicsImageRenderer *r =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:snap.bounds format:fmt];
-        UIImage *img = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [snap drawViewHierarchyInRect:snap.bounds afterScreenUpdates:NO];
+            [[UIGraphicsImageRenderer alloc] initWithBounds:win.bounds format:fmt];
+        UIImage *full = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [win drawViewHierarchyInRect:win.bounds afterScreenUpdates:YES];
         }];
-        if (img == nil || img.CGImage == NULL) return nil;
-        if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return nil;
-        return img;
+        if (full == nil || full.CGImage == NULL) return nil;
+        // Crop to the EXACT card frame -> the cover texture is card-sized.
+        CGFloat sc = full.scale;
+        CGRect pr = CGRectMake(frame.origin.x*sc, frame.origin.y*sc,
+                               frame.size.width*sc, frame.size.height*sc);
+        CGImageRef sub = CGImageCreateWithImageInRect(full.CGImage, pr);
+        if (sub == NULL) return nil;
+        UIImage *area = [UIImage imageWithCGImage:sub scale:sc orientation:UIImageOrientationUp];
+        CGImageRelease(sub);
+        // Clip to the card's exact corner radius -> true alpha rounded corners.
+        UIGraphicsImageRendererFormat *fmt2 = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt2.scale = sc;
+        fmt2.opaque = NO;
+        UIGraphicsImageRenderer *r2 =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:frame.size format:fmt2];
+        UIImage *cover = [r2 imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            UIBezierPath *clip = [UIBezierPath bezierPathWithRoundedRect:
+                CGRectMake(0, 0, frame.size.width, frame.size.height)
+                                               cornerRadius:radius];
+            [clip addClip];
+            [area drawInRect:CGRectMake(0, 0, frame.size.width, frame.size.height)];
+        }];
+        axs_dm_log(@"OPEN wallpaper cover captured %.0fx%.0f radius=%.1f",
+                   frame.size.width, frame.size.height, radius);
+        return cover;
     } @catch (NSException *ignored) {
         return nil;
     }
@@ -1389,7 +1416,7 @@ static void axs_open_becameVisible(UIView *v) {
         if (axs_open_coverStyle()) {
             // .188: capture the screen WITHOUT the card; failure falls back to
             // the classic cached-card deposit for this open.
-            UIImage *wall = axs_open_captureWallpaper();
+            UIImage *wall = axs_open_captureWallpaper(card);
             if (wall == nil) {
                 axs_dm_log(@"OPEN wallpaper capture failed, using classic style");
                 axs_open_wallpaperShot = nil;

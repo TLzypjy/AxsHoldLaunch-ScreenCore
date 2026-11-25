@@ -416,7 +416,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float dock = smoothstep(arrival2 - 0.03, arrival2 - 0.004, u.time);\n\
         float2 tile = u.cardSize/grid;\n\
         float2 pos = u.origin + (cell + corner)*tile;\n\
-        float2 uvS = pos/u.viewport;\n\
+        float2 uvS = (cell+corner)/grid;\n\
         DustVertex outT;\n\
         outT.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
         outT.uv=uvS;\n\

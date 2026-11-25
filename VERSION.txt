@@ -1,3 +1,14 @@
+beautify.189 变更（修复壁纸擦除样式的黑色直角遮罩）：
+- 用户实测 .188 壁纸擦除样式观感接近，但动画期间浮窗位置是一张黑色直角图：
+  根因 ① 截图用 snapshotViewAfterScreenUpdates + drawViewHierarchyInRect 二次
+  绘制，抓成纯黑；② 截的是整屏（430x932）而非浮窗 frame，shader 用
+  uvS=pos/viewport 采样整屏图，cover pass 又无圆角 mask。
+- 修复：axs_open_captureWallpaper(card) 改为直接对 window 调用
+  drawViewHierarchyInRect（避开私有 snapshot 视图），按浮窗 convertRect 裁出
+  frame 大小的区域，再用 axs_dm_cornerRadiusForView 的半径做 bezier 圆角裁剪
+  （alpha 圆角）；cover shader 的 uv 改为 (cell+corner)/grid，与浮窗大小纹理
+  1:1 对应。新增日志 "OPEN wallpaper cover captured WxH radius=R" 与 CI 断言。
+- 经典 .168 样式与消散动画完全不变；版本升至 2.0.5+beautify.189。
 beautify.188 变更（新增壁纸擦除呼出动画，与经典动画可切换）：
 - 用户要求：保留当前 .168 动画，另按"截图背景→真浮窗垫底→粒子擦掉截图"
   方案新增一套动画，并可在设置里切换。
