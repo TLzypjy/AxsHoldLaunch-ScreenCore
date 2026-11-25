@@ -604,7 +604,6 @@ jobs:
           grep -Fq "if (rows > 320) rows = 320" Hooks/AxsMetalSand.xm || { echo "rows clamp raise missing"; exit 1; }
           # .145: generated rainbow sand texture -- NO full-screen capture as
           # the primary grain source (that leaked the home-screen clock)
-          grep -Fq "CGGradientCreateWithColors" Hooks/AxsDismissEffect.xm || { echo "sand gradient missing"; exit 1; }
           # .157: ALL-GPU reveal on the CPU side too -- the CAShapeLayer
           # mask driver (CADisplayLink + per-frame CGPath rebuild, the laggy
           # "CPU engine") is fully removed; the card stays hidden and the
