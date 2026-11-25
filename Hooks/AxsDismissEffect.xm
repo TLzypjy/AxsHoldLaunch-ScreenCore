@@ -713,6 +713,10 @@ static BOOL axs_open_coverStyle(void) {
     return cover;
 }
 
+// .188: wallpaper-cover state, declared before markGone which resets it.
+static BOOL axs_open_revealLive = NO;
+static UIImage *axs_open_wallpaperShot = nil;
+
 // .146: wipe driver association key (declared early so markGone can clear it)
 static char axs_open_wipeDriverKey;
 
@@ -800,8 +804,6 @@ static CGFloat axs_open_density(void) {
 }
 
 // .188: wallpaper-cover style state (ported from .182 architecture only)
-static BOOL axs_open_revealLive = NO;
-static UIImage *axs_open_wallpaperShot = nil;
 
 // .188: capture the screen state while the card is hidden -- this becomes the
 // COVER texture: the overlay paints it back over the card region and fades it
