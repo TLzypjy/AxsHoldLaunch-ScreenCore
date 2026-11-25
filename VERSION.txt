@@ -1,3 +1,29 @@
+beautify.183 变更（按实测指令完整重写 open 动画，验收基准逐条落实）：
+1) 删除 openMode==2 静态卡（黑矩形根因）；真卡 alpha=0 + 覆盖层
+   画卡片纹理逐格长实，min(dock)>=0.999 同帧恢复真卡 alpha 并移除
+   覆盖层——窗口第一帧完全不存在。
+2) 尘改彩色：palette 为主，目标像素权重 texW=0.10*smoothstep(0.5,
+   0.95,dock)；核心不透明 a=1-smoothstep(0.40,0.50,len)；glint 只给
+   noiseY>0.94（约 6%）的粒子。
+3) 尘云围源图标+目标窗口：uniform 增 srcRectX/Y/W/H，起点
+   srcPos=srcRect.xy+unit*srcRect.zw，distance=min(min(vw,vh)*0.30,
+   max(srcW,srcH)*2.5)，场 clamp 在"源∪目标"外扩 8% 包围盒内。
+4) 双纹理：texture(0)=被点图标 60x60pt 截图（2x），texture(1)=卡片
+   快照；srcUv/uv 同为 (cell+corner)/grid——图标第 N 格落窗口第 N 格。
+5) 三段运动：begin/d/burst/motion/order/arrival/travel/a/dock/drift/
+   idle/贝塞尔回卷/size/angle 全部按参考实现替换。
+6) 前沿灰方块带：coverage=mix(1,0,burst)*(1-dock)+dock，未 dock 的
+   格只采样格中心，随 dock 展开成整格。
+7) SDF 圆角裁切（fwidth 抗锯齿），radius 用 ScreenCore 实测值，
+   仅对 dock>0.6 的格子施加。
+8) 网格固定 96x144 基准（density 0.7-1.3x，下限 72x108）；时长基
+   准 1.15s；openStyle 开关默认 1。
+日志：openParticle grains/grid/dur/srcTex/cardTex/srcRect/targetRect/
+corner + reveal elapsed + abort reason（no source texture / card
+texture blank / metal unavailable）。
+不动：dismiss style 0-8、光圈/侧倾、SCFloatingContainerView 布局。
+版本升至 2.0.5+beautify.183。
+
 beautify.182 变更（架构升级：壁纸覆盖层显现真卡）：
 - 用户新发现的问题实锤了缓存架构的根本缺陷：deposit 用的是消散
   时的旧快照，新开浮窗内容变了 → 显现完成后交接闪一下。此缺陷
@@ -307,7 +333,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.182
+版本：2.0.5+beautify.183
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，
