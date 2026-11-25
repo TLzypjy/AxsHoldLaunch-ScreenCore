@@ -839,7 +839,7 @@ static UIImage *axs_open_captureWallpaper(UIView *card) {
         fmt2.scale = sc;
         fmt2.opaque = NO;
         UIGraphicsImageRenderer *r2 =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:frame.size format:fmt2];
+            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, frame.size.width, frame.size.height) format:fmt2];
         UIImage *cover = [r2 imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
             UIBezierPath *clip = [UIBezierPath bezierPathWithRoundedRect:
                 CGRectMake(0, 0, frame.size.width, frame.size.height)
