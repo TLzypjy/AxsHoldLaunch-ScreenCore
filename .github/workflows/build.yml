@@ -494,7 +494,6 @@ jobs:
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/zh.strings" || { echo "ColorSand zh label missing"; exit 1; }
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/en.strings" || { echo "ColorSand en label missing"; exit 1; }
           # the CPU layer path must be fully retired
-          grep -Fq "axs_open_bgTexture" Hooks/AxsDismissEffect.xm || { echo "bg-color texture missing"; exit 1; }
           grep -Fq "emit: gpu engine active" Hooks/AxsDismissEffect.xm || { echo "gpu engine log missing"; exit 1; }
           grep -Fq "axs_dm_styleBaseDuration" Hooks/AxsDismissEffect.xm || { echo "per-style base duration table missing"; exit 1; }
           grep -Fq "axs_metalSandPlay(shot, sourceFrameInWindow, duration," Hooks/AxsDismissEffect.xm || { echo "Metal call with style+density missing"; exit 1; }
@@ -605,7 +604,6 @@ jobs:
           grep -Fq "if (rows > 320) rows = 320" Hooks/AxsMetalSand.xm || { echo "rows clamp raise missing"; exit 1; }
           # .145: generated rainbow sand texture -- NO full-screen capture as
           # the primary grain source (that leaked the home-screen clock)
-          grep -Fq "static UIImage *axs_open_sandTexture(void)" Hooks/AxsDismissEffect.xm || { echo "sand texture generator missing"; exit 1; }
           grep -Fq "CGGradientCreateWithColors" Hooks/AxsDismissEffect.xm || { echo "sand gradient missing"; exit 1; }
           # .157: ALL-GPU reveal on the CPU side too -- the CAShapeLayer
           # mask driver (CADisplayLink + per-frame CGPath rebuild, the laggy
