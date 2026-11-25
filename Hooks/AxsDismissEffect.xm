@@ -512,7 +512,9 @@ static void axs_dm_scanLayers(CALayer *layer, int depth, CGFloat *best, CGFloat 
             if (r > *best) *best = r;
             // the layer that actually paints the rounded card background is
             // the one whose radius matches what the user sees on screen
-            if (layer.backgroundColor != NULL && *bgRadius < 1.0) *bgRadius = r;
+            // .180: the outermost rounded background layer defines the visible
+            // corner radius -- take the largest, not the first.
+            if (layer.backgroundColor != NULL && r > *bgRadius) *bgRadius = r;
         }
         for (CALayer *sub in layer.sublayers) {
             axs_dm_scanLayers(sub, depth + 1, best, bgRadius);
@@ -698,6 +700,8 @@ static void axs_open_armSelfRestore(void) {
 // missed dismissal path) and must be released so the next open gets its
 // particles instead of popping the card in with no animation.
 static CFAbsoluteTime axs_open_openActiveUntil = 0;
+static CFAbsoluteTime axs_open_lastAssembleStart = -1e9;
+static CGFloat axs_open_lastAssembleDur = 0.0;
 // .116: last finger-lift position (ARC menu tap), tracked via UIWindow sendEvent
 static CGPoint axs_open_lastTouchUp = {-1, -1};
 static CFAbsoluteTime axs_open_lastTouchUpAt = 0;
@@ -1257,6 +1261,12 @@ static void axs_open_becameVisible(UIView *v) {
         // assemble is running, it is STALE (a dismissal path missed its
         // release). Skipping then eats a genuine open -- no particles, card
         // pops in. Release the stale flag and fall through to accept.
+        // .180: hard guard against double aggregation -- any candidate within
+        // a recent assemble window is skipped regardless of flag state.
+        if (CACurrentMediaTime() - axs_open_lastAssembleStart < axs_open_lastAssembleDur + 0.6) {
+            axs_dm_log(@"OPEN candidate skipped (recent assemble)");
+            return;
+        }
         if (axs_open_isAssembled(v)) {
             CFAbsoluteTime nowA = CACurrentMediaTime();
             if (!axs_open_assembleInFlight && nowA > axs_open_openActiveUntil) {
@@ -1315,6 +1325,8 @@ static void axs_open_becameVisible(UIView *v) {
         CGFloat duration = 1.15 / axs_open_speedScale();
         // .149: own the card for the whole assemble+reveal+cleanup window
         axs_open_openActiveUntil = CACurrentMediaTime() + duration + 0.3;
+        axs_open_lastAssembleStart = CACurrentMediaTime();
+        axs_open_lastAssembleDur = duration;
         CGRect cardFrame = [card convertRect:card.bounds toView:nil];
         CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
         // .147: fallback must NEVER be the card center (that made grains

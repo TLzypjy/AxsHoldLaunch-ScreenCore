@@ -1,3 +1,12 @@
+beautify.180 变更（角半径取最大 + 防双聚合硬守卫）：
+- 角落直边：圆角半径探测取"第一个带背景的圆角图层"，可能小于
+  最外层可见圆角 → 裁切残留直角。改为取最大 bgRadius（最外层）。
+- 双聚合：尽管 .177 加了交接所有权刷新，部分 becameVisible 事件
+  仍在守卫链缝隙中放行（候选在交接瞬间被接受并重新聚合）。
+  新增硬守卫：距上次聚合开始 < duration+0.6s 的候选一律跳过
+  （"OPEN candidate skipped (recent assemble)"），与标志状态无关。
+- 版本升至 2.0.5+beautify.180，CI 断言同步。
+
 beautify.179 变更（热修 dustSize 未声明）：
 - .178 拼接把 float2 dustSize 声明删掉而 size 行仍引用它，
   shader 编译失败（undeclared identifier 'dustSize'）→ 两种动画
@@ -273,7 +282,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.179
+版本：2.0.5+beautify.180
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，
