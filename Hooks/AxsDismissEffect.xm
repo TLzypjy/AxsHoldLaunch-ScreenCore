@@ -818,7 +818,7 @@ static CGImageRef axs_open_largestSnapCGImage(CALayer *layer, int depth, CGImage
     @try {
         id contents = layer.contents;
         if (contents != nil && CFGetTypeID((__bridge CFTypeRef)contents) == CGImageGetTypeID()) {
-            CGImageRef cg = (CGImageRef)contents;
+            CGImageRef cg = (__bridge CGImageRef)contents;
             size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
             size_t bw = (best != NULL) ? CGImageGetWidth(best) * CGImageGetHeight(best) : 0;
             if (w >= 128 && h >= 128 && w * h > bw) best = cg;
