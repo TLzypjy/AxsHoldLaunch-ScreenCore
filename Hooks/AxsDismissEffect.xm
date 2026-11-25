@@ -874,6 +874,53 @@ static CGImageRef axs_open_screenImageViaUIGet(void) {
     return NULL;
 }
 
+// .192: display-layer capture. CGDisplayCreateImage(CGMainDisplayID()) reads
+// the composited framebuffer straight from WindowServer/IOSurface -- unlike
+// all UIKit snapshot paths (.188-.191) it does NOT go through a view/layer
+// tree, so it can see cross-process content behind the floating card. The
+// symbols are Apple-private on iOS; resolve them dynamically across the
+// frameworks that may export them, and log each attempt so one run tells us
+// exactly which link failed.
+typedef CGImageRef (*AXSDisplayCreateImageFn)(uint32_t displayID);
+typedef uint32_t (*AXSMainDisplayIDFn)(void);
+static CGImageRef axs_open_screenImageViaCGDisplay(NSString **outWhy) {
+    AXSMainDisplayIDFn mainID = NULL;
+    AXSDisplayCreateImageFn createImg = NULL;
+    const char *paths[] = {
+        "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
+        "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices",
+        "/System/Library/Frameworks/UIKit.framework/UIKit",
+        "/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
+    };
+    void *h = NULL;
+    for (int i = 0; i < 4; i++) {
+        void *p = dlopen(paths[i], RTLD_LAZY | RTLD_LOCAL);
+        if (p == NULL) p = RTLD_DEFAULT;
+        AXSMainDisplayIDFn m = (AXSMainDisplayIDFn)dlsym(p, "CGMainDisplayID");
+        AXSDisplayCreateImageFn c = (AXSDisplayCreateImageFn)dlsym(p, "CGDisplayCreateImage");
+        if (m != NULL && c != NULL) { mainID = m; createImg = c; h = p; break; }
+        if (m != NULL && mainID == NULL) mainID = m;
+        if (c != NULL && createImg == NULL) createImg = c;
+    }
+    if (mainID == NULL) {
+        mainID = (AXSMainDisplayIDFn)dlsym(RTLD_DEFAULT, "CGMainDisplayID");
+        createImg = (AXSDisplayCreateImageFn)dlsym(RTLD_DEFAULT, "CGDisplayCreateImage");
+    }
+    (void)h;
+    if (mainID == NULL || createImg == NULL) {
+        if (outWhy != NULL) *outWhy = [NSString stringWithFormat:@"symbols main=%d create=%d",
+                                       (int)(mainID != NULL), (int)(createImg != NULL)];
+        return NULL;
+    }
+    uint32_t did = mainID();
+    CGImageRef img = createImg(did);
+    if (img == NULL) {
+        if (outWhy != NULL) *outWhy = [NSString stringWithFormat:@"did=%u returned NULL", did];
+        return NULL;
+    }
+    return img;
+}
+
 // .190: alpha probe of the cover's center pixel -- logged so we can confirm
 // in one run whether the mask is opaque (1.0) or transparent (0.0).
 static CGFloat axs_open_centerAlpha(UIImage *img) {
@@ -916,12 +963,35 @@ static UIImage *axs_open_captureWallpaper(UIView *card) {
         CGImageRef fullRef = NULL;
         NSString *src = @"none";
         CGFloat scale = [UIScreen mainScreen].scale;
+        // .192: PRIMARY -- display-layer framebuffer capture. This is the only
+        // path that bypasses the view/layer tree entirely and can see the real
+        // composited screen behind the card. Tried first.
         @try {
-            UIView *forceSnap = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
-            UIImage *rendered = axs_open_offscreenRender(forceSnap, screenPt, scale);
-            if (rendered != nil && !axs_dm_imageIsBlank(rendered)) {
-                fullRef = rendered.CGImage;
-                src = @"snapshotOffscreen";
+            NSString *why = @"unknown";
+            CGImageRef disp = axs_open_screenImageViaCGDisplay(&why);
+            if (disp != NULL && (CGFloat)CGImageGetWidth(disp) >= screenPt.width * 0.8) {
+                fullRef = disp;
+                src = @"CGDisplay";
+                axs_dm_log(@"OPEN wallpaper: CGDisplay OK %zux%zu",
+                           (size_t)CGImageGetWidth(disp), (size_t)CGImageGetHeight(disp));
+            } else {
+                axs_dm_log(@"OPEN wallpaper: CGDisplay failed (%@)", why);
+                if (disp != NULL) CGImageRelease(disp);
+            }
+        } @catch (NSException *e) {
+            axs_dm_log(@"OPEN wallpaper: CGDisplay exception %@", [e reason]);
+        }
+        // .191 fallback A: offscreen-render the system snapshot view.
+        @try {
+            if (fullRef == NULL) {
+                UIView *forceSnap = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
+                UIImage *rendered = axs_open_offscreenRender(forceSnap, screenPt, scale);
+                if (rendered != nil && !axs_dm_imageIsBlank(rendered)) {
+                    fullRef = rendered.CGImage;
+                    src = @"snapshotOffscreen";
+                } else {
+                    axs_dm_log(@"OPEN wallpaper: snapshotOffscreen blank/nil");
+                }
             }
         } @catch (NSException *ignored) { }
         // Fallback 1 (.190): mine a real CGImage out of the snapshot layer tree.
@@ -932,6 +1002,8 @@ static UIImage *axs_open_captureWallpaper(UIView *card) {
                 if (mined != NULL && (CGFloat)CGImageGetWidth(mined) >= screenPt.width * 0.8) {
                     fullRef = mined;
                     src = @"snapshotLayer";
+                } else {
+                    axs_dm_log(@"OPEN wallpaper: snapshotLayer no CGImage");
                 }
             } @catch (NSException *ignored) { }
         }
@@ -941,6 +1013,9 @@ static UIImage *axs_open_captureWallpaper(UIView *card) {
             if (screenImg != NULL && (CGFloat)CGImageGetWidth(screenImg) >= screenPt.width * 0.8) {
                 fullRef = screenImg;
                 src = @"UIGetScreenImage";
+            } else {
+                axs_dm_log(@"OPEN wallpaper: UIGetScreenImage nil");
+                if (screenImg != NULL) CGImageRelease(screenImg);
             }
         }
         if (fullRef == NULL) {
@@ -1459,6 +1534,24 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
 
 static void axs_open_becameVisible(UIView *v) {
     @try {
+        // .192: CHECK THE OWNERSHIP WINDOW FIRST. In .191 this test ran LAST,
+        // AFTER the stale/orphaned age checks. The window was only
+        // "duration+0.3" from accept, but pollStep settles ~0.26s before the
+        // assemble even starts, so the window EXPIRED mid-animation (~1.94s)
+        // while reveal lands ~2.0s and cleanup ~2.3s. The age checks therefore
+        // fired on our OWN repeated visibility events and re-assembled every
+        // ~2s (the loop in log71/log72). Moving this to the top means every
+        // event inside the full assemble+reveal+cleanup window is unconditionally
+        // ours, whatever state the flags are in; the age-based cleanup below
+        // only runs once a genuinely NEW open arrives after the window closes.
+        {
+            CFAbsoluteTime nowB = CACurrentMediaTime();
+            if (nowB < axs_open_openActiveUntil) {
+                axs_dm_log(@"OPEN candidate skipped (open still active %.2fs)",
+                           axs_open_openActiveUntil - nowB);
+                return;
+            }
+        }
         // .144: a card already owned by an assemble is STILL the same visible
         // window -- its own reveal and ScreenCore's repeated presents must not
         // start a new assemble. This is persistent (unlike selfRestore) and is
@@ -1491,17 +1584,6 @@ static void axs_open_becameVisible(UIView *v) {
                 return;
             }
         }
-        // .149: within the open-ownership window every extra visibility event
-        // is ours (repeated presents, overlay cleanup), even if the assembled
-        // flag was cleared behind our back by a racing dismissal safety net.
-        {
-            CFAbsoluteTime nowB = CACurrentMediaTime();
-            if (nowB < axs_open_openActiveUntil) {
-                axs_dm_log(@"OPEN candidate skipped (open still active %.2fs)",
-                           axs_open_openActiveUntil - nowB);
-                return;
-            }
-        }
         if (v.window == nil) return;
         if (v.bounds.size.width < 40 || v.bounds.size.height < 40) return;
         CFAbsoluteTime nowT = CACurrentMediaTime();
@@ -1523,8 +1605,12 @@ static void axs_open_becameVisible(UIView *v) {
         // .165: the flight + reveal read too fast at the default speed;
         // the base duration goes 0.85s -> 1.15s (speed slider still scales).
         CGFloat duration = 1.15 / axs_open_speedScale();
-        // .149: own the card for the whole assemble+reveal+cleanup window
-        axs_open_openActiveUntil = CACurrentMediaTime() + duration + 0.3;
+        // .192: own the card for the WHOLE assemble+reveal+cleanup window.
+        // .191 used duration+0.3 which expired mid-animation (pollStep settles
+        // ~0.26s) and let stale/orphaned checks fire on our own events.
+        // duration+1.5 covers settle + reveal(duration+0.05) + cache refresh
+        // (duration+0.35) with margin.
+        axs_open_openActiveUntil = CACurrentMediaTime() + duration + 1.5;
         CGRect cardFrame = [card convertRect:card.bounds toView:nil];
         CGFloat screenH = [UIScreen mainScreen].bounds.size.height;
         // .147: fallback must NEVER be the card center (that made grains

@@ -1,3 +1,22 @@
+beautify.192 变更（E 方案：CGDisplay 显示层截屏 + 修正循环根因—检查顺序）：
+- 用户实测 .191（log72）：截图仍回退经典（src=snapshotOffscreen 0 次，
+  12 次 no composited screen image）；约 2s 循环呼出依然存在。用户确认装的是 .191。
+- 截图根因（4 次失败：.188 drawViewHierarchy 黑图 / .189 window 二次绘制透明 /
+  .190 挖 layer+UIGetScreenImage 取不到 / .191 renderInContext 取不到）：UIKit
+  所有快照路径都经过 view/layer 树，注入后拿不到 SpringBoard 合成后的屏幕像素。
+  本次改用 CGDisplayCreateImage(CGMainDisplayID()) 显示层截屏——直接读合成帧缓冲，
+  绕开 view/layer 树，是唯一能看到浮窗背后真实屏幕的路；dlsym 动态解析符号，
+  每条策略（CGDisplay/snapshotOffscreen/snapshotLayer/UIGetScreenImage）都打日志，
+  一次实测即可定位哪条成功。src 新增 CGDisplay。
+- 循环根因（.191 未修好）：becameVisible 里 "open still active" 窗口检查排在
+  stale/orphaned 年龄检查之后，且窗口只有 duration+0.3；pollStep settle ~0.26s
+  后窗口在动画中途（~1.94s）过期，而 reveal ~2.0s、cleanup ~2.3s 才发生，
+  于是我们自己的重复 visibility 事件被判 stale/orphaned 并重新 assemble。
+  .191 把刷新放在 endWipeReveal(duration+0.05) 太晚且 weak 可能失效。
+  本次：①把窗口检查提到 becameVisible 最前面（窗口内一律吞掉）；②窗口延长到
+  duration+1.5 覆盖完整 assemble+reveal+cleanup。经典 .168 样式、消散动画、
+  cover shader 均不变。版本升至 2.0.5+beautify.192，CI 断言同步。
+
 beautify.191 变更（D 方案：快照视图离屏渲染 + 修复封面样式循环呼出）：
 - 用户实测 .190（log71）：动画与经典样式完全一样、截图还是消散时的浮窗；
   且有时呼出会自动循环几次。
