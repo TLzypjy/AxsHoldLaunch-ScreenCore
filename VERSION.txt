@@ -1,3 +1,16 @@
+beautify.177 变更（多数中心校验 + 使用时守卫 + 循环破除）：
+- log62 实锤 Filza 循环机制：空纹理（刷新抓取在远端内容挂载前
+  执行，中心校验"任意 1 像素即过"太弱让空图入库）→ 呼出交接
+  解除隐藏触发 becameVisible（距 accept 1.7s，已过所有权窗口）
+  → "stale assembled flag released" → 重新聚合 → 再交接 → 死循环。
+- 三项修复：
+  1) centerHasContent 改多数规则：中心 144 采样中 >=72 个不透明
+     才入库，稀疏 chrome 空图不再污染缓存；
+  2) 呼出取纹理时二次校验 centerHasContent，空缓存回退沙粒纹理；
+  3) endWipeReveal 交接时刷新 assembled 标志并将所有权窗口延长
+     3 秒——交接后的可见性事件不再被误读为新呼出，循环破除。
+- 版本升至 2.0.5+beautify.177，CI 断言同步。
+
 beautify.176 变更（拒绝空中心抓取，保住好缓存）：
 - 探针实锤（log61）：消散抓取上传 alpha 255 255 255 255（好），
   呼出 accept 预抓取上传 alpha 0 0 0 0（空）—— 预抓取在远端内容
@@ -242,7 +255,7 @@ beautify.156 变更（修复 .155 呼出/消散全部无动画）：
 
 AxsHoldLaunch (ScreenCore 美化插件) 完整 Theos 工程源码
 
-版本：2.0.5+beautify.176
+版本：2.0.5+beautify.177
 
 beautify.155 变更（按参考视频彻底改回「细砂 + 逐格显现」）：
 - 用户对比 log(43) + 视频 d2a1ec… 后确认 .154 不一致：隐藏浮窗截图失败，

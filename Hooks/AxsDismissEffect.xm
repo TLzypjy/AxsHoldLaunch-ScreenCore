@@ -386,12 +386,15 @@ static BOOL axs_dm_centerHasContent(UIImage *img) {
         CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)S, (CGFloat)S), cg);
         CGContextRelease(ctx);
         CGColorSpaceRelease(cs);
+        // .177: MAJORITY rule -- "any pixel" let sparse-chrome empty captures
+        // (remote content not attached yet) pass and poison the cache.
+        size_t opaqueCount = 0;
         for (size_t y = 10; y < 22; y++) {
             for (size_t x = 10; x < 22; x++) {
-                if (px[(y * S + x) * 4 + 3] > 8) return YES;
+                if (px[(y * S + x) * 4 + 3] > 8) opaqueCount++;
             }
         }
-        return NO;
+        return opaqueCount >= 72;
     } @catch (NSException *ignored) {
         return NO;
     }
@@ -997,6 +1000,13 @@ static void axs_open_endWipeReveal(UIView *card) {
             card.hidden = NO;
         }
         if (card.layer.mask != nil) card.layer.mask = nil;
+        // .177: the handoff unhide fires becameVisible ~1.7s after accept --
+        // past the original ownership window, so the "stale assembled flag
+        // released" self-heal consumed it and re-assembled endlessly (with an
+        // empty texture this showed as repeated particle aggregation). The
+        // card IS assembled at this point: refresh flag ownership for 3s.
+        axs_open_setAssembled(card, YES);
+        axs_open_openActiveUntil = CACurrentMediaTime() + 3.0;
     } @catch (NSException *ignored) { }
 }
 
@@ -1144,7 +1154,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         NSString *texKind = nil;
         UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);
         if (cachedCard != nil && cachedCard.CGImage != NULL
-            && CGImageGetWidth(cachedCard.CGImage) >= 256) {
+            && CGImageGetWidth(cachedCard.CGImage) >= 256
+            && axs_dm_centerHasContent(cachedCard)) {
             tex = cachedCard;
             texKind = @"cached-card";
         }
