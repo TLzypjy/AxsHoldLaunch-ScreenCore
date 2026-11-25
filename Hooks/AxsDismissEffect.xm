@@ -366,10 +366,45 @@ static NSString *axs_open_windowKeyForView(UIView *view) {
     return [NSString stringWithFormat:@"geom-%.0fx%.0f", f.size.width, f.size.height];
 }
 
+// .176: reject captures whose CENTER is transparent. The accept-time
+// pre-hide capture runs before the remote content attaches and contains only
+// chrome pixels; caching it overwrote the good dismiss-time snapshot and the
+// next open deposited an empty texture (probe: alpha 0 0 0 0 -> dust-only).
+static BOOL axs_dm_centerHasContent(UIImage *img) {
+    @try {
+        if (img == nil || img.CGImage == NULL) return NO;
+        CGImageRef cg = img.CGImage;
+        size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+        if (w == 0 || h == 0) return NO;
+        const size_t S = 32;
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        if (cs == NULL) return NO;
+        uint8_t px[S * S * 4];
+        CGContextRef ctx = CGBitmapContextCreate(px, S, S, 8, S * 4, cs,
+                                                 kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+        if (ctx == NULL) { CGColorSpaceRelease(cs); return NO; }
+        CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)S, (CGFloat)S), cg);
+        CGContextRelease(ctx);
+        CGColorSpaceRelease(cs);
+        for (size_t y = 10; y < 22; y++) {
+            for (size_t x = 10; x < 22; x++) {
+                if (px[(y * S + x) * 4 + 3] > 8) return YES;
+            }
+        }
+        return NO;
+    } @catch (NSException *ignored) {
+        return NO;
+    }
+}
+
 static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img) {
     @try {
         if (owner == nil || img == nil || img.CGImage == NULL) return;
         if (CGImageGetWidth(img.CGImage) < 256 || CGImageGetHeight(img.CGImage) < 256) return;
+        if (!axs_dm_centerHasContent(img)) {
+            axs_dm_log(@"OPEN snapshot rejected (empty center)");
+            return;
+        }
         NSString *key = axs_open_windowKeyForView(owner);
         if (key == nil) return;
         if (axs_open_snapshotCache == nil) axs_open_snapshotCache = [NSMutableDictionary new];
