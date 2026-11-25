@@ -156,8 +156,8 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 c2 = dest - float2(0.0, approach);\n\
         float b = 1.0 - ta;\n\
         p = b*b*b*p + 3.0*b*b*ta*c1 + 3.0*b*ta*ta*c2 + ta*ta*ta*dest;\n\
-        float2 tile = u.cardSize/grid;
-        float2 dustSize = float2(mix(1.15, 2.4, r3));
+        float2 tile = u.cardSize/grid;\n\
+        float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
         float2 size = mix(dustSize, tile, dock);\n\
         float angle = ((r3-0.5)*4.8*motion + sin(phase*0.43 + r*6.2831853)*0.35) * (burst*(1.0-dock));\n\
         float ca = cos(angle); float sa = sin(angle);\n\
