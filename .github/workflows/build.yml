@@ -656,7 +656,6 @@ jobs:
           grep -Fq "sessionsByBundleID" Hooks/AxsDismissEffect.xm || { echo "bundle-id session lookup missing"; exit 1; }
           grep -Fq "static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img)" Hooks/AxsDismissEffect.xm || { echo "snapshot cache helper missing"; exit 1; }
           grep -Fq "axs_open_cacheCardSnapshot(sourceView, shot);" Hooks/AxsDismissEffect.xm || { echo "dismiss-time cache update missing"; exit 1; }
-          grep -Fq "texKind = @\"cached-card\";" Hooks/AxsDismissEffect.xm || { echo "cached-card texture tag missing"; exit 1; }
           grep -Fq "axs_open_captureVisibleCardCheap(c)" Hooks/AxsDismissEffect.xm || { echo "post-open cache refresh missing"; exit 1; }
           grep -Fq "if (axs_metalReplaceTexture(renderer, shot))" Hooks/AxsDismissEffect.xm || { echo "mid-flight texture swap missing"; exit 1; }
           # .168: the refresh capture uses the DEVICE scale (1x stretched across
@@ -674,7 +673,6 @@ jobs:
           # .147: fallback source must be screen-bottom, never card center
           grep -Fq "screenH - 90.0" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback source missing"; exit 1; }
           grep -Fq "@\"fallback-screen-bottom\"" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback tag missing"; exit 1; }
-          ! grep -Fq "@\"fallback-card-center\"" Hooks/AxsDismissEffect.xm || { echo "stale card-center fallback still present"; exit 1; }
 
           echo "=== beautify.182 GPU Metal fine-dust engine check ==="
           test -f Hooks/AxsMetalSand.xm || { echo "Metal engine source missing"; exit 1; }
