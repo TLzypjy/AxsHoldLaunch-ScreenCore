@@ -85,16 +85,10 @@ struct DustUniforms {\n\
     uint openMode;\n\
     float sourceX;\n\
     float sourceY;\n\
-    float srcRectX;\n\
-    float srcRectY;\n\
-    float srcRectW;\n\
-    float srcRectH;\n\
-    float cornerRadius;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
     float2 uv;\n\
-    float2 srcUv;\n\
     float2 local;\n\
     float fade;\n\
     float breakage;\n\
@@ -132,56 +126,62 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float2 unit2 = (cell + 0.5)/grid;\n\
-        float begin = unit2.x*0.32 + unit2.y*0.025 + r*0.065;\n\
-        float d = smoothstep(0.0, 1.0, clamp((u.time - begin)/0.57, 0.0, 1.0));\n\
-        float burst = smoothstep(0.0, 0.18, d);\n\
-        float motion = pow(d, 1.12);\n\
-        float order = 0.96*unit2.y + 0.04*hf;\n\
+        float order = 0.96*unit.y + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
-        float travel = clamp(u.time/arrival, 0.0, 1.0);\n\
-        float ta = pow(travel, 2.8);\n\
-        float dock = smoothstep(0.78, 1.0, ta);\n\
-        float distance = min(min(u.viewport.x, u.viewport.y)*0.30, max(u.srcRectW, u.srcRectH)*2.5);\n\
-        float phase = u.seed + u.time*2.1;\n\
-        float2 srcPos = float2(u.srcRectX, u.srcRectY) + unit2*float2(u.srcRectW, u.srcRectH);\n\
-        float2 drift = float2((2.0*r-1.0)*1.65 + 0.55, -(0.45 + 1.05*r2)) * distance;\n\
-        drift += float2(sin(r3*6.2831853 + 7.0*d)*0.20, sin(r2*6.2831853 + 7.0*d)*0.13) * distance;\n\
-        float2 idle = float2(sin(phase*0.73 + r3*6.2831853), cos(phase*0.61 + r2*6.2831853)) * float2(18.0,14.0);\n\
-        float2 p = mix(srcPos, srcPos + drift + idle*burst, motion);\n\
+        float departure = arrival - 0.35;\n\
+        float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
         float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
-        float2 dest = u.origin + ((cell + 0.5 + jitter)/grid)*u.cardSize;\n\
+        float2 landing = (cell + 0.5 + jitter)/grid;\n\
+        float2 finger = float2(u.sourceX, u.sourceY);\n\
+        float ang = r*6.2831853;\n\
+        float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
+        float2 dest = u.origin + landing*u.cardSize;\n\
         float approach = clamp(u.cardSize.y*0.24, 64.0, 150.0);\n\
-        float2 c1 = p + float2((r-0.5)*distance*0.8, -approach*0.55);\n\
-        float2 c2 = dest - float2(0.0, approach);\n\
-        float b = 1.0 - ta;\n\
-        p = b*b*b*p + 3.0*b*b*ta*c1 + 3.0*b*ta*ta*c2 + ta*ta*ta*dest;\n\
-        float2 tile = u.cardSize/grid;\n\
+        float2 c1 = float2(mix(start.x, dest.x, 0.30) + (r2-0.5)*u.cardSize.x*0.55,\n\
+                           max(start.y, dest.y) + approach*(0.7 + 1.5*r2));\n\
+        float2 c2 = dest + float2((r-0.5)*u.cardSize.x*0.45, approach*(0.4 + 1.0*r3));\n\
+        float b = 1.0 - t;\n\
+        float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
+        pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)\n\
+                 * u.cardSize.x*0.05*(1.0-t);\n\
         float2 dustSize = float2(mix(1.15, 2.4, r3));\n\
-        float2 size = mix(dustSize, tile, dock);\n\
-        float angle = ((r3-0.5)*4.8*motion + sin(phase*0.43 + r*6.2831853)*0.35) * (burst*(1.0-dock));\n\
-        float ca = cos(angle); float sa = sin(angle);\n\
-        float2 lc = corner - 0.5;\n\
-        float2 rot = float2(lc.x*ca - lc.y*sa, lc.x*sa + lc.y*ca);\n\
-        p += rot*size;\n\
-        float2 u0 = min(float2(u.srcRectX, u.srcRectY), u.origin);\n\
-        float2 u1 = max(float2(u.srcRectX+u.srcRectW, u.srcRectY+u.srcRectH), u.origin+u.cardSize);\n\
-        float2 ext = (u1-u0)*0.08;\n\
-        p = clamp(p, u0-ext, u1+ext);\n\
-        float coverage = mix(1.0, 0.0, burst)*(1.0 - dock) + dock;\n\
+        pos += (corner-0.5)*dustSize;\n\
+        float born = step(departure, u.time);\n\
+        float gone = 1.0 - step(arrival - 0.006, u.time);\n\
         DustVertex outO;\n\
-        outO.position=float4(2.0*p.x/u.viewport.x-1.0,1.0-2.0*p.y/u.viewport.y,0,1);\n\
-        outO.uv=(cell + mix(float2(0.5), corner, coverage))/grid;\n\
-        outO.srcUv=(cell + mix(float2(0.5), corner, coverage))/grid;\n\
+        outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
+        outO.uv=unit;\n\
         outO.local=corner;\n\
-        outO.fade=1.0;\n\
+        outO.fade=born*gone;\n\
         outO.breakage=0.0;\n\
-        outO.dock=dock;\n\
+        outO.dock=t;\n\
         outO.tint=axsPalette(r + hf*0.15);\n\
         outO.isOpen=1.0;\n\
         outO.noiseX=r;\n\
         outO.noiseY=r3;\n\
         return outO;\n\
+    }\n\
+    if (u.openMode == 2u) {\n\
+        uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+        h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
+        float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
+        float order2 = 0.96*unit.y + 0.04*hf2;\n\
+        float arrival2 = 0.35 + 0.65*order2;\n\
+        float open = step(arrival2 - 0.006, u.time);\n\
+        float2 tile = u.cardSize/grid;\n\
+        float2 pos = u.origin + (cell + corner)*tile;\n\
+        DustVertex outT;\n\
+        outT.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
+        outT.uv=(cell+corner)/grid;\n\
+        outT.local=corner;\n\
+        outT.fade=open;\n\
+        outT.breakage=0.0;\n\
+        outT.dock=0.0;\n\
+        outT.tint=float3(0.0);\n\
+        outT.isOpen=2.0;\n\
+        outT.noiseX=hf2;\n\
+        outT.noiseY=hf2;\n\
+        return outT;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
     float len = length(rel); if (len < 1.0) len = 1.0;\n\
@@ -287,40 +287,29 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
     out.isOpen=0.0;\n\
     return out;\n\
 }\n\
-fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> texIcon [[texture(0)]], texture2d<float> texCard [[texture(1)]]) {\n\
-    constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);\n\
-    float4 texA  = texIcon.sample(s, in.srcUv);\n\
-    float4 texB  = texCard.sample(s, in.uv);\n\
-    float4 texel = mix(texA, texB, in.dock);\n\
-    float3 texelC = texB.rgb / max(texB.a, 0.001);\n\
-    if (u.openMode == 0u) {\n\
-        float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
-        float shape=mix(1.0,roundDust,in.breakage);\n\
-        return texel*(in.fade*shape);\n\
+fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]]) {\n\
+    constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
+    float4 texel=image.sample(sampleImage,in.uv);\n\
+    if (in.isOpen > 1.5) {\n\
+        return texel*in.fade;\n\
     }\n\
     if (in.isOpen > 0.5) {\n\
-        float roundDust = 1.0 - smoothstep(0.40, 0.50, length(in.local - 0.5));\n\
-        float core = 1.0 - smoothstep(0.0, 0.40, length(in.local - 0.5));\n\
-        float phase = u.seed + u.time * 2.1;\n\
-        float texW = 0.10 * smoothstep(0.5, 0.95, in.dock);\n\
-        float3 grain = mix(axsPalette(in.noiseX + phase * 0.025), texelC, texW);\n\
-        float sparkle = 0.5 + 0.5 * sin(phase * 2.1 + in.noiseY * 6.2831853);\n\
-        float glint = smoothstep(0.60, 0.87, in.noiseY) * core * (0.15 + 0.30 * sparkle);\n\
-        grain = mix(grain, axsPalette(in.noiseY + 0.37 * in.noiseX), glint);\n\
-        float alpha = roundDust * in.fade;\n\
-        return float4(grain * alpha, alpha);\n\
+        float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));\n\
+        float core=1.0-smoothstep(0.0,0.40,length(in.local-0.5));\n\
+        float phase=u.seed + u.time*2.1;\n\
+        float3 texelC=texel.rgb/max(texel.a,0.001);\n\
+        float3 grain=mix(axsPalette(in.noiseX + phase*0.025), texelC, 0.35);\n\
+        float sparkle=0.5+0.5*sin(phase*2.1+in.noiseY*6.2831853);\n\
+        float glint=smoothstep(0.60,0.87,in.noiseY)*core*(0.15+0.30*sparkle);\n\
+        grain=mix(grain, axsPalette(in.noiseY+0.37*in.noiseX), glint);\n\
+        float impact=smoothstep(0.88,0.985,in.dock)*(1.0-smoothstep(0.985,1.0,in.dock));\n\
+        grain+=axsPalette(in.noiseX)*impact*0.22;\n\
+        return float4(grain,1.0)*(roundDust*in.fade);\n\
     }\n\
-    float radius = min(max(0.0, u.cornerRadius), min(u.cardSize.x, u.cardSize.y) * 0.5);\n\
-    float2 q = abs(in.uv * u.cardSize - u.cardSize * 0.5) - (u.cardSize * 0.5 - radius);\n\
-    float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;\n\
-    float aa = clamp(fwidth(sd), 0.35, 2.0);\n\
-    float mask = 1.0 - smoothstep(-aa, aa, sd);\n\
-    mask = mix(1.0, mask, smoothstep(0.6, 0.95, in.dock));\n\
-    float alpha = texel.a * in.fade * mask;\n\
-    return float4(texel.rgb, texel.a) * (in.fade * mask);\n\
-}\n\
-\n\
-\n";
+    float roundDust=1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
+    float shape=mix(1.0,roundDust,in.breakage);\n\
+    return texel*(in.fade*shape);\n\
+}\n";
 
 // C-side mirror of DustUniforms. MSL float2 is 8-byte aligned; total = 56 bytes.
 typedef struct {
@@ -335,11 +324,6 @@ typedef struct {
     uint32_t style;
     uint32_t openMode;
     float sourcePoint[2];
-    float srcRectX;
-    float srcRectY;
-    float srcRectW;
-    float srcRectH;
-    float cornerRadius;
 } AXSMetalDustUniforms;
 
 // ---- cached device + queue + pipeline (compiled once, reused) --------------
@@ -383,12 +367,8 @@ static BOOL axs_msd_ensurePipeline(void) {
         id<MTLLibrary> lib = [sMsdDevice newLibraryWithSource:AXS_MSD_SHADER
                                                       options:nil error:&err];
         if (lib == nil) {
-            // .184: never silently fail -- print the full compiler error (with
-            // program_source line/column) and fall back to native immediately.
-            sMsdFailReason = [NSString stringWithFormat:@"shader compile FAILED: %@",
-                              err.localizedDescription ?: @"unknown"];
+            sMsdFailReason = [NSString stringWithFormat:@"shader compile FAILED: %@", [err localizedDescription]];
             axs_msd_log(@"%@", sMsdFailReason);
-            axs_msd_log(@"shader compile FAILED -> native fallback");
             return NO;
         }
         id<MTLFunction> vf = [lib newFunctionWithName:@"nlDustVertex"];
@@ -415,7 +395,7 @@ static BOOL axs_msd_ensurePipeline(void) {
             axs_msd_log(@"%@", sMsdFailReason);
             return NO;
         }
-        axs_msd_log(@"shader compiled OK pipeline ready functions=vertex,fragment textures=2");
+        axs_msd_log(@"metal compiled OK pipeline ready");
         return YES;
     } @catch (NSException *e) {
         sMsdFailReason = [NSString stringWithFormat:@"ensurePipeline EXCEPTION %@", [e reason]];
@@ -444,16 +424,11 @@ static NSMutableArray *sMsdActiveRenderers = nil;
 @property (nonatomic, assign) CGFloat duration;
 @property (nonatomic, assign) AXSMetalDustUniforms u;
 @property (nonatomic, assign) int grainCount;
-    @property (nonatomic, assign) BOOL fadingOut;
-    @property (nonatomic, assign) BOOL revealSwapped;
-    @property (nonatomic, assign) float dockMin;
-    @property (nonatomic, assign) int dockedCount;
-    @property (nonatomic, strong) id<MTLTexture> textureB;
+@property (nonatomic, assign) BOOL fadingOut;
 // .157: YES once the real card snapshot has been swapped in mid-flight;
 // gates the openMode=2 deposited-tile draw pass.
 @property (nonatomic, assign) BOOL cardReady;
 - (BOOL)startWithTexture:(id<MTLTexture>)tex
-                textureB:(id<MTLTexture>)texB
                   frame:(CGRect)frame
                viewport:(CGSize)viewport
                duration:(CGFloat)dur
@@ -463,9 +438,7 @@ static NSMutableArray *sMsdActiveRenderers = nil;
                   style:(uint32_t)style
                 density:(CGFloat)density
                openMode:(uint32_t)openMode
-             sourcePoint:(CGPoint)sourcePoint
-             sourceRect:(CGRect)sourceRect
-            cornerRadius:(CGFloat)cornerRadius;
+             sourcePoint:(CGPoint)sourcePoint;
 @end
 
 // .140: the currently-running open-assemble renderer (mid-flight texture swap)
@@ -476,7 +449,6 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
 @implementation AXSMetalSandRenderer
 
 - (BOOL)startWithTexture:(id<MTLTexture>)tex
-                textureB:(id<MTLTexture>)texB
                   frame:(CGRect)frame
                viewport:(CGSize)viewport
                duration:(CGFloat)dur
@@ -486,11 +458,8 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
                   style:(uint32_t)style
                 density:(CGFloat)density
                openMode:(uint32_t)openMode
-             sourcePoint:(CGPoint)sourcePoint
-             sourceRect:(CGRect)sourceRect
-            cornerRadius:(CGFloat)cornerRadius {
+             sourcePoint:(CGPoint)sourcePoint {
     self.texture = tex;
-    self.textureB = texB;
     self.duration = dur;
     self.overlay = win;
     self.metalLayer = (CAMetalLayer *)view.layer;
@@ -509,27 +478,12 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     u.openMode = openMode;
     u.sourcePoint[0] = (float)sourcePoint.x;
     u.sourcePoint[1] = (float)sourcePoint.y;
-    // .183: openParticle uniforms
-    u.srcRectX = (float)sourceRect.origin.x;
-    u.srcRectY = (float)sourceRect.origin.y;
-    u.srcRectW = (float)sourceRect.size.width;
-    u.srcRectH = (float)sourceRect.size.height;
-    u.cornerRadius = (float)cornerRadius;
     // Grid = per-style base resolution scaled by the density slider.
     // Style 8 (sand) and open mode use the reference plugin's particle-count
     // model (14000 * density distributed by card aspect); the 8 grid styles
     // scale their characteristic base grids (Glass stays chunky 5x6, Dust 14x14...).
     uint32_t cols, rows;
-    if (openMode == 1u) {
-        // .183: openParticle grid -- fixed 96x144 base, density 0.7-1.3x, min 72x108
-        CGFloat dn = density / 3.0;
-        if (dn < 0.7) dn = 0.7;
-        if (dn > 1.3) dn = 1.3;
-        cols = (uint32_t)lround(96.0 * dn);
-        rows = (uint32_t)lround(144.0 * dn);
-        if (cols < 72) cols = 72;
-        if (rows < 108) rows = 108;
-    } else if (style == 8u) {
+    if (style == 8u || openMode == 1u) {
         // .142: raise the cap and the rows clamp -- at density=3 the old
         // rows>240 clamp truncated 42000 grains down to 32640, so the slider
         // never actually delivered its full density on the tall card aspect.
@@ -565,11 +519,6 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     // popped in after the dust. Arm it right here for a real initial capture.
     if (openMode == 1u && tex.width >= 256 && tex.height >= 256) {
         self.cardReady = YES;
-    }
-    if (openMode == 1u) {
-        axs_msd_log(@"OPEN start tex=%lux%lu cardReady=%d",
-                    (unsigned long)tex.width, (unsigned long)tex.height,
-                    self.cardReady ? 1 : 0);
     }
     self.u = u;
 
@@ -649,9 +598,6 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     // open and dissolve fell back to "no effect".
     [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     [enc setFragmentTexture:self.texture atIndex:0];
-    // .183: texture(0)=source icon crop, texture(1)=card snapshot (open mode)
-    if (self.textureB != nil) [enc setFragmentTexture:self.textureB atIndex:1];
-    else [enc setFragmentTexture:self.texture atIndex:1];
     // 6 vertices = one quad; one instance per grain. ONE draw call for all.
     [enc drawPrimitives:MTLPrimitiveTypeTriangle
             vertexStart:0 vertexCount:6
@@ -659,15 +605,21 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     // .157: deposited-card tile pass (open only, once the real texture has
     // been swapped in). Same clock, same hash, same grid -- the card is
     // painted on the GPU cell by cell, exactly where the dust dies.
+    if (_u.openMode == 1u && _cardReady) {
+        uint32_t savedOpen = _u.openMode;
+        _u.openMode = 2u;
+        [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+        [enc drawPrimitives:MTLPrimitiveTypeTriangle
+                vertexStart:0 vertexCount:6
+              instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+        _u.openMode = savedOpen;
+    }
     [enc endEncoding];
     [cb presentDrawable:drawable];
     [cb commit];
     return YES;
 }
-
-// .183: same-frame handoff callback (the open caller restores the real card)
-static void (*axs_msd_revealSwapFn)(void) = NULL;
-void axs_msd_setRevealSwapFn(void (*fn)(void)) { axs_msd_revealSwapFn = fn; }
 
 - (void)tick:(CADisplayLink *)link {
     @try {
@@ -675,36 +627,6 @@ void axs_msd_setRevealSwapFn(void (*fn)(void)) { axs_msd_revealSwapFn = fn; }
         CGFloat t = self.duration > 0 ? elapsed / self.duration : 1.0;
         BOOL done = (t >= 1.0);
         _u.time = done ? 1.0f : (float)t;   // direct ivar: ARC forbids struct-member via property
-        // .183: min(dock) over the grid -- the SAME-FRAME handoff fires when
-        // every cell has docked: real card restored and the overlay removed
-        // in one runloop turn (no swap flash possible).
-        if (_u.openMode == 1u && !self.revealSwapped) {
-            float minDock = 1.0f; int docked = 0;
-            for (uint32_t cy2 = 0; cy2 < _u.rows; cy2++) {
-                for (uint32_t cx2 = 0; cx2 < _u.columns; cx2++) {
-                    uint32_t h = cx2*73856093u ^ cy2*19349663u ^ 83492791u;
-                    h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
-                    float hf = (float)(h & 0xffffu)/65535.0f;
-                    float uy = ((float)cy2 + 0.5f)/(float)_u.rows;
-                    float arrival = 0.35f + 0.65f*(0.96f*uy + 0.04f*hf);
-                    float tr = _u.time/arrival; if (tr > 1.0f) tr = 1.0f; if (tr < 0.0f) tr = 0.0f;
-                    float a2v = powf(tr, 2.8f);
-                    float tt = (a2v - 0.78f)/0.22f; if (tt > 1.0f) tt = 1.0f; if (tt < 0.0f) tt = 0.0f;
-                    float dk = tt*tt*(3.0f-2.0f*tt);
-                    if (dk < minDock) minDock = dk;
-                    if (dk >= 0.999f) docked++;
-                }
-            }
-            self.dockMin = minDock;
-            self.dockedCount = docked;
-            if (minDock >= 0.999f) {
-                self.revealSwapped = YES;
-                axs_msd_log(@"OPEN openParticle reveal elapsed=%.3f hiddenCard=0", elapsed);
-                if (axs_msd_revealSwapFn != NULL) axs_msd_revealSwapFn();
-                [self cleanup];
-                return;
-            }
-        }
         [self renderOnce];
         if (done) {
             if (self.u.openMode == 1u && !self.fadingOut) {
@@ -810,31 +732,14 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device) {
     if (tex == nil) return nil;
     [tex replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0
              withBytes:[data bytes] bytesPerRow:bpr];
-    // .173: read back a few alpha samples right after upload -- a transparent
-    // upload (empty texture) is immediately visible in the log instead of
-    // silently killing the deposit reveal.
-    @try {
-        if (td.storageMode == MTLStorageModeShared) {
-            // .175 CRITICAL FIX: the buffer must hold bytesPerRow * rows.
-            // The old 48-byte buffer was overwritten with 4 rows * 48 bytes
-            // (192 bytes), smashing the stack canary -> SIGABRT -> respring
-            // on every open (SpringBoard-2026-11-25-171832.ips).
-            uint8_t smp[4 * 48];
-            [tex getBytes:smp bytesPerRow:48
-              fromRegion:MTLRegionMake2D(w / 2, h / 2, 4, 4) mipmapLevel:0];
-            axs_msd_log(@"texture upload %lux%lu alpha %d %d %d %d",
-                        (unsigned long)w, (unsigned long)h,
-                        smp[3], smp[51], smp[99], smp[147]);
-        }
-    } @catch (NSException *ignored) { }
     return tex;
 }
 
 // ---- public entry points: return YES if Metal took over the effect --------
 // common core shared by dismiss (openMode=0) and open-assemble (openMode=1)
-static BOOL axs_metalPlayCommon(UIImage *shot, UIImage *shotB, CGRect frameInWindow, CGFloat duration,
+static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                 uint32_t style, CGFloat density, uint32_t openMode,
-                                CGPoint sourcePoint, CGRect sourceRect, CGFloat cornerRadius) {
+                                CGPoint sourcePoint) {
     @try {
         if (!axs_msd_ensurePipeline()) {
             axs_msd_log(@"metal unavailable -> no dissolve effect (%@)",
@@ -885,8 +790,6 @@ static BOOL axs_metalPlayCommon(UIImage *shot, UIImage *shotB, CGRect frameInWin
         [overlay addSubview:view];
 
         AXSMetalSandRenderer *renderer = [AXSMetalSandRenderer new];
-        id<MTLTexture> texB = (shotB != nil && shotB.CGImage != NULL)
-            ? axs_msd_makeTexture(shotB.CGImage, sMsdDevice) : nil;
         if (sMsdActiveRenderers == nil) sMsdActiveRenderers = [NSMutableArray array];
         [sMsdActiveRenderers addObject:renderer];
         if (openMode == 1u) sMsdActiveOpenRenderer = renderer;
@@ -895,10 +798,10 @@ static BOOL axs_metalPlayCommon(UIImage *shot, UIImage *shotB, CGRect frameInWin
         // .105: startWithTexture does a synchronous first-frame probe and
         // returns NO if Metal cannot actually draw. Only claim success when it
         // really rendered.
-        BOOL started = [renderer startWithTexture:tex textureB:texB frame:frameInWindow viewport:overlay.bounds.size
+        BOOL started = [renderer startWithTexture:tex frame:frameInWindow viewport:overlay.bounds.size
                                           duration:duration overlay:overlay view:view seed:seed
                                             style:style density:density openMode:openMode
-                                      sourcePoint:sourcePoint sourceRect:sourceRect cornerRadius:cornerRadius];
+                                      sourcePoint:sourcePoint];
         if (!started) {
             [sMsdActiveRenderers removeObject:renderer];
             overlay.hidden = YES;
@@ -922,8 +825,8 @@ static BOOL axs_metalPlayCommon(UIImage *shot, UIImage *shotB, CGRect frameInWin
 // dismiss (dissolve): style selects the motion model, openMode=0
 BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                        uint32_t style, CGFloat density) {
-    return axs_metalPlayCommon(shot, nil, frameInWindow, duration, style, density, 0,
-                               CGPointMake(0, 0), CGRectZero, 0.0);
+    return axs_metalPlayCommon(shot, frameInWindow, duration, style, density, 0,
+                               CGPointMake(0, 0));
 }
 
 // .133: hide/show the particle overlay while the composited screen is
@@ -932,11 +835,10 @@ BOOL axs_metalSandPlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
 // card while it was briefly visible under the dense cloud)
 // beautify.141 open-assemble: grains fly FROM sourcePoint TO the card
 // .140: open assemble returning the live renderer handle (for mid-flight swap)
-void *axs_metalAssemblePlayRet(UIImage *shot, UIImage *shotB, CGRect frameInWindow, CGFloat duration,
-                               CGFloat density, CGPoint sourcePoint,
-                               CGRect sourceRect, CGFloat cornerRadius) {
-    BOOL ok = axs_metalPlayCommon(shot, shotB, frameInWindow, duration, 8, density, 1,
-                                  sourcePoint, sourceRect, cornerRadius);
+void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
+                               CGFloat density, CGPoint sourcePoint) {
+    BOOL ok = axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
+                                  sourcePoint);
     return ok ? (__bridge void *)sMsdActiveOpenRenderer : NULL;
 }
 
@@ -953,8 +855,8 @@ BOOL axs_metalReplaceTexture(void *renderer, UIImage *img) {
 
 BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                            CGFloat density, CGPoint sourcePoint) {
-    return axs_metalPlayCommon(shot, nil, frameInWindow, duration, 8, density, 1,
-                               sourcePoint, CGRectZero, 0.0);
+    return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
+                               sourcePoint);
 }
 
 // .155: the CPU reveal mask must use the renderer's exact clock, not a
