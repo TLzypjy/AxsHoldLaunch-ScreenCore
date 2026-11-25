@@ -824,79 +824,12 @@ static CGFloat axs_open_density(void) {
 // .134: particle color = the card's background color (pure data read from
 // the layer -- no rendering involved). The calculator is dark -> dark
 // fragments, exactly like the reference video. Fallback: white.
-static UIImage *axs_open_bgTexture(UIView *card) {
-    UIColor *col = nil;
-    CGFloat r1=0, g1=0, b1=0, a1=0;
-    @try {
-        CGColorRef bg = card.layer.backgroundColor;
-        if (bg != NULL) {
-            col = [UIColor colorWithCGColor:bg];
-        } else {
-            // try the first subview's background
-            for (UIView *sv in card.subviews) {
-                if (sv.layer.backgroundColor != NULL) {
-                    col = [UIColor colorWithCGColor:sv.layer.backgroundColor];
-                    break;
-                }
-            }
-        }
-        if (col != nil) {
-            // .135: a fully transparent (clear) background would make the
-            // grains invisible on any page -- fall back to dark gray
-            [col getRed:&r1 green:&g1 blue:&b1 alpha:&a1];
-            if (a1 < 0.05) col = nil;
-        }
-    } @catch (NSException *ignored) {
-        col = nil;
-    }
-    if (col == nil) col = [UIColor colorWithWhite:0.15 alpha:0.95];
-    CGFloat fr=0, fg=0, fb=0, fa=0;
-    [col getRed:&fr green:&fg blue:&fb alpha:&fa];
-    axs_dm_log(@"OPEN grain color final %.2f %.2f %.2f %.2f (raw %.2f %.2f %.2f %.2f)",
-               fr, fg, fb, fa, r1, g1, b1, a1);
-    UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-    fmt.opaque = NO;
-    UIGraphicsImageRenderer *r =
-        [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, 1, 1) format:fmt];
-    UIImage *tex = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-        CGContextSetFillColorWithColor(ctx.CGContext, col.CGColor);
-        CGContextFillRect(ctx.CGContext, CGRectMake(0, 0, 1, 1));
-    }];
-    return tex;
-}
 
 // .145: colored sand texture for the open reveal. The reference plugin's
 // grains are vivid cyan/purple/orange, NOT fragments of the whole screen --
 // .144 cut the home-screen clock into the particles by capturing the full
 // _UIScenePresentationView. A generated gradient gives every grain a stable
 // color (the shader samples it with a per-cell hash) with zero capture cost.
-static UIImage *axs_open_sandTexture(void) {
-    @try {
-        CGFloat S = 128.0;
-        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.opaque = NO;
-        fmt.scale = 1.0;
-        UIGraphicsImageRenderer *r =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, S, S) format:fmt];
-        return [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            CGContextRef c = ctx.CGContext;
-            NSArray *cols = @[
-                (id)[UIColor colorWithRed:0.18 green:0.86 blue:0.92 alpha:1.0].CGColor, // cyan
-                (id)[UIColor colorWithRed:0.42 green:0.42 blue:0.95 alpha:1.0].CGColor, // indigo
-                (id)[UIColor colorWithRed:0.86 green:0.36 blue:0.78 alpha:1.0].CGColor, // magenta
-                (id)[UIColor colorWithRed:1.00 green:0.55 blue:0.28 alpha:1.0].CGColor, // orange
-                (id)[UIColor colorWithRed:0.99 green:0.82 blue:0.35 alpha:1.0].CGColor  // yellow
-            ];
-            CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-            CGGradientRef grad = CGGradientCreateWithColors(cs, (CFArrayRef)cols, NULL);
-            CGContextDrawLinearGradient(c, grad, CGPointMake(0, 0), CGPointMake(S, S), 0);
-            CGGradientRelease(grad);
-            CGColorSpaceRelease(cs);
-        }];
-    } @catch (NSException *ignored) {
-        return nil;
-    }
-}
 
 // .154: capture the REAL card as the particle texture. The shader now makes
 // each grain a fragment of this image and docks it into its own grid cell, so
@@ -1464,6 +1397,8 @@ static void axs_open_becameVisible(UIView *v) {
         // swap restores alpha when every cell has docked.
         card.alpha = 0.0;
         axs_open_currentCard = card;
+        // .183: capture the tapped dock icon as the SOURCE texture
+        axs_open_sourceTexture = axs_open_captureSourceIcon(sourcePoint);
         axs_open_assembleInFlight = YES;
         // .144: mark the card as owned from the FIRST frame. Every later
         // visibility event (our reveal, overlay cleanup, repeated present)
