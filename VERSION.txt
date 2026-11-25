@@ -1,3 +1,24 @@
+beautify.191 变更（D 方案：快照视图离屏渲染 + 修复封面样式循环呼出）：
+- 用户实测 .190（log71）：动画与经典样式完全一样、截图还是消散时的浮窗；
+  且有时呼出会自动循环几次。
+  根因 ①（截图）：.190 从 snapshotView 的 layer 树挖 CGImage——真机上其内容
+  是私有 CAImageRef，挖不到；兜底 UIGetScreenImage() 也拿不到有效图。
+  log71 中 .190 11 次全是 "no composited screen image" → "using classic style"，
+  src= 成功日志 0 次，故每次都回退到 cached-card（消散浮窗截图）。
+  根因 ②（循环）：cover 截图失败 → revealLive=NO → endWipeReveal 走经典分支，
+  而该分支未刷新 ownership 窗口/assembled 标志（只有 cover 成功分支刷新）。
+  于是 reveal 后约 0.3s 窗口过期、self-restore 已 >0.6s，ScreenCore 后续
+  visibility 事件把两标志判为 stale+orphaned 并释放 → 每约 2s 重新 assemble。
+- 本次改法（D 方案）：axs_open_captureWallpaper 主策略改为对系统快照视图
+  做 renderInContext 离屏渲染（区别于 .188 的 drawViewHierarchyInRect 二次
+  绘制——那条路已知出纯黑；区别于 .190 的挖 layer——那条路真机无 CGImage），
+  新增 axs_open_offscreenRender；保留挖 layer / UIGetScreenImage 兜底。
+  成功后仍按浮窗 frame 精确裁剪 + 圆角 clip，src 新增 snapshotOffscreen。
+  endWipeReveal 的 ownership/assembled/self-restore 刷新移到两个分支之外，
+  经典与封面路径都会刷新，消除循环呼出。
+- 经典 .168 样式、消散动画、cover shader 与 pass 顺序均不变。版本升至
+  2.0.5+beautify.191，CI 断言同步。
+
 beautify.190 变更（C 方案：壁纸遮罩改取系统合成真实像素）：
 - 用户实测 .189（log70+视频）：浮窗全程直接显现、粒子在上面飞，看不到遮罩。
   根因：.189 用 drawViewHierarchyInRect 画浮窗自己的 window，浮窗隐藏后

@@ -813,6 +813,37 @@ static CGFloat axs_open_density(void) {
 // tree. snapshotViewAfterScreenUpdates: is rendered by the system compositor;
 // its backing CGImages are REAL composited pixels. Re-drawing that view via
 // drawViewHierarchyInRect (.188) rasterizes to black -- mining avoids it.
+// .191: blank probe is defined later in the file; declare it here so the
+// capture strategies below can reject a rendered-but-empty bitmap.
+static BOOL axs_dm_imageIsBlank(UIImage *img);
+
+// .191: USER-CHOOSEN "offscreen render" strategy. The system snapshot view
+// (snapshotViewAfterScreenUpdates:) is compositor-owned -- .188 proved that
+// re-drawing it with drawViewHierarchyInRect yields SOLID BLACK, and .190
+// proved its layer contents is a private CAImageRef (no CGImage to mine).
+// renderInContext: walks the layer tree through CoreGraphics directly, which
+// is a DIFFERENT path and can composite layers that drawViewHierarchyInRect
+// refuses to. We render the snapshot view (and, as a second shot, the key
+// window) into an offscreen bitmap and keep the first non-blank result.
+static UIImage *axs_open_offscreenRender(UIView *view, CGSize size, CGFloat scale) {
+    if (view == nil || size.width < 40.0 || size.height < 40.0) return nil;
+    UIImage *img = nil;
+    @try {
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;   // keep the real alpha so empty areas stay detectable
+        fmt.scale = scale;
+        CGRect bounds = CGRectMake(0, 0, size.width, size.height);
+        UIGraphicsImageRenderer *r =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:bounds format:fmt];
+        img = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            [view.layer renderInContext:ctx.CGContext];
+        }];
+    } @catch (NSException *ignored) { img = nil; }
+    if (img == nil || img.CGImage == NULL) return nil;
+    if ((CGFloat)CGImageGetWidth(img.CGImage) < size.width * 0.8) return nil;
+    return img;
+}
+
 static CGImageRef axs_open_largestSnapCGImage(CALayer *layer, int depth, CGImageRef best) {
     if (layer == nil || depth > 8) return best;
     @try {
@@ -878,18 +909,33 @@ static UIImage *axs_open_captureWallpaper(UIView *card) {
         CGFloat radius = axs_dm_cornerRadiusForView(card);
         CGSize screenPt = [UIScreen mainScreen].bounds.size;
 
-        // Force commits card.hidden=YES to the compositor, then take the
-        // system-generated snapshot (contains cross-process App content).
+        // .191: USER-CHOOSEN strategy -- offscreen-render the system snapshot
+        // view via renderInContext (NOT drawViewHierarchyInRect: .188 proved
+        // that path yields solid black, and NOT layer-mining: .190 proved the
+        // contents is a private CAImageRef with no CGImage). Try first.
         CGImageRef fullRef = NULL;
         NSString *src = @"none";
+        CGFloat scale = [UIScreen mainScreen].scale;
         @try {
             UIView *forceSnap = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
-            CGImageRef mined = axs_open_largestSnapCGImage(forceSnap.layer, 0, NULL);
-            if (mined != NULL && (CGFloat)CGImageGetWidth(mined) >= screenPt.width * 0.8) {
-                fullRef = mined;
-                src = @"snapshotLayer";
+            UIImage *rendered = axs_open_offscreenRender(forceSnap, screenPt, scale);
+            if (rendered != nil && !axs_dm_imageIsBlank(rendered)) {
+                fullRef = rendered.CGImage;
+                src = @"snapshotOffscreen";
             }
         } @catch (NSException *ignored) { }
+        // Fallback 1 (.190): mine a real CGImage out of the snapshot layer tree.
+        if (fullRef == NULL) {
+            @try {
+                UIView *forceSnap2 = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
+                CGImageRef mined = axs_open_largestSnapCGImage(forceSnap2.layer, 0, NULL);
+                if (mined != NULL && (CGFloat)CGImageGetWidth(mined) >= screenPt.width * 0.8) {
+                    fullRef = mined;
+                    src = @"snapshotLayer";
+                }
+            } @catch (NSException *ignored) { }
+        }
+        // Fallback 2 (.190): UIGetScreenImage() via dlsym.
         if (fullRef == NULL) {
             CGImageRef screenImg = axs_open_screenImageViaUIGet();
             if (screenImg != NULL && (CGFloat)CGImageGetWidth(screenImg) >= screenPt.width * 0.8) {
@@ -1127,9 +1173,7 @@ static void axs_open_endWipeReveal(UIView *card) {
         card.alpha = 1.0;
         if (axs_open_revealLive) {
             // .188: the card has been VISIBLE beneath the cover since accept;
-            // nothing to unhide. Keep ownership so no re-assemble fires.
-            axs_open_setAssembled(card, YES);
-            axs_open_openActiveUntil = CACurrentMediaTime() + 3.0;
+            // nothing to unhide.
         } else {
             if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
                 ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
@@ -1137,6 +1181,19 @@ static void axs_open_endWipeReveal(UIView *card) {
                 card.hidden = NO;
             }
         }
+        // .191: OWNERSHIP HANDOFF for BOTH paths. .190 only refreshed these in
+        // the revealLive (cover-success) branch. When the wallpaper capture
+        // failed and we fell back to the classic path, the ownership window
+        // armed at accept (duration+0.3) expired ~0.3s before this reveal, and
+        // the arm-self-restore fired at duration*0.55 was already older than
+        // 0.6s. The next repeated ScreenCore visibility event then saw BOTH
+        // flags stale/orphaned -> released them -> re-assembled the card, which
+        // is the ~2s "auto open loop" in log71. Re-arm both here so the reveal
+        // unhide and all post-reveal presents are swallowed as our own until
+        // a genuine dismiss clears them.
+        axs_open_setAssembled(card, YES);
+        axs_open_openActiveUntil = CACurrentMediaTime() + 3.0;
+        axs_open_armSelfRestore();
         if (card.layer.mask != nil) card.layer.mask = nil;
     } @catch (NSException *ignored) { }
 }
