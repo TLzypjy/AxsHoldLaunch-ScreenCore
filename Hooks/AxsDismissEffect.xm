@@ -1216,7 +1216,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // swaps it in mid-flight when one ever succeeds. The sand texture is
         // only the last-resort placeholder (dust color stays palette-driven).
         UIImage *tex = nil;
-        NSString *texKind = nil;
         // .183: the CARD texture (cached dismiss-time snapshot) and the SOURCE
         // texture (tapped icon crop) -- both required for openParticle.
         UIImage *cardTex = axs_open_cachedCardSnapshotForView(card);
