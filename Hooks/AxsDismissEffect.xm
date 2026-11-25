@@ -1223,7 +1223,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             && CGImageGetWidth(cardTex.CGImage) >= 256
             && axs_dm_centerHasContent(cardTex)) {
             tex = cardTex;
-            texKind = @"cached-card";
         }
         if (tex == nil) {
             axs_dm_log(@"OPEN openParticle abort reason=card texture blank");
@@ -1244,7 +1243,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             axs_open_currentCard = nil;
             return;
         }
-        if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
         if (tex == nil) {
             axs_dm_log(@"OPEN texture unavailable, native card restored");
             axs_open_assembleInFlight = NO;
