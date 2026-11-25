@@ -695,7 +695,8 @@ static BOOL axs_open_enabled(void) {
     return on;
 }
 
-// .188: open style -- 0 = classic .168 deposit (default), 1 = wallpaper cover.
+// .194: open style -- 0 = classic .168 deposit (default), 1 = wallpaper cover,
+// 2 = live cover (real card visible, darkened own-snapshot erased by dust).
 static BOOL axs_open_coverStyle(void) {
     BOOL cover = NO;
     @try {
@@ -712,6 +713,28 @@ static BOOL axs_open_coverStyle(void) {
         cover = NO;
     }
     return cover;
+}
+
+// .194: style 2 -- LIVE COVER. Real card stays visible under the overlay;
+// the cover is a darkened copy of the card's OWN fresh snapshot, erased
+// per-cell by the dust so the crisp live window is revealed underneath.
+// Completely independent of any screen-capture API.
+static BOOL axs_open_liveCoverStyle(void) {
+    BOOL on = NO;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return NO;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyOpenStyle", @0);
+            if ([value isKindOfClass:[NSNumber class]]) on = [value integerValue] == 2;
+        }
+    } @catch (NSException *ignored) {
+        on = NO;
+    }
+    return on;
 }
 
 // .188: wallpaper-cover state, declared before markGone which resets it.
@@ -943,6 +966,42 @@ static CGFloat axs_open_centerAlpha(UIImage *img) {
     }
     CGContextRelease(c);
     return a;
+}
+
+// .194: build the LIVE COVER plate from the card's OWN visible pixels.
+// `src` is the fresh card snapshot (already corner-clipped by
+// axs_open_captureVisibleCardCheap). We darken it into a dark rounded
+// silhouette that fully hides the real card beneath the alpha-cleared overlay.
+// The cover shader then erases it cell by cell exactly where each grain lands,
+// uncovering the live card (fresh content, never hidden). Corner alpha is kept
+// verbatim so the plate matches the window's rounded shape 1:1.
+static UIImage *axs_open_makeLiveCover(UIImage *src) {
+    if (src == nil || src.CGImage == NULL) return nil;
+    UIImage *out = nil;
+    @try {
+        CGSize sz = src.size;
+        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
+        fmt.opaque = NO;
+        fmt.scale = src.scale;
+        UIGraphicsImageRenderer *r =
+            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, sz.width, sz.height) format:fmt];
+        out = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            CGRect b = CGRectMake(0, 0, sz.width, sz.height);
+            [src drawInRect:b];
+            // Darken to ~10% luminance, keeping a faint ghost of the real
+            // content so the plate reads as a covered window, not a blank box.
+            // SourceAtop paints ONLY where the snapshot already has alpha, so
+            // the exact rounded-corner mask survives -- no square dark corners
+            // (the .188 failure mode).
+            CGContextRef c = ctx.CGContext;
+            CGContextSaveGState(c);
+            CGContextSetBlendMode(c, kCGBlendModeSourceAtop);
+            [[UIColor colorWithWhite:0.0 alpha:0.90] setFill];
+            CGContextFillRect(c, b);
+            CGContextRestoreGState(c);
+        }];
+    } @catch (NSException *ignored) { out = nil; }
+    return out;
 }
 
 // .190: capture the screen state while the card is hidden -- this becomes the
@@ -1415,7 +1474,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // only the last-resort placeholder (dust color stays palette-driven).
         UIImage *tex = nil;
         NSString *texKind = nil;
-        BOOL useCover = axs_open_coverStyle() && axs_open_wallpaperShot != nil;
+        BOOL liveCover = axs_open_liveCoverStyle() && axs_open_wallpaperShot != nil;
+        BOOL useCover = liveCover || (axs_open_coverStyle() && axs_open_wallpaperShot != nil);
         UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);
         if (cachedCard != nil && cachedCard.CGImage != NULL
             && CGImageGetWidth(cachedCard.CGImage) >= 256) {
@@ -1427,7 +1487,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             // as dust arrives, uncovering the REAL card beneath. Applied after
             // the cached-card fallback so the classic path stays byte-identical.
             tex = axs_open_wallpaperShot;
-            texKind = @"wallpaper";
+            texKind = liveCover ? @"live-cover" : @"wallpaper";
         }
         if (tex == nil) { tex = axs_open_sandTexture(); texKind = @"reference-dust"; }
         if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
@@ -1469,8 +1529,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         @try {
             card.alpha = 1.0;
             if (useCover) {
-                // .188: unhide through the ORIGINAL IMP so our hook does not
-                // re-enter; the card sits visible beneath the cover overlay.
+                // .188/.194: unhide through the ORIGINAL IMP so our hook does
+                // not re-enter; the card sits visible beneath the cover overlay.
                 if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
                     ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
                 } else if (axs_open_orig_setHidden == (IMP)1) {
@@ -1486,12 +1546,16 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 }
             }
         } @catch (NSException *ignored) { }
-        __weak UIView *weakCardTex = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.016 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            UIView *c = weakCardTex;
-            if (c != nil) axs_open_gpuTextureRetry(c, renderer, 30);
-        });
+        // .194: LIVE COVER must keep its darkened texture -- a mid-flight swap
+        // to real card pixels would erase the cover and kill the reveal.
+        if (!liveCover) {
+            __weak UIView *weakCardTex = card;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.016 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                UIView *c = weakCardTex;
+                if (c != nil) axs_open_gpuTextureRetry(c, renderer, 30);
+            });
+        }
         // .158: 0.35s after the open finished the card is visible again --
         // grab a fresh snapshot (cheap 1x) so the NEXT open deposits current
         // content, not the stale cached one.
@@ -1631,8 +1695,10 @@ static void axs_open_becameVisible(UIView *v) {
         // .167: fill the per-window cache BEFORE hiding -- the first ever
         // open of a window has no snapshot yet, so its deposit pass had
         // nothing to paint and the card only popped in after the dust.
+        // .194: hoisted so the live-cover branch can reuse this fresh capture.
+        UIImage *preShot = nil;
         @try {
-            UIImage *preShot = axs_open_captureVisibleCardCheap(card);
+            preShot = axs_open_captureVisibleCardCheap(card);
             if (preShot != nil) axs_open_cacheCardSnapshot(card, preShot);
         } @catch (NSException *ignored) { }
         // .122: hide from frame 0 (invisible). The native present animation is
@@ -1642,8 +1708,31 @@ static void axs_open_becameVisible(UIView *v) {
         // .123: the whole flow runs OUTSIDE the UIKit window-setup stack and
         // the poll uses weak captures only (see axs_open_pollStep) -- no
         // block-copy of strong view captures anywhere.
+        BOOL wantLiveCover = axs_open_liveCoverStyle();
+        // .194: hide at frame 0 for ALL styles (no real-card flash before the
+        // cover overlay's first frame). The live-cover style unhides the card
+        // beneath the cover in pollStep, exactly like the wallpaper style.
         card.hidden = YES;
-        if (axs_open_coverStyle()) {
+        if (wantLiveCover) {
+            // .194: cover = darkened copy of the card's OWN pixels. The
+            // accept-time capture (preShot) is usually blank because remote
+            // content is not attached yet; the snapshot cached at dismiss (or
+            // loaded from disk) is the reliable source -- log73 proves it is
+            // always present (texture=cached-card). The plate is only a dark
+            // silhouette, so slight staleness is invisible; the REAL window
+            // revealed underneath is always live content.
+            UIImage *src = preShot;
+            if (src == nil || src.CGImage == NULL) src = axs_open_cachedCardSnapshotForView(card);
+            UIImage *plate = axs_open_makeLiveCover(src);
+            if (plate != nil) {
+                axs_open_wallpaperShot = plate;
+                axs_dm_log(@"OPEN live cover captured %.0fx%.0f (card own pixels)",
+                           plate.size.width, plate.size.height);
+            } else {
+                axs_dm_log(@"OPEN live cover failed, using classic style");
+                axs_open_wallpaperShot = nil;
+            }
+        } else if (axs_open_coverStyle()) {
             // .188: capture the screen WITHOUT the card; failure falls back to
             // the classic cached-card deposit for this open.
             UIImage *wall = axs_open_captureWallpaper(card);
@@ -1654,6 +1743,8 @@ static void axs_open_becameVisible(UIView *v) {
                 axs_open_wallpaperShot = wall;
             }
         }
+        // reset unconditionally: pollStep re-arms YES only if a cover is live;
+        // on any fallback the classic path must still unhide at the handoff.
         axs_open_revealLive = NO;
         axs_open_assembleInFlight = YES;
         // .144: mark the card as owned from the FIRST frame. Every later

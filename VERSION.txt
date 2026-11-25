@@ -1,3 +1,18 @@
+beautify.194 变更（第三种呼出样式：实景擦除 / Live Window Reveal）：
+- 背景：log73 确认全屏截图四条路全部失败（CGDisplay 符号缺失、离屏空白、
+  layer 无 CGImage、UIGetScreenImage 为 nil），所以每次都回退经典样式；
+  但浮窗"自身"的快照每次都成功（snapshot corners ... 910x1972 / cached key=...）。
+- 新方案不再截屏：把真浮窗自己的实时快照用 SourceAtop 压暗到 ~10% 亮度，
+  做成与浮窗 1:1 同形（保留精确圆角 alpha）的实景遮罩；真浮窗在浮层下垫底
+  可见，粒子从爆点飞向浮窗，按 cover shader 的同一 hash 时钟逐格把遮罩擦除，
+  露出下面清晰、实时的真浮窗。内容永远是最新的，彻底不依赖任何截屏 API。
+- 复用已验证的 cover pipeline（AXS_MSD_SHADER_COVER / openMode=2 逐格淡出），
+  只换 cover 纹理来源；该样式跳过中途纹理替换，避免暗色遮罩被真像素覆盖。
+- 设置面板 splitBeautifyOpenStyle 新增值 2 = OPEN_STYLE_LIVE
+  （中："实景擦除" / 英："Live Window Reveal"）；0 经典、1 壁纸擦除保持不变。
+- 修复 .193 探测包遗留：preShot 提升到外层作用域供实景遮罩复用；
+  revealLive 无条件复位，任何回退到经典的路径都能在正常交接时取消隐藏浮窗。
+
 beautify.193 变更（只读探测包：定位悬浮球真实 UIView 与 TOJB hook 点）：
 - 背景：分析参考插件 com.ms.openparticleanimation 0.3.67 后确认——它不是"截屏"，
   而是 hook TrollOpenJB 的托盘激活回调，直接拿悬浮球的真实 UIView，对该 view 做
