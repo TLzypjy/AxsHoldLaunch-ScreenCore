@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <math.h>
+#include <dlfcn.h>
 
 // Logos does not inject substrate.h into a translation unit with no %hook
 // block. Declare the entry point directly.
@@ -808,6 +809,66 @@ static CGFloat axs_open_density(void) {
 // .188: capture the screen state while the card is hidden -- this becomes the
 // COVER texture: the overlay paints it back over the card region and fades it
 // out per cell as dust arrives, uncovering the REAL card beneath (fresh content).
+// .190 C-plan: mine the largest CGImage from a system snapshot view's layer
+// tree. snapshotViewAfterScreenUpdates: is rendered by the system compositor;
+// its backing CGImages are REAL composited pixels. Re-drawing that view via
+// drawViewHierarchyInRect (.188) rasterizes to black -- mining avoids it.
+static CGImageRef axs_open_largestSnapCGImage(CALayer *layer, int depth, CGImageRef best) {
+    if (layer == nil || depth > 8) return best;
+    @try {
+        id contents = layer.contents;
+        if (contents != nil && CFGetTypeID((__bridge CFTypeRef)contents) == CGImageGetTypeID()) {
+            CGImageRef cg = (CGImageRef)contents;
+            size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+            size_t bw = (best != NULL) ? CGImageGetWidth(best) * CGImageGetHeight(best) : 0;
+            if (w >= 128 && h >= 128 && w * h > bw) best = cg;
+        }
+        for (CALayer *sub in layer.sublayers) {
+            best = axs_open_largestSnapCGImage(sub, depth + 1, best);
+        }
+    } @catch (NSException *ignored) { }
+    return best;
+}
+
+// .190: UIGetScreenImage() is a private UIKit symbol on jailbroken iOS.
+// Resolve via dlsym so a missing symbol cannot fail linkage.
+static CGImageRef axs_open_screenImageViaUIGet(void) {
+    @try {
+        typedef CGImageRef (*AXSGetScreenImageFn)(void);
+        void *h = dlopen("/System/Library/Frameworks/UIKit.framework/UIKit", RTLD_LAZY);
+        if (h == NULL) h = RTLD_DEFAULT;
+        AXSGetScreenImageFn fn = (AXSGetScreenImageFn)dlsym(h, "UIGetScreenImage");
+        if (fn != NULL) return fn();
+    } @catch (NSException *ignored) { }
+    return NULL;
+}
+
+// .190: alpha probe of the cover's center pixel -- logged so we can confirm
+// in one run whether the mask is opaque (1.0) or transparent (0.0).
+static CGFloat axs_open_centerAlpha(UIImage *img) {
+    CGImageRef cg = (img != nil) ? img.CGImage : NULL;
+    if (cg == NULL) return -1.0;
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    if (w == 0 || h == 0) return -1.0;
+    CGContextRef c = CGBitmapContextCreate(NULL, 1, 1, 8, 4,
+                                           CGColorSpaceCreateDeviceRGB(),
+                                           kCGImageAlphaPremultipliedLast);
+    if (c == NULL) return -1.0;
+    CGRect one = CGRectMake((CGFloat)(w / 2), (CGFloat)(h / 2), 1, 1);
+    CGImageRef px = CGImageCreateWithImageInRect(cg, one);
+    CGFloat a = -1.0;
+    if (px != NULL) {
+        CGContextDrawImage(c, CGRectMake(0, 0, 1, 1), px);
+        UInt8 *data = (UInt8 *)CGBitmapContextGetData(c);
+        if (data != NULL) a = (CGFloat)data[3] / 255.0;
+        CGImageRelease(px);
+    }
+    CGContextRelease(c);
+    return a;
+}
+
+// .190: capture the screen state while the card is hidden -- this becomes the
+// COVER texture. C-plan: grab REAL composited pixels without any re-render.
 static UIImage *axs_open_captureWallpaper(UIView *card) {
     @try {
         UIWindow *win = card.window;
@@ -815,28 +876,52 @@ static UIImage *axs_open_captureWallpaper(UIView *card) {
         CGRect frame = [card convertRect:card.bounds toView:win];
         if (frame.size.width < 40.0 || frame.size.height < 40.0) return nil;
         CGFloat radius = axs_dm_cornerRadiusForView(card);
-        // .189: draw the real WINDOW instead of re-rendering a private
-        // snapshotView (which rasterized to pure black on iOS).
-        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.scale = [UIScreen mainScreen].scale;
-        fmt.opaque = NO;
-        UIGraphicsImageRenderer *r =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:win.bounds format:fmt];
-        UIImage *full = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [win drawViewHierarchyInRect:win.bounds afterScreenUpdates:YES];
-        }];
-        if (full == nil || full.CGImage == NULL) return nil;
-        // Crop to the EXACT card frame -> the cover texture is card-sized.
-        CGFloat sc = full.scale;
-        CGRect pr = CGRectMake(frame.origin.x*sc, frame.origin.y*sc,
-                               frame.size.width*sc, frame.size.height*sc);
-        CGImageRef sub = CGImageCreateWithImageInRect(full.CGImage, pr);
+        CGSize screenPt = [UIScreen mainScreen].bounds.size;
+
+        // Force commits card.hidden=YES to the compositor, then take the
+        // system-generated snapshot (contains cross-process App content).
+        CGImageRef fullRef = NULL;
+        NSString *src = @"none";
+        @try {
+            UIView *forceSnap = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
+            CGImageRef mined = axs_open_largestSnapCGImage(forceSnap.layer, 0, NULL);
+            if (mined != NULL && (CGFloat)CGImageGetWidth(mined) >= screenPt.width * 0.8) {
+                fullRef = mined;
+                src = @"snapshotLayer";
+            }
+        } @catch (NSException *ignored) { }
+        if (fullRef == NULL) {
+            CGImageRef screenImg = axs_open_screenImageViaUIGet();
+            if (screenImg != NULL && (CGFloat)CGImageGetWidth(screenImg) >= screenPt.width * 0.8) {
+                fullRef = screenImg;
+                src = @"UIGetScreenImage";
+            }
+        }
+        if (fullRef == NULL) {
+            axs_dm_log(@"OPEN wallpaper cover: no composited screen image");
+            return nil;
+        }
+
+        // Map the card frame (points) into the captured image's pixel space.
+        CGFloat imgW = (CGFloat)CGImageGetWidth(fullRef);
+        CGFloat imgH = (CGFloat)CGImageGetHeight(fullRef);
+        CGFloat sx = imgW / MAX(screenPt.width, 1.0);
+        CGFloat sy = imgH / MAX(screenPt.height, 1.0);
+        CGRect pr = CGRectMake(frame.origin.x * sx, frame.origin.y * sy,
+                               frame.size.width * sx, frame.size.height * sy);
+        if (pr.origin.x < 0) pr.origin.x = 0;
+        if (pr.origin.y < 0) pr.origin.y = 0;
+        if (pr.origin.x + pr.size.width > imgW) pr.size.width = imgW - pr.origin.x;
+        if (pr.origin.y + pr.size.height > imgH) pr.size.height = imgH - pr.origin.y;
+        if (pr.size.width < 8 || pr.size.height < 8) return nil;
+        CGImageRef sub = CGImageCreateWithImageInRect(fullRef, pr);
         if (sub == NULL) return nil;
-        UIImage *area = [UIImage imageWithCGImage:sub scale:sc orientation:UIImageOrientationUp];
+        UIImage *area = [UIImage imageWithCGImage:sub scale:sx orientation:UIImageOrientationUp];
         CGImageRelease(sub);
+
         // Clip to the card's exact corner radius -> true alpha rounded corners.
         UIGraphicsImageRendererFormat *fmt2 = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt2.scale = sc;
+        fmt2.scale = sx;
         fmt2.opaque = NO;
         UIGraphicsImageRenderer *r2 =
             [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, frame.size.width, frame.size.height) format:fmt2];
@@ -847,8 +932,10 @@ static UIImage *axs_open_captureWallpaper(UIView *card) {
             [clip addClip];
             [area drawInRect:CGRectMake(0, 0, frame.size.width, frame.size.height)];
         }];
-        axs_dm_log(@"OPEN wallpaper cover captured %.0fx%.0f radius=%.1f",
-                   frame.size.width, frame.size.height, radius);
+        CGFloat alpha = axs_open_centerAlpha(cover);
+        axs_dm_log(@"OPEN wallpaper cover captured %.0fx%.0f radius=%.1f src=%@ alpha=%.2f full=%zux%zu",
+                   frame.size.width, frame.size.height, radius, src, alpha,
+                   (size_t)CGImageGetWidth(fullRef), (size_t)CGImageGetHeight(fullRef));
         return cover;
     } @catch (NSException *ignored) {
         return nil;

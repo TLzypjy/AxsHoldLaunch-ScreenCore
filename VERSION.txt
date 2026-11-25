@@ -1,3 +1,16 @@
+beautify.190 变更（C 方案：壁纸遮罩改取系统合成真实像素）：
+- 用户实测 .189（log70+视频）：浮窗全程直接显现、粒子在上面飞，看不到遮罩。
+  根因：.189 用 drawViewHierarchyInRect 画浮窗自己的 window，浮窗隐藏后
+  该 window 为空且 fmt.opaque=NO → 截出全透明图，遮罩 alpha=0 等于没画。
+  （对比 .188 用 snapshotView 二次绘制 → 不透明但纯黑。）
+- 本次改法（C 方案）：保留系统级 snapshotViewAfterScreenUpdates:YES
+  （能抓到跨进程 App 合成画面），但不再二次绘制它——直接从 snapshot view
+  的 layer 树挖出系统生成的 CGImage（真实像素，不变黑）；兜底用 dlsym
+  动态解析 UIGetScreenImage()。截图前 snapshotView 强制提交 card.hidden=YES，
+  保证抓到的是无浮窗的真实背景。再按浮窗 frame 精确裁剪 + 浮窗圆角 clip，
+  1:1 贴回。新增 src/alpha/full 诊断日志，一次运行即可确认遮罩不透明度。
+- 经典 .168 样式、消散动画、cover shader 与 pass 顺序均不变。版本升至
+  2.0.5+beautify.190，CI 断言同步。
 beautify.189 变更（修复壁纸擦除样式的黑色直角遮罩）：
 - 用户实测 .188 壁纸擦除样式观感接近，但动画期间浮窗位置是一张黑色直角图：
   根因 ① 截图用 snapshotViewAfterScreenUpdates + drawViewHierarchyInRect 二次
