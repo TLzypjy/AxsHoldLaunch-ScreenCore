@@ -757,32 +757,6 @@ static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat dur
             axs_msd_log(@"metal sand texture upload failed");
             return NO;
         }
-        // .173: decisive ground truth -- read back five pixels from the
-        // uploaded texture. If these come back alpha=0/rgb=0 the upload is
-        // silently producing an empty texture (the docking tiles then fade
-        // out at arrival while the palette dust stays visible); if they carry
-        // content the problem is on the sampling side.
-        @try {
-            NSUInteger w = tex.width, h = tex.height;
-            NSUInteger pts[5][2] = {
-                {w/2, h/2}, {2, 2}, {w-3, 2}, {w/2, h/8}, {w/2, h-3}
-            };
-            uint8_t px[5][4];
-            for (int i = 0; i < 5; i++) {
-                MTLRegion reg = MTLRegionMake2D(pts[i][0], pts[i][1], 1, 1);
-                [tex getBytes:px[i] bytesPerRow:4 fromRegion:reg mipmapLevel:0];
-            }
-            axs_msd_log(@"texture probe open=%u size=%lux%lu alphaInfo=%d "
-                        @"c=RGBA(%u,%u,%u,%u) tl=(%u,%u,%u,%u) tr=(%u,%u,%u,%u) "
-                        @"top=(%u,%u,%u,%u) bot=(%u,%u,%u,%u)",
-                        openMode, (unsigned long)w, (unsigned long)h,
-                        (int)CGImageGetAlphaInfo(shot.CGImage),
-                        px[0][2], px[0][1], px[0][0], px[0][3],
-                        px[1][2], px[1][1], px[1][0], px[1][3],
-                        px[2][2], px[2][1], px[2][0], px[2][3],
-                        px[3][2], px[3][1], px[3][0], px[3][3],
-                        px[4][2], px[4][1], px[4][0], px[4][3]);
-        } @catch (NSException *ignored) { }
 
         UIWindow *overlay = [[UIWindow alloc] initWithFrame:host.bounds];
         if ([overlay respondsToSelector:@selector(setWindowScene:)]) {
