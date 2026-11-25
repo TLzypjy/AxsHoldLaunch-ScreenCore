@@ -113,9 +113,10 @@ check "dylib has Metal cleanup log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunc
 check "dylib has Metal shader compile log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'metal compiled OK pipeline ready'"
 check "dylib has Metal unified start log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'metal started open='"
 # beautify.183: ARC-open assemble animation markers
-check "dylib has open assemble entry" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN assemble started'"
+check "dylib has openParticle assemble entry" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN openParticle grains='"
 check "dylib has open switch key" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'splitBeautifyOpenAnimEnabled'"
-check "dylib has finger-source assemble" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN assemble started duration'"
+check "dylib has openParticle source rect" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'srcRect=('"
+check "dylib has same-frame swap log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN openParticle reveal elapsed='"
 check "dylib has sendEvent tracking" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN INSTALL sendEvent'"
 check "dylib has native animation replaced log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN native animation replaced'"
 check "dylib has open hook install log" sh -c "{ strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' 2>/dev/null || true; } | grep -q 'OPEN INSTALL'"
