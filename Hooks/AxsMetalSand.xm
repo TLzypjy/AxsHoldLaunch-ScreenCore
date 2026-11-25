@@ -147,7 +147,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;\n\
         pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)\n\
                  * u.cardSize.x*0.05*(1.0-t);\n\
-        float2 size = mix(dustSize, tile, dock);\n\
+        float2 size = mix(float2(mix(1.15, 2.4, r3)), tile, dock);\n\
         pos += (corner-0.5)*size;\n\
         float born = step(departure, u.time);\n\
         DustVertex outO;\n\
