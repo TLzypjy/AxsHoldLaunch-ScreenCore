@@ -1,760 +1,718 @@
-name: Build ScreenCore beautify.182 (rootless)
 
-on:
-  workflow_dispatch:
-    inputs:
-      runner_label:
-        description: 'macOS runner pool (switch pools if one is congested)'
-        required: false
-        default: 'macos-15'
-        type: choice
-        options:
-          - macos-15
-          - macos-15-intel
-          - macos-13
-          - macos-14
-
-permissions:
-  contents: read
-
-env:
-  HOMEBREW_NO_AUTO_UPDATE: 1
-  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
-  THEOS: ${{ github.workspace }}/theos-roothide
-
-jobs:
-  build:
-    name: Build rootless beautify.182
-    runs-on: ${{ inputs.runner_label || 'macos-15' }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Environment
-        run: |
-          echo "$THEOS/bin" >> "$GITHUB_PATH"
-          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
-          echo "THEOS_IGNORE_PARALLEL_BUILDING_NOTICE=yes" >> "$HOME/.theosrc"
-
-      - name: Pin Package Version
-        run: |
-          # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.182"
-          echo "Using version: $VERSION"
-          sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
-
-      - name: Checkout Theos (RootHide)
-        uses: actions/checkout@v4
-        with:
-          repository: roothide/theos
-          path: theos-roothide
-          submodules: recursive
-
-      - name: Install iOS SDK (iPhoneOS16.5)
-        run: |
-          set -euo pipefail
-          mkdir -p "$THEOS/sdks"
-          if [ -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
-            echo "iPhoneOS16.5.sdk already present"
-            exit 0
-          fi
-          SDK_STAGE="$(mktemp -d)"
-          trap 'rm -rf "$SDK_STAGE"' EXIT
-          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$SDK_STAGE/sdks"
-          git -C "$SDK_STAGE/sdks" sparse-checkout set iPhoneOS16.5.sdk
-          cp -R "$SDK_STAGE/sdks/iPhoneOS16.5.sdk" "$THEOS/sdks/"
-          ls -1 "$THEOS/sdks"
-
-      - name: Install build dependencies
-        run: |
-          brew install dpkg xz file coreutils findutils gnu-sed ldid-procursus
-          # patch.sh (roothide conversion) calls plain `realpath`; coreutils ships grealpath
-          ln -sf "$(brew --prefix coreutils)/bin/grealpath" "$(brew --prefix)/bin/realpath"
-          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
-
-      - name: Build Tweak (rootless, arm64 + arm64e)
-        run: |
-          set -euo pipefail
-          sh build.sh rootless
-          echo "=== intermediate .deb files ==="
-          find ./packages -name "*.deb" -type f
-
-      - name: Verify compiled dylib (arches + symbols)
-        run: |
-          set -euo pipefail
-          EXTRACT="$(mktemp -d)"
-          DEB=$(find ./packages -name "*.deb" | head -n 1)
-          test -n "$DEB"
-          dpkg-deb -x "$DEB" "$EXTRACT"
-          DYLIB=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
-          test -n "$DYLIB"
-          echo "=== lipo -archs ==="
-          lipo -archs "$DYLIB"
-          lipo -archs "$DYLIB" | grep -q "arm64"
-          lipo -archs "$DYLIB" | grep -q "arm64e"
-          echo "=== required symbols ==="
-          # materialize strings once: grep -q on a pipe closes early -> SIGPIPE makes
-          # strings "failed to flush output" and pipefail fails the step spuriously.
-          strings -a "$DYLIB" > "$EXTRACT/dylib.strings"
-          for sym in splitBeautifyRingFrameColor UIColorPickerViewController com.susudear.screencoreprefs \
-                     colorPickerViewControllerDidFinish: colorPickerViewControllerDidSelectColor: \
-                     colorPickerControllerDidFinish: \
-                     splitBeautifyGlowEnabled splitBeautifyGlowCustomEnabled \
-                     splitBeautifyGlowColor splitBeautifyGlowRadius \
-                     splitBeautifyGlowBrightness ; do
-            grep -Fq "$sym" "$EXTRACT/dylib.strings" || { echo "MISSING symbol: $sym"; exit 1; }
-          done
-          echo "symbol check ok"
-          rm -rf "$EXTRACT"
-
-      - name: Collect Repack Files
-        run: |
-          set -euo pipefail
-          mkdir -p ./repack
-          DEB=$(find ./packages -name "*.deb" | head -n 1)
-          test -n "$DEB"
-          EXTRACT="$(mktemp -d)"
-          dpkg-deb -x "$DEB" "$EXTRACT"
-          find "$EXTRACT" -name "AxsHoldLaunch.dylib" -exec cp {} ./repack/ \;
-          find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
-          ls -la ./repack
-
-      - name: Package 2.0.5+beautify.182 (dpkg-deb)
-        env:
-          AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
-        run: |
-          set -euo pipefail
-          # brew bin first: patch.sh requires the Procursus ldid fork
-          # (ldid-procursus formula) for its -Hsha256 re-signing step.
-          PATH="$(brew --prefix)/bin:$PATH" sh packaging/package_beautify.sh
-
-      - name: Verify final beautify deb
-        run: |
-          set -euo pipefail
-          DEB=$(find ./packaging/out -name "*.deb" ! -name "*roothide*" | head -n 1)
-          test -n "$DEB"
-          echo "=== rootless deb: $DEB ==="
-          echo "=== dpkg-deb -I ==="
-          dpkg-deb -I "$DEB"
-          echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.182"
-          echo "=== package contents ==="
-          dpkg-deb -c "$DEB"
-          echo "=== bplist check (panel plist/strings) ==="
-          EXTRACT="$(mktemp -d)"
-          dpkg-deb -x "$DEB" "$EXTRACT"
-          B="$EXTRACT/var/jb/Library/PreferenceBundles/ScreenCorePrefs.bundle"
-          head -c 8 "$B/SplitSettings.plist" | grep -q "bplist00"
-          head -c 8 "$B/zh-Hans.lproj/SplitSettings.strings" | grep -q "bplist00"
-          head -c 8 "$B/en.lproj/SplitSettings.strings" | grep -q "bplist00"
-          # dump strings once per artifact: grep -q on a pipe closes early ->
-          # strings SIGPIPE / "failed to flush output" spuriously fails under pipefail.
-          strings -a "$B/SplitSettings.plist" > "$EXTRACT/plist.strings"
-          strings -a "$B/zh-Hans.lproj/SplitSettings.strings" > "$EXTRACT/zh.strings"
-          strings -a "$B/en.lproj/SplitSettings.strings" > "$EXTRACT/en.strings"
-          echo "=== beautify.95 panel cleanup check ==="
-          # edge-icon switch must be gone from the panel plist
-          grep -Fq "splitBeautifyEdgeIconEnabled" "$EXTRACT/plist.strings" && { echo "edge icon switch still in plist"; exit 1; }
-          grep -Fq "BEAUTIFY_EDGE_ICON" "$EXTRACT/zh.strings" && { echo "BEAUTIFY_EDGE_ICON still in zh strings"; exit 1; }
-          grep -Fq "BEAUTIFY_EDGE_ICON" "$EXTRACT/en.strings" && { echo "BEAUTIFY_EDGE_ICON still in en strings"; exit 1; }
-          # original dock icon switch must remain
-          grep -Fq "splitDockIconEnabled" "$EXTRACT/plist.strings" || { echo "splitDockIconEnabled missing"; exit 1; }
-          # slider value format must be exact two decimals
-          DYLIB34=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
-          test -n "$DYLIB34"
-          strings -a "$DYLIB34" > "$EXTRACT/dylib34.strings"
-          grep -Fq "%.2f" "$EXTRACT/dylib34.strings" || { echo "%.2f format missing"; exit 1; }
-          echo "=== beautify.95 slider compact check (source-level) ==="
-          # compact geometry: title 78 / value 38 / glyph 18 / hot zone 28
-          grep -Fq "constraintEqualToConstant:78" Hooks/AxsHoldLaunchMain.xm || { echo "title width 78 missing"; exit 1; }
-          grep -Fq "constraintEqualToConstant:38" Hooks/AxsHoldLaunchMain.xm || { echo "value width 38 missing"; exit 1; }
-          grep -Fq "constraintEqualToConstant:18" Hooks/AxsHoldLaunchMain.xm || { echo "glyph 18 missing"; exit 1; }
-          grep -Fq "constraintEqualToConstant:28" Hooks/AxsHoldLaunchMain.xm || { echo "hot zone 28 missing"; exit 1; }
-          # old .36 geometry must be gone
-          grep -Eq "constraintEqualToConstant:(92|44|30|22)" Hooks/AxsHoldLaunchMain.xm && { echo "old .36 slider geometry still present"; exit 1; }
-          # no stray title font sizes (group titles/footers render elsewhere)
-          ! grep -nE "systemFontOfSize:(11|13|15|17|20)[^0-9]" Hooks/AxsHoldLaunchMain.xm || { echo "stray non-12pt title font"; exit 1; }
-          # deep sweep + compact thumb/track wired in
-          grep -Fq "axs_ring_page_applyUnifiedFontDeep" Hooks/AxsHoldLaunchMain.xm || { echo "deep font sweep missing"; exit 1; }
-          grep -Fq "axs_ring_page_sliderThumbImage" Hooks/AxsHoldLaunchMain.xm || { echo "compact thumb missing"; exit 1; }
-          echo "=== beautify.95 dylib selector check ==="
-          grep -Fq "setThumbImage:forState:" "$EXTRACT/dylib34.strings" || { echo "thumb selector missing"; exit 1; }
-          grep -Fq "setMinimumTrackImage:forState:" "$EXTRACT/dylib34.strings" || { echo "track selector missing"; exit 1; }
-          echo "=== beautify.95 decor master switch check ==="
-          grep -Fq "splitBeautifyDecorEnabled" "$EXTRACT/dylib34.strings" || { echo "decor master key missing from dylib"; exit 1; }
-          grep -Fq "splitBeautifyDecorEnabled" "$EXTRACT/plist.strings" || { echo "decor master key missing from plist"; exit 1; }
-          grep -Fq "splitBeautifyTiltEnabled" "$EXTRACT/dylib34.strings" || { echo "tilt enabled key missing from dylib"; exit 1; }
-          grep -Fq "splitBeautifyTiltAngle" "$EXTRACT/dylib34.strings" || { echo "tilt angle key missing from dylib"; exit 1; }
-          # one-decimal format wired for tilt angle slider, two decimals kept elsewhere
-          grep -Fq 'isEqualToString:@"splitBeautifyTiltAngle"' Hooks/AxsHoldLaunchMain.xm || { echo "tilt angle precision key check missing"; exit 1; }
           grep -Fq 'stringWithFormat:@"%.1f"' Hooks/AxsHoldLaunchMain.xm || { echo "one-decimal format missing"; exit 1; }
-          # beautify.95：业务层把保存值夹紧到 0..AXS_TILT_ANGLE_MAX(12)，默认 3.0
-          grep -Fq 'axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 3.0, 0.0, AXS_TILT_ANGLE_MAX)' Hooks/AxsBeautifyRing.xm || { echo "tilt angle clamp to AXS_TILT_ANGLE_MAX missing"; exit 1; }
-          grep -Fq 'axs_ring_clamp(axs_ring_tiltAngle(), 0.0, AXS_TILT_ANGLE_MAX)' Hooks/AxsBeautifyRing.xm || { echo "applyTilt angle clamp to AXS_TILT_ANGLE_MAX missing"; exit 1; }
-          grep -Fq '#define AXS_TILT_ANGLE_MAX    (30.0)' Hooks/AxsBeautifyRing.xm || { echo "AXS_TILT_ANGLE_MAX 12 missing"; exit 1; }
-          python3 - <<PYEOF
-          import plistlib, sys
-          b = "$B/"
-          pl = plistlib.load(open(b + "SplitSettings.plist", "rb"), fmt=plistlib.FMT_BINARY)
-          keys = [it.get("key") for it in pl["items"] if it.get("key")]
-          order = ["splitBeautifyRingFrameEnabled", "splitBeautifyRingCustomColorEnabled",
-                   "splitBeautifyRingFrameColor", "splitBeautifyDecorEnabled",
-                   "splitBeautifyTiltEnabled", "splitBeautifyTiltAngle",
-                   "splitBeautifyGlowEnabled", "splitBeautifyGlowCustomEnabled",
-                   "splitBeautifyGlowColor", "splitBeautifyRingThickness",
-                   "splitBeautifyGlowRadius", "splitBeautifyGlowBrightness"]
-          idx = [keys.index(k) for k in order]
-          if idx != sorted(idx):
-              sys.exit("beautify group order wrong: %r" % idx)
-          # tilt rows must sit immediately after decor switch, before glow switch
-          if keys[keys.index("splitBeautifyDecorEnabled")+1:keys.index("splitBeautifyDecorEnabled")+3] \
-             != ["splitBeautifyTiltEnabled", "splitBeautifyTiltAngle"]:
-              sys.exit("tilt rows not right after decor switch")
-          tilt = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltAngle"][0]
-          if tilt.get("cell") != "PSSliderCell" or tilt.get("min") != 0.0 \
-             or tilt.get("max") != 30.0 or tilt.get("step") != 0.5 or tilt.get("default") != 3.0:
-              sys.exit("tilt angle slider spec wrong (expect 0..12 default 3): %r" % tilt)
-          tiltsw = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltEnabled"][0]
-          if tiltsw.get("cell") != "PSSwitchCell" or tiltsw.get("default") is not False:
-              sys.exit("tilt enabled switch spec wrong: %r" % tiltsw)
-          zh = plistlib.load(open(b + "zh-Hans.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
-          if zh.get("BEAUTIFY_DECOR_ENABLED") != "小窗边框美化":
-              sys.exit("zh BEAUTIFY_DECOR_ENABLED wrong: %r" % zh.get("BEAUTIFY_DECOR_ENABLED"))
-          if zh.get("BEAUTIFY_RING_THICKNESS") != "光圈粗细设置":
-              sys.exit("zh BEAUTIFY_RING_THICKNESS wrong: %r" % zh.get("BEAUTIFY_RING_THICKNESS"))
-          if "边框粗细设置" in zh.values():
-              sys.exit("old zh copy 边框粗细设置 still present")
-          if zh.get("BEAUTIFY_TILT_ENABLED") != "侧倾功能开关" \
-             or len(zh.get("BEAUTIFY_TILT_ENABLED", "")) != 6:
-              sys.exit("zh BEAUTIFY_TILT_ENABLED must be exactly 6 chars 侧倾功能开关")
-          if zh.get("BEAUTIFY_TILT_ANGLE") != "侧倾角度设置" \
-             or len(zh.get("BEAUTIFY_TILT_ANGLE", "")) != 6:
-              sys.exit("zh BEAUTIFY_TILT_ANGLE must be exactly 6 chars 侧倾角度设置")
-          en = plistlib.load(open(b + "en.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
-          if not en.get("BEAUTIFY_DECOR_ENABLED"):
-              sys.exit("en BEAUTIFY_DECOR_ENABLED missing")
-          if not en.get("BEAUTIFY_TILT_ENABLED") or not en.get("BEAUTIFY_TILT_ANGLE"):
-              sys.exit("en tilt labels missing")
-          print("beautify.95 decor+tilt panel checks ok: order + zh 6-char copy + en labels")
-          PYEOF
-          echo "=== beautify.95 master switch scope check (source-level) ==="
-          # .39 bug pattern must be gone: master gate inside the pure sub-switch readers
-          ! grep -Fq "if (!axs_ring_decorEnabled()) return NO;" Hooks/AxsBeautifyRing.xm || { echo ".39 gate pattern still in sub-switch readers"; exit 1; }
-          # master appears in: decl + def + 2 per-type helpers + 2 classify logs = 6;
-          # scanTick / attach guard / detach path have none (count would drift if leaked)
-          test "$(grep -c "axs_ring_decorEnabled" Hooks/AxsBeautifyRing.xm)" -eq 6 || { echo "decorEnabled occurrences changed (expected 6)"; exit 1; }
-          # per-container docked classification wired
-          grep -Fq "static BOOL axs_ring_containerIsDocked(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "docked classifier missing"; exit 1; }
-          grep -Fq "respondsToSelector:@selector(isDocked)" Hooks/AxsBeautifyRing.xm || { echo "internal isDocked probe missing"; exit 1; }
-          grep -Fq "renderScale > 0.92" Hooks/AxsBeautifyRing.xm || { echo "geometry 45% centerLarge rule missing"; exit 1; }
-          grep -Fq "leftGap <= 24.0" Hooks/AxsBeautifyRing.xm || { echo "geometry 80pt edge rule missing"; exit 1; }
-          grep -Fq "static BOOL axs_ring_ringAllowedFor(BOOL docked, UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "ringAllowedFor missing"; exit 1; }
-          grep -Fq "static BOOL axs_ring_glowAllowedFor(BOOL docked, UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "glowAllowedFor missing"; exit 1; }
-          # attach: classification + per-container gates
-          grep -Fq "BOOL docked = axs_ring_containerIsDocked(container);" Hooks/AxsBeautifyRing.xm || { echo "attach docked classify missing"; exit 1; }
-          grep -Fq "driver.ring.hidden = !ringAllowed;" Hooks/AxsBeautifyRing.xm || { echo "sync per-frame visibility missing"; exit 1; }
-          grep -Fq "BOOL glowOn = axs_ring_glowAllowedFor(docked, container);" Hooks/AxsBeautifyRing.xm || { echo "sync glow per-type gate missing"; exit 1; }
-          grep -Fq "BOOL docked = axs_ring_containerIsDocked(d.container);" Hooks/AxsBeautifyRing.xm || { echo "refresh per-driver classify missing"; exit 1; }
-          grep -Fq "!axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container), driver.container)" Hooks/AxsBeautifyRing.xm || { echo "applyGlow per-container gate missing"; exit 1; }
-          test "$(grep -c "decor classify" Hooks/AxsBeautifyRing.xm)" -eq 2 || { echo "classify log missing (expect attach + sync)"; exit 1; }
-          echo "=== beautify.95 regression fix check (source-level) ==="
-          # .42 idle-pause machinery must be fully rolled back (指令 三.1/三.2)
-          ! grep -Fq "self.link.paused = YES;" Hooks/AxsBeautifyRing.xm || { echo ".42 idle pause still present"; exit 1; }
-          ! grep -Fq "BOOL needsSync" Hooks/AxsBeautifyRing.xm || { echo "needsSync flag still present"; exit 1; }
-          ! grep -Fq "BOOL wasAnimating" Hooks/AxsBeautifyRing.xm || { echo "wasAnimating flag still present"; exit 1; }
-          ! grep -Fq "lastContFrame" Hooks/AxsBeautifyRing.xm || { echo "lastContFrame gate still present"; exit 1; }
-          ! grep -Fq "axs_ring_resumeAllLinks" Hooks/AxsBeautifyRing.xm || { echo "resumeAllLinks still present"; exit 1; }
-          ! grep -Fq ".link.paused" Hooks/AxsBeautifyRing.xm || { echo "link paused still present"; exit 1; }
-          # tick 一帧不早退：直接调用 syncDriver（指令 三.1/三.3）
-          grep -Fq "axs_ring_syncDriver(self);" Hooks/AxsBeautifyRing.xm || { echo "tick->syncDriver missing"; exit 1; }
-          # per-driver 状态记录 + visChanged 视为 changed 项（指令 六.1/六.5）
-          grep -Fq "BOOL lastIsDocked" Hooks/AxsBeautifyRing.xm || { echo "lastIsDocked missing"; exit 1; }
-          grep -Fq "BOOL lastRingAllowed" Hooks/AxsBeautifyRing.xm || { echo "lastRingAllowed missing"; exit 1; }
-          grep -Fq "BOOL lastGlowAllowed" Hooks/AxsBeautifyRing.xm || { echo "lastGlowAllowed missing"; exit 1; }
-          grep -Fq "BOOL visChanged" Hooks/AxsBeautifyRing.xm || { echo "visChanged missing"; exit 1; }
-          grep -Fq "BOOL changed = visChanged" Hooks/AxsBeautifyRing.xm || { echo "state-change not treated as changed"; exit 1; }
-          # hidden/alpha 在几何 changed 之前同步提交，关隐式动画（指令 三.4/三.6/六.3）
-          grep -Fq "[CATransaction setDisableActions:YES];" Hooks/AxsBeautifyRing.xm || { echo "disableActions missing"; exit 1; }
-          grep -Fq "driver.ring.hidden = !ringAllowed;" Hooks/AxsBeautifyRing.xm || { echo "ring hidden commit missing"; exit 1; }
-          grep -Fq "driver.ring.opacity = ringAllowed ? 1.0 : 0.0;" Hooks/AxsBeautifyRing.xm || { echo "ring alpha commit missing"; exit 1; }
-          grep -Fq "driver.glowInner.hidden = !glowAllowed;" Hooks/AxsBeautifyRing.xm || { echo "glow hidden commit missing"; exit 1; }
-          grep -Fq "static void axs_ring_syncAllDriversNow(void)" Hooks/AxsBeautifyRing.xm || { echo "event sync helper missing"; exit 1; }
-          grep -Fq "axs_ring_syncAllDriversNow();" Hooks/AxsBeautifyRing.xm || { echo "event sync call missing"; exit 1; }
-          # 无 shouldRasterize / fade 残留（指令 三.7/三.6）
-          ! grep -Fq "shouldRasterize" Hooks/AxsBeautifyRing.xm || { echo "shouldRasterize still present"; exit 1; }
-          echo "=== beautify.95 safe optimizations kept (source-level) ==="
-          grep -Fq "static void axs_ring_queueScan(void)" Hooks/AxsBeautifyRing.xm || { echo "scan dedupe missing"; exit 1; }
-          grep -Fq "axs_ring_queueScan();" Hooks/AxsBeautifyRing.xm || { echo "queueScan call missing"; exit 1; }
-          # layer/mask cache-first (no per-frame findMount/findRealClip/selectMask)
-          grep -Fq "CALayer *mount = driver.mountLayer;" Hooks/AxsBeautifyRing.xm || { echo "mount cache-first missing"; exit 1; }
-          grep -Fq "driver.realLayer.superlayer == nil" Hooks/AxsBeautifyRing.xm || { echo "realLayer cache validity missing"; exit 1; }
-          grep -Fq "driver.radiusMask.superlayer == nil" Hooks/AxsBeautifyRing.xm || { echo "radiusMask cache validity missing"; exit 1; }
-          # geometry slimming: path/gradient/glow caches
-          grep -Fq "driver.lastPathBounds" Hooks/AxsBeautifyRing.xm || { echo "path cache missing"; exit 1; }
-          grep -Fq "driver.lastGradientDiag" Hooks/AxsBeautifyRing.xm || { echo "gradient cache missing"; exit 1; }
-          grep -Fq "driver.lastGlowGeomBounds" Hooks/AxsBeautifyRing.xm || { echo "glow geom cache missing"; exit 1; }
-          grep -Fq "BOOL geomChanged, BOOL colorChanged" Hooks/AxsBeautifyRing.xm || { echo "glow split rebuild missing"; exit 1; }
-          # prefs snapshot: all config reads funnel through refreshConfigSnapshot
-          grep -Fq "static void axs_ring_refreshConfigSnapshot(void)" Hooks/AxsBeautifyRing.xm || { echo "config snapshot missing"; exit 1; }
-          test "$(grep -c "axs_holdlaunch_theirValueForKey" Hooks/AxsBeautifyRing.xm)" -eq 15 || { echo "config reads drifted (expected 15 = 14 snapshot reads incl. debug mode + 1 selector)"; exit 1; }
-          grep -Fq "axs_ring_refreshConfigSnapshot();" Hooks/AxsBeautifyRing.xm || { echo "snapshot refresh call missing"; exit 1; }
-          echo "=== beautify.95 side-tilt feature check (source-level) ==="
-          # config getters (snapshot reads)
-          grep -Fq "static BOOL axs_ring_tiltEnabled(void)" Hooks/AxsBeautifyRing.xm || { echo "tiltEnabled getter missing"; exit 1; }
-          grep -Fq "static double axs_ring_tiltAngle(void)" Hooks/AxsBeautifyRing.xm || { echo "tiltAngle getter missing"; exit 1; }
-          # per-driver docked-side probe (internal state first, geometry fallback)
-          grep -Fq "static int axs_ring_containerDockSide(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "dock side probe missing"; exit 1; }
-          grep -Fq "isLeftDocked" Hooks/AxsBeautifyRing.xm || { echo "left side internal probe missing"; exit 1; }
-          grep -Fq "isRightDocked" Hooks/AxsBeautifyRing.xm || { echo "right side internal probe missing"; exit 1; }
-          # beautify.95: 3D card side-flip — rotationY around Y axis + m34 perspective, NOT 2D rotation.z
-          grep -Fq "CATransform3DRotate(CATransform3DIdentity, (CGFloat)rad, 0.0, 1.0, 0.0)" Hooks/AxsBeautifyRing.xm || { echo "rotationY transform missing"; exit 1; }
-          ! grep -Fq "CATransform3DMakeRotation((CGFloat)rad, 0.0, 0.0, 1.0)" Hooks/AxsBeautifyRing.xm || { echo "old 2D rotation.z tilt still present"; exit 1; }
-          # .65 核心根因修复：m34 必须经 R·P 复合写入 m14/m34，不能只塞 m34（对 z=0 平面透视失效）
-          grep -Fq "tiltRotation.m14 = -sinRad * AXS_TILT_M34;" Hooks/AxsBeautifyRing.xm || { echo "m14 perspective term missing (.65 root fix)"; exit 1; }
-          grep -Fq "tiltRotation.m34 =  cosRad * AXS_TILT_M34;" Hooks/AxsBeautifyRing.xm || { echo "m34*cos perspective term missing (.65 root fix)"; exit 1; }
-          ! grep -Fq "tiltRotation.m34 = AXS_TILT_M34;" Hooks/AxsBeautifyRing.xm || { echo "old broken m34-only write still present"; exit 1; }
-          grep -Fq "#define AXS_TILT_PERSPECTIVE_GAIN  (2.6)" Hooks/AxsBeautifyRing.xm || { echo "perspective gain missing"; exit 1; }
-          grep -Fq "rad = rad * AXS_TILT_PERSPECTIVE_GAIN;" Hooks/AxsBeautifyRing.xm || { echo "perspective gain application missing"; exit 1; }
-          grep -Fq "side * angle * M_PI / 180.0" Hooks/AxsBeautifyRing.xm || { echo "tilt angle conversion missing"; exit 1; }
-          # cleanBase 判定与复位必须清 3D 透视分量 m13/m31/m34，防累积/残留
-          grep -Fq "fabs(t.m13) < 1e-4 && fabs(t.m23) < 1e-4" Hooks/AxsBeautifyRing.xm || { echo "3D perspective cleanBase guard missing"; exit 1; }
-          grep -Fq "t.m13 = 0; t.m23 = 0; t.m31 = 0; t.m32 = 0; t.m34 = 0;" Hooks/AxsBeautifyRing.xm || { echo "3D perspective strip on reset missing"; exit 1; }
-          # restore to native base on center/off/zero + per-frame reapply
-          grep -Fq "static void axs_ring_resetTilt(AXSRingLinkDriver *driver)" Hooks/AxsBeautifyRing.xm || { echo "tilt reset missing"; exit 1; }
-          grep -Fq "axs_ring_resetTilt(driver);" Hooks/AxsBeautifyRing.xm || { echo "tilt reset call missing"; exit 1; }
-          grep -Fq "axs_ring_applyTilt(driver);" Hooks/AxsBeautifyRing.xm || { echo "per-frame tilt apply missing"; exit 1; }
-          grep -Fq "side = axs_ring_containerDockSide(container);" Hooks/AxsBeautifyRing.xm || { echo "tilt side gate missing"; exit 1; }
-          # exception safety
-          test "$(grep -c "axs_ring_applyTilt\|axs_ring_resetTilt\|axs_ring_containerDockSide" Hooks/AxsBeautifyRing.xm)" -ge 8 || { echo "tilt helpers missing"; exit 1; }
-          test "$(grep -c "ring tilt .* exception" Hooks/AxsBeautifyRing.xm)" -ge 3 || { echo "tilt @try protection insufficient"; exit 1; }
-          echo "=== beautify.95 overlay isolation + visual-host fix (source-level) ==="
-          # overlay class probe + finder, stays in identity plane (no inverse 3D written to overlay)
-          grep -Fq 'objc_getClass("SCFloatingInteractionOverlayView")' Hooks/AxsBeautifyRing.xm || { echo "overlay class probe missing"; exit 1; }
-          grep -Fq "static UIView *axs_ring_findTiltOverlay(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "overlay finder missing"; exit 1; }
-          ! grep -Fq "ov.layer.transform = owant;" Hooks/AxsBeautifyRing.xm || { echo "overlay inverse 3D still written (must stay planar)"; exit 1; }
-          grep -Fq "overlayAncestorTilted" Hooks/AxsBeautifyRing.xm || { echo "overlay ancestor tilt check missing"; exit 1; }
-          grep -Fq "ov.frame = inSuper;" Hooks/AxsBeautifyRing.xm || { echo "overlay projected hit-frame sync missing"; exit 1; }
-          ! grep -Fq "ov.userInteractionEnabled = NO" Hooks/AxsBeautifyRing.xm || { echo "overlay interaction disabled"; exit 1; }
-          grep -Fq "axs_ring_tiltCollectHitRegions" Hooks/AxsBeautifyRing.xm || { echo "hit-region probe missing"; exit 1; }
-          # visual-host classifier (CONTENT=_UIScenePresentationView, OVERLAY excluded, no plain-UIView false positive)
-          grep -Fq "static NSArray *axs_ring_collectVisualHosts" Hooks/AxsBeautifyRing.xm || { echo "visual host collector missing"; exit 1; }
-          grep -Fq "static BOOL axs_ring_isOverlayNode(UIView *v)" Hooks/AxsBeautifyRing.xm || { echo "overlay node classifier missing"; exit 1; }
-          grep -Fq "static BOOL axs_ring_subtreeHasSceneContent(UIView *v)" Hooks/AxsBeautifyRing.xm || { echo "scene content classifier missing"; exit 1; }
-          grep -Fq "_UIScenePresentationView" Hooks/AxsBeautifyRing.xm || { echo "scene presentation content root missing"; exit 1; }
-          grep -Fq "axs_ring_subtreeHasOverlay(wp)" Hooks/AxsBeautifyRing.xm || { echo "overlay intersection guard missing"; exit 1; }
-          # per-host nativeBase keyed by pointer address; sampled once before first tilt write
-          grep -Fq "tiltVisualBase" Hooks/AxsBeautifyRing.xm || { echo "per-host nativeBase dict missing"; exit 1; }
-          grep -Fq "valueWithCATransform3D:nativeBase" Hooks/AxsBeautifyRing.xm || { echo "nativeBase cache write missing"; exit 1; }
-          ! grep -Fq "driver.tiltBaseTransform = cur;" Hooks/AxsBeautifyRing.xm || { echo "old single-host base sampling still present"; exit 1; }
-          # centerLarge geometry: main-screen gaps + ratio >=0.45 -> no tilt; no presentationLayer feedback
-          grep -Fq "renderScale > 0.92" Hooks/AxsBeautifyRing.xm || { echo "centerLarge ratio gate missing"; exit 1; }
-          grep -Fq "leftGap <= 24.0" Hooks/AxsBeautifyRing.xm || { echo "screen left-gap gate missing"; exit 1; }
-          # log fields required by 指令 十
-          grep -Fq "ring tilt VISUAL HOSTS (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "visual hosts log missing"; exit 1; }
-          grep -Fq "ring tilt 3D apply (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "3D apply log missing"; exit 1; }
-          grep -Fq "ring tilt 3D reset (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "3D reset log missing"; exit 1; }
-          grep -Fq "residual(m13=" Hooks/AxsBeautifyRing.xm || { echo "reset residual log missing"; exit 1; }
-          grep -Fq "corners=%@" Hooks/AxsBeautifyRing.xm || { echo "projection corners log missing"; exit 1; }
-          grep -Fq "userInt=%d ges=%@" Hooks/AxsBeautifyRing.xm || { echo "hit region interaction log missing"; exit 1; }
-          grep -Fq "static NSString *axs_ring_nsTransform3D" Hooks/AxsBeautifyRing.xm || { echo "3D transform describe helper missing"; exit 1; }
-          ! grep -Eq "void \(\\^(walk|recurse|traverse)\)" Hooks/AxsBeautifyRing.xm || { echo "recursive block self-capture pattern present"; exit 1; }
-          echo "=== beautify.95 diagnostic probe check (source-level) ==="
-          grep -Fq "static void axs_ring_tiltLogPreferenceSources" Hooks/AxsBeautifyRing.xm || { echo "pref dual-source logger missing"; exit 1; }
-          grep -Fq "ring tilt PREFS plistPath=" Hooks/AxsBeautifyRing.xm || { echo "pref dual-source log line missing"; exit 1; }
-          grep -Fq "snapshotMismatch" Hooks/AxsBeautifyRing.xm || { echo "pref snapshot mismatch detection missing"; exit 1; }
-          grep -Fq "wrongDomain" Hooks/AxsBeautifyRing.xm || { echo "pref wrong-domain detection missing"; exit 1; }
-          grep -Fq "static void axs_ring_tiltLogDockState" Hooks/AxsBeautifyRing.xm || { echo "dock multi-state logger missing"; exit 1; }
-          grep -Fq "ring tilt DOCK container=" Hooks/AxsBeautifyRing.xm || { echo "dock log line missing"; exit 1; }
-          grep -Fq "leftGap" Hooks/AxsBeautifyRing.xm || { echo "dock geometry edge-gap probe missing"; exit 1; }
-          grep -Fq "static void axs_ring_tiltDumpHierarchy" Hooks/AxsBeautifyRing.xm || { echo "hierarchy dump missing"; exit 1; }
-          grep -Fq "subT=%@ presT=%@" Hooks/AxsBeautifyRing.xm || { echo "hierarchy sublayer/presentation transform fields missing"; exit 1; }
-          grep -Fq "hasBG=%d" Hooks/AxsBeautifyRing.xm || { echo "hierarchy background/content/overlay flags missing"; exit 1; }
-          grep -Fq "static NSString *axs_ring_tiltNativeBaseDesc" Hooks/AxsBeautifyRing.xm || { echo "native base transform reader missing"; exit 1; }
-          grep -Fq "ring native chain probe (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "native chain probe log missing"; exit 1; }
-          # beautify.95: remote-scene-root ban + local wrapper hosts + clip fix
-          grep -Fq "REMOTE_SCENE_ROOT" Hooks/AxsBeautifyRing.xm || { echo "remote scene root marker missing"; exit 1; }
-          grep -Fq "CONTENT_WRAPPER" Hooks/AxsBeautifyRing.xm || { echo "content wrapper host missing"; exit 1; }
-          grep -Fq "BACKGROUND_WRAPPER" Hooks/AxsBeautifyRing.xm || { echo "background wrapper host missing"; exit 1; }
-          grep -Fq "wp.superview == container" Hooks/AxsBeautifyRing.xm || { echo "wrapper climb-to-container-direct-child missing"; exit 1; }
-          grep -Fq "tiltVisualClips" Hooks/AxsBeautifyRing.xm || { echo "clips original-value cache missing"; exit 1; }
-          grep -Fq "h.clipsToBounds = NO;" Hooks/AxsBeautifyRing.xm || { echo "tilt-time clip release missing"; exit 1; }
-          grep -Fq "ring tilt HOST_EVICTED" Hooks/AxsBeautifyRing.xm || { echo "host-evicted restore missing"; exit 1; }
-          ! grep -Fq "[sceneRoots containsObject:v]) \[hosts addObject" Hooks/AxsBeautifyRing.xm || { echo "remote root still chosen as host"; exit 1; }
-          # beautify.95: cleanBase state machine + direction flip + corner mask + z-order + NaN safety
-          grep -Fq "static BOOL axs_ring_tiltMatrixClean" Hooks/AxsBeautifyRing.xm || { echo "matrix clean check missing"; exit 1; }
-          grep -Fq "static BOOL axs_ring_tiltMatrixFinite" Hooks/AxsBeautifyRing.xm || { echo "matrix finite check missing"; exit 1; }
-          grep -Fq "ring tilt BASE_CLEAN" Hooks/AxsBeautifyRing.xm || { echo "BASE_CLEAN log missing"; exit 1; }
-          grep -Fq "BASE_PENDING" Hooks/AxsBeautifyRing.xm || { echo "BASE_PENDING log missing"; exit 1; }
-          grep -Fq "ring tilt BASE_STALE" Hooks/AxsBeautifyRing.xm || { echo "BASE_STALE log missing"; exit 1; }
-          grep -Fq "ring tilt HOST_EVICTED" Hooks/AxsBeautifyRing.xm || { echo "HOST_EVICTED log missing"; exit 1; }
-          grep -Fq "ring tilt SAFE_ABORT" Hooks/AxsBeautifyRing.xm || { echo "SAFE_ABORT log missing"; exit 1; }
-          grep -Fq "ring tilt CORNER_CLIP" Hooks/AxsBeautifyRing.xm || { echo "CORNER_CLIP log missing"; exit 1; }
-          grep -Fq "ring tilt ZORDER" Hooks/AxsBeautifyRing.xm || { echo "ZORDER log missing"; exit 1; }
-          grep -Fq "AxsTiltCornerMask" Hooks/AxsBeautifyRing.xm || { echo "plugin corner mask missing"; exit 1; }
-          grep -Fq "static CGFloat axs_ring_tiltProbeCornerRadius" Hooks/AxsBeautifyRing.xm || { echo "corner radius probe missing"; exit 1; }
-          grep -Fq "#define AXS_TILT_SIDE_SIGN    (-1.0)" Hooks/AxsBeautifyRing.xm || { echo "sideSign direction flip missing"; exit 1; }
-          grep -Fq "want.m11 < 0.02" Hooks/AxsBeautifyRing.xm || { echo "scale-degradation guard missing"; exit 1; }
-          grep -Fq "cornersFinite" Hooks/AxsBeautifyRing.xm || { echo "projection finite guard missing"; exit 1; }
-          grep -Fq "bringSubviewToFront:ov" Hooks/AxsBeautifyRing.xm || { echo "overlay z-order fix missing"; exit 1; }
-          ! grep -Fq "#define AXS_TILT_SIDE_SIGN    (1.0)" Hooks/AxsBeautifyRing.xm || { echo "old unflipped sideSign still present"; exit 1; }
-          # beautify.95: metadata type guard + per-node exception + explicit classify/probe logs
-          grep -Fq "METADATA_TYPE_SKIP" Hooks/AxsBeautifyRing.xm || { echo "metadata type skip log missing"; exit 1; }
-          grep -Fq "COLLECT_NODE_EXCEPTION" Hooks/AxsBeautifyRing.xm || { echo "per-node exception log missing"; exit 1; }
-          grep -Fq "HOST_CLASSIFY" Hooks/AxsBeautifyRing.xm || { echo "host classify marker missing"; exit 1; }
-          grep -Fq "DOCKED_ITEM_PROBE" Hooks/AxsBeautifyRing.xm || { echo "docked item probe missing"; exit 1; }
-          grep -Fq "hasCALayerHost" Hooks/AxsBeautifyRing.xm || { echo "CALayerHost detection missing"; exit 1; }
-          grep -Fq '@{@"axsNode": container}' Hooks/AxsBeautifyRing.xm || { echo "dict-tuple initial push missing"; exit 1; }
-          ! grep -Fq 'UIView \*v = item\[@"v"\];' Hooks/AxsBeautifyRing.xm || { echo "crash pattern: bare node read as dict still present"; exit 1; }
-          # beautify.95: all-window scan + dock-manager probes + stale host eviction + layer-tree gate
-          grep -Fq "ALL_WINDOWS_PROBE" Hooks/AxsBeautifyRing.xm || { echo "all-windows probe missing"; exit 1; }
-          grep -Fq "DOCK_MANAGER_PROBE" Hooks/AxsBeautifyRing.xm || { echo "dock manager probe missing"; exit 1; }
-          grep -Fq "DOCK_RECORD_PROBE" Hooks/AxsBeautifyRing.xm || { echo "dock record probe missing"; exit 1; }
-          grep -Fq "LAYER_TREE_PROBE" Hooks/AxsBeautifyRing.xm || { echo "layer tree probe missing"; exit 1; }
-          grep -Fq "LAYER_TREE_MISSING_CONTENT" Hooks/AxsBeautifyRing.xm || { echo "layer-tree content gate missing"; exit 1; }
-          grep -Fq "STALE_HOST_EVICT" Hooks/AxsBeautifyRing.xm || { echo "stale host eviction missing"; exit 1; }
-          grep -Fq "connectedScenes" Hooks/AxsBeautifyRing.xm || { echo "multi-window scan missing"; exit 1; }
-          # beautify.95: dock-transition snapshot + prefix class match
-          grep -Fq "DOCK_TRANSITION_SNAP" Hooks/AxsBeautifyRing.xm || { echo "dock transition snap missing"; exit 1; }
-          grep -Fq "SNAP WINDOW TREE" Hooks/AxsBeautifyRing.xm || { echo "snapshot window tree missing"; exit 1; }
-          grep -Fq "DockedFloatingItem" Hooks/AxsBeautifyRing.xm || { echo "prefix docked-item match missing"; exit 1; }
-          grep -Fq "lastDockSnap" Hooks/AxsBeautifyRing.xm || { echo "dock flip state missing"; exit 1; }
-          # beautify.95: container-as-host regression with native corner preservation
-          grep -Fq "CONTAINER_SUB_HOST" Hooks/AxsBeautifyRing.xm || { echo "local wrapper host selection missing"; exit 1; }
-          grep -Fq "CONTAINER_SUB_HOST" Hooks/AxsBeautifyRing.xm || { echo "container sub host classifier missing"; exit 1; }
-          grep -Fq "role=probe-only" Hooks/AxsBeautifyRing.xm || { echo "wrapper demotion missing"; exit 1; }
-          grep -Fq "h != container && (h.clipsToBounds" Hooks/AxsBeautifyRing.xm || { echo "container native-corner preservation missing"; exit 1; }
-          # beautify.95: safe-scale below native dock zoom + strip-perspective resets
-          grep -Fq "want.m11 < 0.02" Hooks/AxsBeautifyRing.xm || { echo "safe scale threshold missing"; exit 1; }
-          ! grep -Fq "want.m11 < 0.35" Hooks/AxsBeautifyRing.xm || { echo "old 0.35 threshold still present"; exit 1; }
-          grep -Fq "static CATransform3D axs_ring_tiltStripPerspective" Hooks/AxsBeautifyRing.xm || { echo "strip perspective helper missing"; exit 1; }
-          test "$(grep -c "axs_ring_tiltStripPerspective" Hooks/AxsBeautifyRing.xm)" -ge 5 || { echo "strip-perspective not applied to all reset points"; exit 1; }
-          # beautify.95: sublayerTransform path for the remote scene root host
-          grep -Fq "h.layer.sublayerTransform = want;" Hooks/AxsBeautifyRing.xm || { echo "sublayer transform write missing"; exit 1; }
-          grep -Fq "BOOL hIsScene" Hooks/AxsBeautifyRing.xm || { echo "scene-root branch missing"; exit 1; }
-          grep -Fq "SCENE_HOST" Hooks/AxsBeautifyRing.xm || { echo "scene host selection missing"; exit 1; }
-          grep -Fq "HOST_CLASSIFY LOCAL_WRAPPER role=host" Hooks/AxsBeautifyRing.xm || { echo "local wrapper host classify missing"; exit 1; }
-          echo "=== beautify.95 docked-UI-never-host + left-dock stuck fix check ==="
-          grep -Fq "hasDockedVisualHost" Hooks/AxsBeautifyRing.xm || { echo "docked visual host priority missing"; exit 1; }
-          grep -Fq "DOCKED_ITEM_NEVER_HOST" Hooks/AxsBeautifyRing.xm || { echo "docked never-host marker missing"; exit 1; }
-          grep -Fq "DOCKED_ITEM_SUB_SKIPPED" Hooks/AxsBeautifyRing.xm || { echo "docked sub skip marker missing"; exit 1; }
-          grep -Fq "axs_ring_insideDockedItemSubtree" Hooks/AxsBeautifyRing.xm || { echo "docked subtree exclusion missing"; exit 1; }
-          grep -Fq "DOCKED_ITEM_SUB_HOST" Hooks/AxsBeautifyRing.xm && { echo "docked sub host must be removed (.83)"; exit 1; }
-          grep -Fq "DOCKED_ITEM_TAP_ROOT_VISUAL_HOST" Hooks/AxsBeautifyRing.xm && { echo "docked tap-root host must be removed (.83)"; exit 1; }
-          grep -Fq "LOCAL_WRAPPER_SKIPPED" Hooks/AxsBeautifyRing.xm || { echo "hidden wrapper host skip missing"; exit 1; }
+          B="$EXTRACT/var/jb/Library/PreferenceBundles/ScreenCorePrefs.bundle"
+          grep -Fq "screenH - 90.0" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback source missing"; exit 1; }
+  HOMEBREW_NO_AUTO_UPDATE: 1
+          grep -Fq "if (in.isOpen > 0.5) {" Hooks/AxsMetalSand.xm || { echo "fragment open branch missing"; exit 1; }
           grep -Fq "CATransform3D restore = (baseVal != nil) ? nativeBase" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on undock missing"; exit 1; }
-          grep -Fq "CATransform3D staleRestore = (sbaseVal != nil)" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on stale evict missing"; exit 1; }
-          grep -Fq "CATransform3D oldRestore = (obaseVal != nil)" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on host evict missing"; exit 1; }
-          grep -Fq "CATransform3D safeRestore = (baseVal != nil)" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on SAFE_ABORT missing"; exit 1; }
-          grep -Fq "CATransform3D restore = (baseVal != nil) ? [baseVal CATransform3DValue]" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on detach missing"; exit 1; }
-          # beautify.95: full-size sibling shadow-shell follows tilt + angle max 12
-          grep -Fq "SHADOW_SIB_ADDED" Hooks/AxsBeautifyRing.xm || { echo "shadow sibling completion missing"; exit 1; }
-          grep -Fq "NSMutableArray *hosts = [NSMutableArray arrayWithArray:axs_ring_collectVisualHosts" Hooks/AxsBeautifyRing.xm || { echo "mutable hosts for shadow completion missing"; exit 1; }
-          # beautify.95: window-hidden asymmetry fix + native layer-shadow diagnostics/neutralization
-          grep -Fq "(accepted: window-hidden docked steady, .95)" Hooks/AxsBeautifyRing.xm || { echo "window-hidden sibling acceptance missing"; exit 1; }
-          grep -Fq "ring tilt SHADOW_PROBE" Hooks/AxsBeautifyRing.xm || { echo "shadow probe diagnostics missing"; exit 1; }
-          grep -Fq "ring tilt SHADOW_NEUTRALIZED" Hooks/AxsBeautifyRing.xm || { echo "shadow neutralization missing"; exit 1; }
-          grep -Fq "ring tilt SHADOW_RESTORED" Hooks/AxsBeautifyRing.xm || { echo "shadow restore missing"; exit 1; }
-          # beautify.95: ring/glow layers follow tilt + stable sibling size ref
-          grep -Fq "光圈(ring)/光晕" Hooks/AxsBeautifyRing.xm || { echo "decor layers follow tilt missing"; exit 1; }
-          grep -Fq "CATransform3D want = shouldTilt ? tiltRotation : CATransform3DIdentity;" Hooks/AxsBeautifyRing.xm || { echo "decor tilt matrix missing"; exit 1; }
-          grep -Fq "CGRect refBounds = container.bounds;" Hooks/AxsBeautifyRing.xm || { echo "stable sibling size ref missing"; exit 1; }
-          echo "=== beautify.96 fullscreen probe check (source-level, log-only) ==="
-          test -f Hooks/AxsFullscreenProbe.xm || { echo "AxsFullscreenProbe.xm missing"; exit 1; }
-          grep -Fq "sc_handleFullscreenTap:" Hooks/AxsFullscreenProbe.xm || { echo "probe tap hook missing"; exit 1; }
-          grep -Fq "sc_floatingContainerViewDidRequestFullscreen:" Hooks/AxsFullscreenProbe.xm || { echo "probe request hook missing"; exit 1; }
-          grep -Fq "promoteSceneToFullscreenForSession:completion:" Hooks/AxsFullscreenProbe.xm || { echo "probe promoteSession hook missing"; exit 1; }
-          grep -Fq "sc_promoteFrontmostFloatingSceneToFullscreen" Hooks/AxsFullscreenProbe.xm || { echo "probe promoteFrontmost hook missing"; exit 1; }
-          grep -Fq "axs_fs_argsAreObjects" Hooks/AxsFullscreenProbe.xm || { echo "probe args-safety guard missing"; exit 1; }
-          grep -Fq "FSP module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "probe load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.182 dismiss particle module check ==="
-          grep -Fq "splitBeautifyDismissAnimEnabled" Hooks/AxsDismissEffect.xm || { echo "dismiss switch key missing"; exit 1; }
-          grep -Fq "DME module loaded in SpringBoard" Hooks/AxsDismissEffect.xm || { echo "dismiss load log missing"; exit 1; }
-          # .111: hide the real card while the dissolve plays (no double image)
-          grep -Fq "card hidden behind dissolve" Hooks/AxsDismissEffect.xm || { echo "card hide-on-dissolve missing"; exit 1; }
-          grep -Fq "static BOOL axs_dm_emitParticlesFromView" Hooks/AxsDismissEffect.xm || { echo "emit result status missing"; exit 1; }
-          # .111: speed slider must step continuously (0.1), not 1.0 defaults
-          plutil -p packaging/overlay/SplitSettings.plist | grep -A8 "splitBeautifyDismissSpeed" | grep -q "step" || { echo "dismiss speed step missing"; exit 1; }
-          grep -Fq "sc_closeSession:" Hooks/AxsDismissEffect.xm || { echo "dismiss closeSession hook missing"; exit 1; }
+          ! grep -Fq "self.link.paused = YES;" Hooks/AxsBeautifyRing.xm || { echo ".42 idle pause still present"; exit 1; }
           # .112: the windowScene binding lives in the unified Metal engine now
-          grep -Fq "overlay.windowScene = host.windowScene" Hooks/AxsMetalSand.xm || { echo "dismiss windowScene fix missing"; exit 1; }
-          grep -Fq "axs_dm_sigMatches" Hooks/AxsDismissEffect.xm || { echo "dismiss sig guard missing"; exit 1; }
-          grep -Fq "DME module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "dismiss load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.182 dismiss style selector check ==="
-          grep -Fq "splitBeautifyDismissStyle" Hooks/AxsDismissEffect.xm || { echo "dismiss style key missing"; exit 1; }
+          grep -Fq "animationDidStop:finished:" Hooks/AxsDismissEffect.xm || { echo "manual completion fire missing"; exit 1; }
+          echo "=== beautify.96 fullscreen probe check (source-level, log-only) ==="
+          grep -Fq "static CGFloat axs_dm_densityScale" Hooks/AxsDismissEffect.xm || { echo "density scale fn missing"; exit 1; }
+          grep -Fq "static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView)" Hooks/AxsDismissEffect.xm || { echo "rounded snapshot clip missing"; exit 1; }
+          order = ["splitBeautifyRingFrameEnabled", "splitBeautifyRingCustomColorEnabled",
+             or len(zh.get("BEAUTIFY_TILT_ENABLED", "")) != 6:
+          grep -Fq "static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img)" Hooks/AxsDismissEffect.xm || { echo "snapshot cache helper missing"; exit 1; }
+          grep -Fq "[CATransaction setDisableActions:YES];" Hooks/AxsBeautifyRing.xm || { echo "disableActions missing"; exit 1; }
+          # exception safety
+          ! grep -Fq "if (!axs_ring_decorEnabled()) return NO;" Hooks/AxsBeautifyRing.xm || { echo ".39 gate pattern still in sub-switch readers"; exit 1; }
+          grep -Fq "fabs(t.m13) < 1e-4 && fabs(t.m23) < 1e-4" Hooks/AxsBeautifyRing.xm || { echo "3D perspective cleanBase guard missing"; exit 1; }
+          grep -Fq "lastDockSnap" Hooks/AxsBeautifyRing.xm || { echo "dock flip state missing"; exit 1; }
+  contents: read
+          grep -Fq "static UIImage *axs_open_captureCardCheap(UIView *card)" Hooks/AxsDismissEffect.xm || { echo "cheap card capture missing"; exit 1; }
+          SDK_STAGE="$(mktemp -d)"
+          # .147: fallback source must be screen-bottom, never card center
+          ln -sf "$(brew --prefix coreutils)/bin/grealpath" "$(brew --prefix)/bin/realpath"
+          AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
+          grep -Fq "splitDockIconEnabled" "$EXTRACT/plist.strings" || { echo "splitDockIconEnabled missing"; exit 1; }
+          grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/zh.strings" || { echo "open zh label missing"; exit 1; }
+          # restore to native base on center/off/zero + per-frame reapply
+      - name: Verify compiled dylib (arches + symbols)
+          grep -Fq "axs_ring_tiltCollectHitRegions" Hooks/AxsBeautifyRing.xm || { echo "hit-region probe missing"; exit 1; }
+          AXSD="$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib"
+          grep -Fq "axs_ring_subtreeHasOverlay(wp)" Hooks/AxsBeautifyRing.xm || { echo "overlay intersection guard missing"; exit 1; }
+          grep -Fq "axs_open_cacheCardSnapshot(sourceView, shot);" Hooks/AxsDismissEffect.xm || { echo "dismiss-time cache update missing"; exit 1; }
+          echo "=== beautify.95 overlay isolation + visual-host fix (source-level) ==="
           grep -Fq "AXSDismissStyleGlass" Hooks/AxsDismissEffect.xm || { echo "dismiss style enum missing"; exit 1; }
-          grep -Fq "style=%ld(%@)" Hooks/AxsDismissEffect.xm || { echo "dismiss style log missing"; exit 1; }
-          grep -Fq "splitBeautifyDismissStyle" "$EXTRACT/dylib34.strings" || { echo "dismiss style key not compiled into dylib"; exit 1; }
-          echo "=== beautify.182 unified GPU engine (no CPU path) + density slider check ==="
+on:
+      - name: Checkout Theos (RootHide)
+          grep -Fq "float departure = arrival - 0.35;" Hooks/AxsMetalSand.xm || { echo "staggered departure missing"; exit 1; }
+          grep -Fq "driver.lastGlowGeomBounds" Hooks/AxsBeautifyRing.xm || { echo "glow geom cache missing"; exit 1; }
+          grep -Fq "splitBeautifyDecorEnabled" "$EXTRACT/plist.strings" || { echo "decor master key missing from plist"; exit 1; }
+          name: beautify-package
+          grep -Fq "openMode" Hooks/AxsMetalSand.xm || { echo "shader openMode branch missing"; exit 1; }
+          grep -Fq "axs_metalSandPlay" Hooks/AxsDismissEffect.xm || { echo "Metal hookup in dismiss missing"; exit 1; }
+          grep -Fq "role=probe-only" Hooks/AxsBeautifyRing.xm || { echo "wrapper demotion missing"; exit 1; }
+          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.182"
+          echo "=== required symbols ==="
+          grep -Fq "DOCKED_ITEM_SUB_HOST" Hooks/AxsBeautifyRing.xm && { echo "docked sub host must be removed (.83)"; exit 1; }
+              sys.exit("en BEAUTIFY_DECOR_ENABLED missing")
+          ! grep -Fq "BOOL wasAnimating" Hooks/AxsBeautifyRing.xm || { echo "wasAnimating flag still present"; exit 1; }
+          echo "=== beautify.182 particle-is-window reveal + no-open-loop check ==="
+          grep -Fq "HOST_CLASSIFY" Hooks/AxsBeautifyRing.xm || { echo "host classify marker missing"; exit 1; }
+          grep -Fq "    float dock;" Hooks/AxsMetalSand.xm || { echo "dock varying missing"; exit 1; }
+          grep -Fq "drawableSize = CGSizeMake" Hooks/AxsMetalSand.xm || { echo "drawable size fix missing"; exit 1; }
+          grep -Fq 'objc_getClass("SCFloatingInteractionOverlayView")' Hooks/AxsBeautifyRing.xm || { echo "overlay class probe missing"; exit 1; }
+          grep -Fq "snapshotViewAfterScreenUpdates:YES" Hooks/AxsDismissEffect.xm || { echo "committed-state snapshot missing"; exit 1; }
+          grep -Fq "static BOOL axs_dm_centerHasContent(UIImage *img)" Hooks/AxsDismissEffect.xm || { echo "center-content probe missing"; exit 1; }
+          grep -Fq "static NSString *axs_ring_tiltNativeBaseDesc" Hooks/AxsBeautifyRing.xm || { echo "native base transform reader missing"; exit 1; }
+          grep -Fq "static BOOL axs_ring_tiltMatrixClean" Hooks/AxsBeautifyRing.xm || { echo "matrix clean check missing"; exit 1; }
+          grep -Fq "float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;" Hooks/AxsMetalSand.xm || { echo "landing jitter declaration missing (shader would not compile)"; exit 1; }
+          grep -Fq "card hidden behind dissolve" Hooks/AxsDismissEffect.xm || { echo "card hide-on-dissolve missing"; exit 1; }
+          grep -Fq "DISMISS_SPEED" "$EXTRACT/en.strings" || { echo "speed en label missing"; exit 1; }
+          dpkg-deb -I "$DEB"
+          # beautify.95: cleanBase state machine + direction flip + corner mask + z-order + NaN safety
+          grep -Fq "hasDockedVisualHost" Hooks/AxsBeautifyRing.xm || { echo "docked visual host priority missing"; exit 1; }
+          head -c 8 "$B/en.lproj/SplitSettings.strings" | grep -q "bplist00"
+          grep -Fq "splitBeautifyOpenAnimEnabled" "$EXTRACT/dylib34.strings" || { echo "open switch key not compiled into dylib"; exit 1; }
+          zh = plistlib.load(open(b + "zh-Hans.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
+          grep -Fq "sendEvent:" Hooks/AxsDismissEffect.xm || { echo "sendEvent hook missing"; exit 1; }
+          # (ldid-procursus formula) for its -Hsha256 re-signing step.
+          grep -Fq "@\"fallback-screen-bottom\"" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback tag missing"; exit 1; }
+          ls -1 "$THEOS/sdks"
+          grep -Fq "sc_handleFullscreenTap:" Hooks/AxsFullscreenProbe.xm || { echo "probe tap hook missing"; exit 1; }
+          submodules: recursive
+          find "$EXTRACT" -name "AxsHoldLaunch.dylib" -exec cp {} ./repack/ \;
+          # config getters (snapshot reads)
+            grep -Fq "$sym" "$EXTRACT/dylib.strings" || { echo "MISSING symbol: $sym"; exit 1; }
+          sh build.sh rootless
+          dpkg-deb -x "$DEB" "$EXTRACT"
+          grep -Fq "respondsToSelector:@selector(isDocked)" Hooks/AxsBeautifyRing.xm || { echo "internal isDocked probe missing"; exit 1; }
+      - name: Package 2.0.5+beautify.182 (dpkg-deb)
+          grep -Fq "axs_dm_styleBaseDuration" Hooks/AxsDismissEffect.xm || { echo "per-style base duration table missing"; exit 1; }
+          grep -Fq "fmt.scale = 2.0;" Hooks/AxsDismissEffect.xm || { echo "2x png encode missing"; exit 1; }
           grep -Fq "AXSDismissStyleColorSand" Hooks/AxsDismissEffect.xm || { echo "ColorSand enum missing"; exit 1; }
-          grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/plist.strings" || { echo "ColorSand panel option missing"; exit 1; }
-          grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/zh.strings" || { echo "ColorSand zh label missing"; exit 1; }
-          grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/en.strings" || { echo "ColorSand en label missing"; exit 1; }
-          # the CPU layer path must be fully retired
-          ! grep -Fq "axs_dm_emitColorSand" Hooks/AxsDismissEffect.xm || { echo "stale UIView ColorSand emitter still present"; exit 1; }
+          grep -Fq "texKind = @\"cached-card\";" Hooks/AxsDismissEffect.xm || { echo "cached-card texture tag missing"; exit 1; }
+          grep -Fq "axs_ring_applyTilt(driver);" Hooks/AxsBeautifyRing.xm || { echo "per-frame tilt apply missing"; exit 1; }
+          grep -Fq "float arrival = 0.35 + 0.65*order;" Hooks/AxsMetalSand.xm || { echo "staggered arrival missing"; exit 1; }
+        required: false
+          # .144: a card stays "assembled" from the first frame of an open
+      - name: Upload Beautify Package
+          grep -Fq "static int axs_ring_containerDockSide(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "dock side probe missing"; exit 1; }
+          grep -Fq 'axs_ring_clamp(axs_ring_tiltAngle(), 0.0, AXS_TILT_ANGLE_MAX)' Hooks/AxsBeautifyRing.xm || { echo "applyTilt angle clamp to AXS_TILT_ANGLE_MAX missing"; exit 1; }
+          # edge-icon switch must be gone from the panel plist
+          ! grep -Fq "#define AXS_TILT_SIDE_SIGN    (1.0)" Hooks/AxsBeautifyRing.xm || { echo "old unflipped sideSign still present"; exit 1; }
+          grep -Fq "ALL_WINDOWS_PROBE" Hooks/AxsBeautifyRing.xm || { echo "all-windows probe missing"; exit 1; }
+          if idx != sorted(idx):
+          # beautify.95: window-hidden asymmetry fix + native layer-shadow diagnostics/neutralization
+          grep -Fq "self.cardReady = YES;" Hooks/AxsMetalSand.xm || { echo "cardReady arming missing"; exit 1; }
+            exit 0
+          # deep sweep + compact thumb/track wired in
+          grep -Fq "ring tilt HOST_EVICTED" Hooks/AxsBeautifyRing.xm || { echo "host-evicted restore missing"; exit 1; }
+          dpkg-deb -f "$RH_DEB" Pre-Depends | grep -q "rootless-compat" || { echo "roothide deb missing Pre-Depends rootless-compat"; exit 1; }
+          fi
+          # mask driver (CADisplayLink + per-frame CGPath rebuild, the laggy
+          EXTRACT="$(mktemp -d)"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.182"
+          grep -Fq "BACKGROUND_WRAPPER" Hooks/AxsBeautifyRing.xm || { echo "background wrapper host missing"; exit 1; }
+          grep -Fq "axs_open_openActiveUntil = CACurrentMediaTime() + 3.0;" Hooks/AxsDismissEffect.xm || { echo "handoff ownership refresh missing"; exit 1; }
+          path: theos-roothide
+          tiltsw = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltEnabled"][0]
+          test -L "$AXSD.roothidepatch" || { echo "roothide AutoPatches marker missing"; exit 1; }
+          grep -Fq "out.isOpen=0.0;" Hooks/AxsMetalSand.xm || { echo "dismiss branch open flag reset missing"; exit 1; }
+          dpkg-deb -f "$RH_DEB" Architecture | grep -qx "iphoneos-arm64e" || { echo "roothide deb must be Architecture iphoneos-arm64e"; exit 1; }
+          grep -Fq "side * angle * M_PI / 180.0" Hooks/AxsBeautifyRing.xm || { echo "tilt angle conversion missing"; exit 1; }
+        with:
+          ! grep -Fq "BOOL needsSync" Hooks/AxsBeautifyRing.xm || { echo "needsSync flag still present"; exit 1; }
+          grep -Fq "CONTAINER_SUB_HOST" Hooks/AxsBeautifyRing.xm || { echo "local wrapper host selection missing"; exit 1; }
+          grep -Fq "leftGap <= 24.0" Hooks/AxsBeautifyRing.xm || { echo "geometry 80pt edge rule missing"; exit 1; }
+          grep -Fq "COLLECT_NODE_EXCEPTION" Hooks/AxsBeautifyRing.xm || { echo "per-node exception log missing"; exit 1; }
+  THEOS: ${{ github.workspace }}/theos-roothide
+          grep -Fq "if (nowT - goneAt < 0.15) {" Hooks/AxsDismissEffect.xm || { echo "quick-toggle 0.15 missing"; exit 1; }
+          dpkg-deb -x "$RH_DEB" "$RH_EXTRACT"
+          grep -Fq "metal queue exposes no command buffer selector" "$EXTRACT/dylib34.strings" || { echo "safe selector fallback log not compiled into dylib"; exit 1; }
+          # scanTick / attach guard / detach path have none (count would drift if leaked)
+          strings -a "$B/en.lproj/SplitSettings.strings" > "$EXTRACT/en.strings"
+          # .42 idle-pause machinery must be fully rolled back (指令 三.1/三.2)
+          test -n "$DYLIB34"
+          test ! -e "$RH_EXTRACT/var/jb" || { echo "roothide still has var/jb prefix"; exit 1; }
+          grep -Fq "axs_open_captureVisibleCardCheap(c)" Hooks/AxsDismissEffect.xm || { echo "post-open cache refresh missing"; exit 1; }
+          DYLIB=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
+          if keys[keys.index("splitBeautifyDecorEnabled")+1:keys.index("splitBeautifyDecorEnabled")+3] \
+          grep -Fq "static UIImage *axs_open_sandTexture(void)" Hooks/AxsDismissEffect.xm || { echo "sand texture generator missing"; exit 1; }
+          grep -Fq "sMsdQueue, cbSel" Hooks/AxsMetalSand.xm || { echo "command buffer must be sent to queue, not device"; exit 1; }
+          grep -Fq "if (axs_metalReplaceTexture(renderer, shot))" Hooks/AxsDismissEffect.xm || { echo "mid-flight texture swap missing"; exit 1; }
+              sys.exit("tilt rows not right after decor switch")
+          grep -Fq "renderScale > 0.92" Hooks/AxsBeautifyRing.xm || { echo "geometry 45% centerLarge rule missing"; exit 1; }
+          if zh.get("BEAUTIFY_RING_THICKNESS") != "光圈粗细设置":
+          # .111: speed slider must step continuously (0.1), not 1.0 defaults
+          grep -Fq "HOST_CLASSIFY LOCAL_WRAPPER role=host" Hooks/AxsBeautifyRing.xm || { echo "local wrapper host classify missing"; exit 1; }
+          grep -Fq "sourcePoint" Hooks/AxsMetalSand.xm || { echo "shader sourcePoint missing"; exit 1; }
+          b = "$B/"
+          # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
+          grep -Fq "#define AXS_TILT_SIDE_SIGN    (-1.0)" Hooks/AxsBeautifyRing.xm || { echo "sideSign direction flip missing"; exit 1; }
+          grep -Fq "leftGap <= 24.0" Hooks/AxsBeautifyRing.xm || { echo "screen left-gap gate missing"; exit 1; }
+          grep -Fq "return axs_dm_fixSnapshotCorners(shot, card);" Hooks/AxsDismissEffect.xm || { echo "open capture not corner-fixed"; exit 1; }
+          # beautify.95：业务层把保存值夹紧到 0..AXS_TILT_ANGLE_MAX(12)，默认 3.0
+          ! grep -Fq "CATransform3DMakeRotation((CGFloat)rad, 0.0, 0.0, 1.0)" Hooks/AxsBeautifyRing.xm || { echo "old 2D rotation.z tilt still present"; exit 1; }
+          grep -Fq "static NSArray *axs_ring_collectVisualHosts" Hooks/AxsBeautifyRing.xm || { echo "visual host collector missing"; exit 1; }
+name: Build ScreenCore beautify.182 (rootless)
+          grep -Fq "nlDustFragment" Hooks/AxsMetalSand.xm || { echo "Metal shader fragment fn missing"; exit 1; }
+          echo "=== bplist check (panel plist/strings) ==="
+          grep -Fq "/var/mobile/Library/Caches/sc-open-cache" Hooks/AxsDismissEffect.xm || { echo "persistent snapshot cache missing"; exit 1; }
+          echo "=== beautify.95 docked-UI-never-host + left-dock stuck fix check ==="
+          RH_DEB=$(find ./packaging/out -name "*roothide*.deb" | head -n 1)
+          tilt = [it for it in pl["items"] if it.get("key") == "splitBeautifyTiltAngle"][0]
+          grep -Fq "static BOOL axs_ring_tiltEnabled(void)" Hooks/AxsBeautifyRing.xm || { echo "tiltEnabled getter missing"; exit 1; }
+          grep -Fq "float2 uvS = pos/u.viewport;" Hooks/AxsMetalSand.xm || { echo "cover screen uv missing"; exit 1; }
+          grep -Eq "constraintEqualToConstant:(92|44|30|22)" Hooks/AxsHoldLaunchMain.xm && { echo "old .36 slider geometry still present"; exit 1; }
+          grep -Fq "    float isOpen;" Hooks/AxsMetalSand.xm || { echo "isOpen varying missing"; exit 1; }
+          grep -Fq "splitBeautifyDismissDensity" "$EXTRACT/dylib34.strings" || { echo "density key not compiled into dylib"; exit 1; }
+          # one-decimal format wired for tilt angle slider, two decimals kept elsewhere
+          echo "=== beautify.182 finger-source assemble + loop fix check ==="
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
+          grep -Fq "DOCK_RECORD_PROBE" Hooks/AxsBeautifyRing.xm || { echo "dock record probe missing"; exit 1; }
+          # density=3 must actually deliver full grains (no rows>240 truncation)
+          grep -Fq "LOCAL_WRAPPER_SKIPPED" Hooks/AxsBeautifyRing.xm || { echo "hidden wrapper host skip missing"; exit 1; }
+          if not en.get("BEAUTIFY_DECOR_ENABLED"):
+          grep -Fq "splitBeautifyDismissStyle" "$EXTRACT/dylib34.strings" || { echo "dismiss style key not compiled into dylib"; exit 1; }
+          # cleanBase 判定与复位必须清 3D 透视分量 m13/m31/m34，防累积/残留
+          grep -Fq '@{@"axsNode": container}' Hooks/AxsBeautifyRing.xm || { echo "dict-tuple initial push missing"; exit 1; }
+          grep -Fq "h.clipsToBounds = NO;" Hooks/AxsBeautifyRing.xm || { echo "tilt-time clip release missing"; exit 1; }
+          codesign -dv "$AXSD" >/dev/null 2>&1 || { echo "roothide dylib has no code signature"; exit 1; }
+          # density slider (0.5..3.0, step 0.1)
+          grep -Fq "float order = 0.96*unit.y + 0.04*hf;" Hooks/AxsMetalSand.xm || { echo "top-down arrival order missing"; exit 1; }
+          test "$(grep -c "axs_ring_applyTilt\|axs_ring_resetTilt\|axs_ring_containerDockSide" Hooks/AxsBeautifyRing.xm)" -ge 8 || { echo "tilt helpers missing"; exit 1; }
+          echo "=== version check ==="
+          # .162: the jitter declaration is compile-critical -- deleting it made the
+          # .158: hidden-card capture is impossible (cross-process content);
+          # strings SIGPIPE / "failed to flush output" spuriously fails under pipefail.
+          echo "symbol check ok"
+          grep -Fq "tex = axs_open_sandTexture(); texKind = @\"reference-dust\";" Hooks/AxsDismissEffect.xm || { echo "sand placeholder texture not used"; exit 1; }
+          grep -Fq "[sMsdQueue respondsToSelector:cbSel]" Hooks/AxsMetalSand.xm || { echo "runtime selector probe missing"; exit 1; }
+          # log fields required by 指令 十
+          grep -Fq "ring tilt ZORDER" Hooks/AxsBeautifyRing.xm || { echo "ZORDER log missing"; exit 1; }
+              sys.exit("tilt enabled switch spec wrong: %r" % tiltsw)
+          grep -Fq "![sMsdActiveRenderers containsObject:r]" Hooks/AxsMetalSand.xm || { echo "stale-renderer guard missing"; exit 1; }
+          grep -Fq "corners=%@" Hooks/AxsBeautifyRing.xm || { echo "projection corners log missing"; exit 1; }
+      - name: Install build dependencies
+          grep -Fq "float dock = smoothstep(arrival - 0.03, arrival - 0.004, u.time);" Hooks/AxsMetalSand.xm || { echo "docking gate missing"; exit 1; }
+          find ./packages -name "*.deb" -type f
+          grep -Fq "isLeftDocked" Hooks/AxsBeautifyRing.xm || { echo "left side internal probe missing"; exit 1; }
+          grep -Fq "static UIView *axs_ring_findTiltOverlay(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "overlay finder missing"; exit 1; }
+      - name: Verify final beautify deb
           grep -Fq "axs_open_endWipeReveal" Hooks/AxsDismissEffect.xm || { echo "final handoff missing"; exit 1; }
+          grep -Fq "static BOOL axs_ring_isOverlayNode(UIView *v)" Hooks/AxsBeautifyRing.xm || { echo "overlay node classifier missing"; exit 1; }
+          lipo -archs "$DYLIB" | grep -q "arm64"
+          grep -Fq "instanceCount:(NSUInteger)" Hooks/AxsMetalSand.xm || { echo "single instanced draw call missing"; exit 1; }
+          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.plist" || { echo "roothide filter plist missing"; exit 1; }
+          # completion is fired manually
+          grep -Fq "sMsdQueue = [sMsdDevice newCommandQueue]" Hooks/AxsMetalSand.xm || { echo "command queue creation missing"; exit 1; }
+              sys.exit("en tilt labels missing")
+          grep -Fq "if (rows > 320) rows = 320" Hooks/AxsMetalSand.xm || { echo "rows clamp raise missing"; exit 1; }
+          # hidden/alpha 在几何 changed 之前同步提交，关隐式动画（指令 三.4/三.6/六.3）
+          grep -Fq "splitBeautifyTiltEnabled" "$EXTRACT/dylib34.strings" || { echo "tilt enabled key missing from dylib"; exit 1; }
+          # patch.sh (roothide conversion) calls plain `realpath`; coreutils ships grealpath
+          set -euo pipefail
+          # beautify.95: dock-transition snapshot + prefix class match
+          grep -Fq "CONTAINER_SUB_HOST" Hooks/AxsBeautifyRing.xm || { echo "container sub host classifier missing"; exit 1; }
+          grep -Fq "_UIScenePresentationView" Hooks/AxsBeautifyRing.xm || { echo "scene presentation content root missing"; exit 1; }
+          grep -Fq "driver.radiusMask.superlayer == nil" Hooks/AxsBeautifyRing.xm || { echo "radiusMask cache validity missing"; exit 1; }
+          grep -Fq "wp.superview == container" Hooks/AxsBeautifyRing.xm || { echo "wrapper climb-to-container-direct-child missing"; exit 1; }
+          grep -Fq "ring tilt SHADOW_RESTORED" Hooks/AxsBeautifyRing.xm || { echo "shadow restore missing"; exit 1; }
+          grep -Fq "@selector(commandBuffer)" Hooks/AxsMetalSand.xm || { echo "reference-plugin commandBuffer selector missing"; exit 1; }
+          echo "=== lipo -archs ==="
+          grep -Fq "axs_open_openActiveUntil = CACurrentMediaTime() + duration + 0.3;" Hooks/AxsDismissEffect.xm || { echo "ownership window not armed on accept missing"; exit 1; }
+          test -n "$DEB"
+          # .161: the cache is keyed by the window bundle identity (survives
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+          grep -Fq "h != container && (h.clipsToBounds" Hooks/AxsBeautifyRing.xm || { echo "container native-corner preservation missing"; exit 1; }
           grep -Fq "axs_open_bgTexture" Hooks/AxsDismissEffect.xm || { echo "bg-color texture missing"; exit 1; }
+          grep -Fq "DOCKED_ITEM_PROBE" Hooks/AxsBeautifyRing.xm || { echo "docked item probe missing"; exit 1; }
+          grep -Fq "float3 axsPalette(float p)" Hooks/AxsMetalSand.xm || { echo "rainbow palette function missing"; exit 1; }
+    steps:
+          grep -Fq "splitBeautifyDecorEnabled" "$EXTRACT/dylib34.strings" || { echo "decor master key missing from dylib"; exit 1; }
+          grep -Fq "axs_open_dismissedSinceAssemble = YES;" Hooks/AxsDismissEffect.xm || { echo "dismiss-side flag set missing"; exit 1; }
+          # bottom band, flies into its own cell and dies at arrival; a
+          head -c 8 "$B/zh-Hans.lproj/SplitSettings.strings" | grep -q "bplist00"
+          grep -Fq "OPEN candidate skipped (recent assemble)" Hooks/AxsDismissEffect.xm || { echo "recent-assemble skip missing"; exit 1; }
+          # attach: classification + per-container gates
+          # beautify.95: all-window scan + dock-manager probes + stale host eviction + layer-tree gate
+        default: 'macos-15'
+          grep -Fq "if (axs_open_isAssembled(v))" Hooks/AxsDismissEffect.xm || { echo "assembled guard in becameVisible missing"; exit 1; }
+  workflow_dispatch:
+          # brew bin first: patch.sh requires the Procursus ldid fork
+          grep -Fq 'axs_ring_clamp([v isKindOfClass:[NSNumber class]] ? [v doubleValue] : 3.0, 0.0, AXS_TILT_ANGLE_MAX)' Hooks/AxsBeautifyRing.xm || { echo "tilt angle clamp to AXS_TILT_ANGLE_MAX missing"; exit 1; }
+permissions:
+          grep -Fq "ring tilt SHADOW_NEUTRALIZED" Hooks/AxsBeautifyRing.xm || { echo "shadow neutralization missing"; exit 1; }
+          ! grep -Fq "driver.tiltBaseTransform = cur;" Hooks/AxsBeautifyRing.xm || { echo "old single-host base sampling still present"; exit 1; }
+          grep -Fq "sc_closeSession:" Hooks/AxsDismissEffect.xm || { echo "dismiss closeSession hook missing"; exit 1; }
+          grep -Fq "float hf = (float)(h & 0xffffu)/65535.0;" Hooks/AxsMetalSand.xm || { echo "hash normalization missing"; exit 1; }
+          grep -Fq "driver.glowInner.hidden = !glowAllowed;" Hooks/AxsBeautifyRing.xm || { echo "glow hidden commit missing"; exit 1; }
+          grep -Fq "OPEN start tex=" Hooks/AxsMetalSand.xm || { echo "open start diagnostic log missing"; exit 1; }
+          grep -Fq "if (u.openMode == 1u) {" Hooks/AxsMetalSand.xm || { echo "open mode branch missing"; exit 1; }
+          grep -Fq "valueWithCATransform3D:nativeBase" Hooks/AxsBeautifyRing.xm || { echo "nativeBase cache write missing"; exit 1; }
+          grep -Fq "dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC))," Hooks/AxsMetalSand.xm || { echo "handoff-before-fade delay missing"; exit 1; }
+          test -f Hooks/AxsFullscreenProbe.xm || { echo "AxsFullscreenProbe.xm missing"; exit 1; }
+          # 无 shouldRasterize / fade 残留（指令 三.7/三.6）
+          grep -Fq "outO.noiseX=r;" Hooks/AxsMetalSand.xm || { echo "dust noise output missing"; exit 1; }
+          echo "=== beautify.95 panel cleanup check ==="
+          grep -Fq "DOCKED_ITEM_NEVER_HOST" Hooks/AxsBeautifyRing.xm || { echo "docked never-host marker missing"; exit 1; }
+          # "CPU engine") is fully removed; the card stays hidden and the
+          grep -Fq "splitBeautifyDismissDensity" Hooks/AxsDismissEffect.xm || { echo "density key missing in source"; exit 1; }
+          grep -Fq "Metal QuartzCore" Makefile || { echo "Metal framework not linked"; exit 1; }
+          grep -Fq "tiltRotation.m14 = -sinRad * AXS_TILT_M34;" Hooks/AxsBeautifyRing.xm || { echo "m14 perspective term missing (.65 root fix)"; exit 1; }
+          echo "=== dpkg-deb -I ==="
+          echo "=== beautify.182 dismiss particle module check ==="
+          grep -Fq "MTLStorageModeShared" Hooks/AxsMetalSand.xm || { echo "shared texture storage fix missing"; exit 1; }
+          grep -Fq "SNAP WINDOW TREE" Hooks/AxsBeautifyRing.xm || { echo "snapshot window tree missing"; exit 1; }
+          # beautify.95: safe-scale below native dock zoom + strip-perspective resets
+          test -n "$DYLIB"
+          grep -Fq "axs_ring_refreshConfigSnapshot();" Hooks/AxsBeautifyRing.xm || { echo "snapshot refresh call missing"; exit 1; }
+          grep -Fq "msgSendSuper" Hooks/AxsDismissEffect.xm || { echo "super-forward safety missing"; exit 1; }
+          # compact geometry: title 78 / value 38 / glyph 18 / hot zone 28
+          grep -Fq "axs_ring_syncAllDriversNow();" Hooks/AxsBeautifyRing.xm || { echo "event sync call missing"; exit 1; }
+          grep -Fq "CFTimeInterval axs_metalAssembleStartTime(void *renderer)" Hooks/AxsMetalSand.xm || { echo "shared renderer clock accessor missing"; exit 1; }
+          echo "=== package contents ==="
+          grep -Fq "ring tilt 3D apply (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "3D apply log missing"; exit 1; }
+          grep -Fq "renderScale > 0.92" Hooks/AxsBeautifyRing.xm || { echo "centerLarge ratio gate missing"; exit 1; }
+          grep -Fq "axs_dm_styleBaseDuration(style) * speedScale" Hooks/AxsDismissEffect.xm || { echo "style speed scaling missing"; exit 1; }
+          # /var/jb, binary must carry a code signature, AutoPatches markers present
+          # .176: empty-center captures (accept-time pre-hide) must be rejected
+          if zh.get("BEAUTIFY_TILT_ANGLE") != "侧倾角度设置" \
+          otool -l "$AXSD" | grep -Fq "path @loader_path/.jbroot/usr/lib" || { echo "roothide dylib missing .jbroot rpath"; exit 1; }
+          grep -Fq "AxsTiltCornerMask" Hooks/AxsBeautifyRing.xm || { echo "plugin corner mask missing"; exit 1; }
+          grep -Fq "CATransform3D want = shouldTilt ? tiltRotation : CATransform3DIdentity;" Hooks/AxsBeautifyRing.xm || { echo "decor tilt matrix missing"; exit 1; }
+          grep -Fq "splitBeautifyDismissAnimEnabled" Hooks/AxsDismissEffect.xm || { echo "dismiss switch key missing"; exit 1; }
+          echo "=== beautify.182 ARC-open assemble animation check ==="
+          grep -Fq "!axs_ring_glowAllowedFor(axs_ring_containerIsDocked(driver.container), driver.container)" Hooks/AxsBeautifyRing.xm || { echo "applyGlow per-container gate missing"; exit 1; }
+          grep -Fq "CATransform3DRotate(CATransform3DIdentity, (CGFloat)rad, 0.0, 1.0, 0.0)" Hooks/AxsBeautifyRing.xm || { echo "rotationY transform missing"; exit 1; }
+          grep -Fq "emit: gpu engine active" Hooks/AxsDismissEffect.xm || { echo "gpu engine log missing"; exit 1; }
+          # visual-host classifier (CONTENT=_UIScenePresentationView, OVERLAY excluded, no plain-UIView false positive)
+          for sym in splitBeautifyRingFrameColor UIColorPickerViewController com.susudear.screencoreprefs \
+          grep -Fq "wrongDomain" Hooks/AxsBeautifyRing.xm || { echo "pref wrong-domain detection missing"; exit 1; }
+          # beautify.95: ring/glow layers follow tilt + stable sibling size ref
+          grep -Fq "BOOL glowOn = axs_ring_glowAllowedFor(docked, container);" Hooks/AxsBeautifyRing.xm || { echo "sync glow per-type gate missing"; exit 1; }
+          grep -Fq "OPEN stale assembled flag released, re-assembling" Hooks/AxsDismissEffect.xm || { echo "stale assembled self-heal missing"; exit 1; }
+          # dump strings once per artifact: grep -q on a pipe closes early ->
+          # .167: true alpha corners via background clearing; radius clip is fallback.
+          grep -Fq "sc_floatingContainerViewDidRequestFullscreen:" Hooks/AxsFullscreenProbe.xm || { echo "probe request hook missing"; exit 1; }
+          mkdir -p ./repack
+          grep -Fq "%.2f" "$EXTRACT/dylib34.strings" || { echo "%.2f format missing"; exit 1; }
+          grep -Fq "float3 grain=mix(axsPalette(in.noiseX + phase*0.025), texelC, 0.35);" Hooks/AxsMetalSand.xm || { echo "35% real-texel dust mix missing"; exit 1; }
+        options:
+          if [ -d "$THEOS/sdks/iPhoneOS16.5.sdk" ]; then
+          # per-container docked classification wired
+          grep -Fq "REMOTE_SCENE_ROOT" Hooks/AxsBeautifyRing.xm || { echo "remote scene root marker missing"; exit 1; }
+          grep -Fq "candidate skipped (already assembled)" Hooks/AxsDismissEffect.xm || { echo "assembled skip log missing"; exit 1; }
+          # .110: no manual texture flip -- a raw CGBitmapContext already lands
+          # the "convert .deb" dialog for plain iphoneos-arm64 (rootless) debs.
+                   "splitBeautifyTiltEnabled", "splitBeautifyTiltAngle",
+          grep -Fq "float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));" Hooks/AxsMetalSand.xm || { echo "round dust shape missing"; exit 1; }
+          DYLIB34=$(find "$EXTRACT" -name "AxsHoldLaunch.dylib" | head -n 1)
+          echo "=== beautify.95 diagnostic probe check (source-level) ==="
+          idx = [keys.index(k) for k in order]
+              sys.exit("zh BEAUTIFY_TILT_ANGLE must be exactly 6 chars 侧倾角度设置")
+          grep -Fq "ring tilt CORNER_CLIP" Hooks/AxsBeautifyRing.xm || { echo "CORNER_CLIP log missing"; exit 1; }
+          # .182: the WALLPAPER-COVER architecture -- the real card is visible
+          # view recreation -- associated objects died with the container).
+          grep -Fq "OPEN orphaned self-restore flag released, re-assembling" Hooks/AxsDismissEffect.xm || { echo "orphaned selfRestore self-heal missing"; exit 1; }
+          grep -Fq "DISMISS_DENSITY" "$EXTRACT/zh.strings" || { echo "density zh label missing"; exit 1; }
+          grep -Fq "splitBeautifyDismissSpeed" Hooks/AxsDismissEffect.xm || { echo "speed key missing in source"; exit 1; }
+          # .145: generated rainbow sand texture -- NO full-screen capture as
+          test -n "$RH_DEB" || { echo "roothide deb missing"; exit 1; }
+              sys.exit("old zh copy 边框粗细设置 still present")
+          grep -Fq "axs_open_interceptUntil = 0" Hooks/AxsDismissEffect.xm || { echo "intercept disarm missing"; exit 1; }
+          grep -Fq "sessionsByBundleID" Hooks/AxsDismissEffect.xm || { echo "bundle-id session lookup missing"; exit 1; }
+          grep -Fq "bringSubviewToFront:ov" Hooks/AxsBeautifyRing.xm || { echo "overlay z-order fix missing"; exit 1; }
+          grep -Fq "BOOL lastIsDocked" Hooks/AxsBeautifyRing.xm || { echo "lastIsDocked missing"; exit 1; }
+          grep -Fq "LAYER_TREE_MISSING_CONTENT" Hooks/AxsBeautifyRing.xm || { echo "layer-tree content gate missing"; exit 1; }
+      - name: Install iOS SDK (iPhoneOS16.5)
+                     colorPickerViewControllerDidFinish: colorPickerViewControllerDidSelectColor: \
+          grep -Fq "axs_ring_page_sliderThumbImage" Hooks/AxsHoldLaunchMain.xm || { echo "compact thumb missing"; exit 1; }
+          grep -Fq "OPEN native animation replaced" Hooks/AxsDismissEffect.xm || { echo "animation swallow missing"; exit 1; }
+          grep -Fq "metal started open=" "$EXTRACT/dylib34.strings" || { echo "Metal start log not compiled into dylib"; exit 1; }
+          grep -Fq "LAYER_TREE_PROBE" Hooks/AxsBeautifyRing.xm || { echo "layer tree probe missing"; exit 1; }
+          # original dock icon switch must remain
+          grep -Fq "float4 position [[position]];" Hooks/AxsMetalSand.xm || { echo "vertex position missing"; exit 1; }
+          grep -Fq "splitBeautifyDismissSpeed" "$EXTRACT/dylib34.strings" || { echo "speed key not compiled into dylib"; exit 1; }
+          grep -Fq "sc_promoteFrontmostFloatingSceneToFullscreen" Hooks/AxsFullscreenProbe.xm || { echo "probe promoteFrontmost hook missing"; exit 1; }
+          grep -Fq "    float3 tint;" Hooks/AxsMetalSand.xm || { echo "tint varying missing"; exit 1; }
+          # -- caching them overwrote the good snapshot and emptied the deposit.
+          grep -Fq "driver.ring.opacity = ringAllowed ? 1.0 : 0.0;" Hooks/AxsBeautifyRing.xm || { echo "ring alpha commit missing"; exit 1; }
+          DEB=$(find ./packaging/out -name "*.deb" ! -name "*roothide*" | head -n 1)
+          grep -Fq "outO.fade=born*(1.0-dock);" Hooks/AxsMetalSand.xm || { echo "dust arrival fade missing"; exit 1; }
+          ! grep -Fq "lastContFrame" Hooks/AxsBeautifyRing.xm || { echo "lastContFrame gate still present"; exit 1; }
+          grep -Fq "id<MTLCommandQueue> sMsdQueue" Hooks/AxsMetalSand.xm || { echo "MTLCommandQueue singleton missing"; exit 1; }
+          # dust keeps bursting from the finger lift point and streaming in.
+        uses: actions/checkout@v4
+          grep -Fq "float2 landing = (cell + 0.5 + jitter)/grid;" Hooks/AxsMetalSand.xm || { echo "jittered landing cell missing"; exit 1; }
+          grep -Fq "want.m11 < 0.02" Hooks/AxsBeautifyRing.xm || { echo "safe scale threshold missing"; exit 1; }
+          grep -Fq "driver.ring.hidden = !ringAllowed;" Hooks/AxsBeautifyRing.xm || { echo "sync per-frame visibility missing"; exit 1; }
+env:
+          grep -Fq "splitBeautifyDismissStyle" Hooks/AxsDismissEffect.xm || { echo "dismiss style key missing"; exit 1; }
+          if otool -l "$AXSD" | grep -Fq "path /var/jb"; then echo "roothide dylib still has /var/jb rpath"; exit 1; fi
+          grep -Fq "CAMetalLayer" Hooks/AxsMetalSand.xm || { echo "CAMetalLayer missing"; exit 1; }
+          echo "=== beautify.182 GPU Metal fine-dust engine check ==="
+          # .149: self-healing state flags -- a stale assembled flag or an
+          grep -Fq "static void axs_ring_tiltDumpHierarchy" Hooks/AxsBeautifyRing.xm || { echo "hierarchy dump missing"; exit 1; }
+          ! grep -nE "systemFontOfSize:(11|13|15|17|20)[^0-9]" Hooks/AxsHoldLaunchMain.xm || { echo "stray non-12pt title font"; exit 1; }
+              sys.exit("zh BEAUTIFY_DECOR_ENABLED wrong: %r" % zh.get("BEAUTIFY_DECOR_ENABLED"))
+          RH_EXTRACT="$(mktemp -d)"
+          grep -Fq "STALE_HOST_EVICT" Hooks/AxsBeautifyRing.xm || { echo "stale host eviction missing"; exit 1; }
+          grep -Fq "ring tilt PREFS plistPath=" Hooks/AxsBeautifyRing.xm || { echo "pref dual-source log line missing"; exit 1; }
+          grep -Fq "ring tilt 3D reset (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "3D reset log missing"; exit 1; }
+          grep -Fq "DOCKED_ITEM_TAP_ROOT_VISUAL_HOST" Hooks/AxsBeautifyRing.xm && { echo "docked tap-root host must be removed (.83)"; exit 1; }
+          grep -Fq "    float noiseX;" Hooks/AxsMetalSand.xm || { echo "dust noise varying missing"; exit 1; }
+          grep -Fq "CATransform3D staleRestore = (sbaseVal != nil)" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on stale evict missing"; exit 1; }
+          grep -Fq "axs_ring_page_applyUnifiedFontDeep" Hooks/AxsHoldLaunchMain.xm || { echo "deep font sweep missing"; exit 1; }
+          grep -Fq "constraintEqualToConstant:28" Hooks/AxsHoldLaunchMain.xm || { echo "hot zone 28 missing"; exit 1; }
+          lipo -archs "$DYLIB" | grep -q "arm64e"
+          repository: roothide/theos
+          grep -Fq "splitBeautifyDismissSpeed" "$EXTRACT/plist.strings" || { echo "speed panel option missing"; exit 1; }
+          # tilt rows must sit immediately after decor switch, before glow switch
+          brew install dpkg xz file coreutils findutils gnu-sed ldid-procursus
+          if zh.get("BEAUTIFY_DECOR_ENABLED") != "小窗边框美化":
+          echo "=== beautify.95 side-tilt feature check (source-level) ==="
+             or len(zh.get("BEAUTIFY_TILT_ANGLE", "")) != 6:
+          ! grep -Eq "void \(\\^(walk|recurse|traverse)\)" Hooks/AxsBeautifyRing.xm || { echo "recursive block self-capture pattern present"; exit 1; }
+          grep -Fq "overlay.windowScene = host.windowScene" Hooks/AxsMetalSand.xm || { echo "dismiss windowScene fix missing"; exit 1; }
+          grep -Fq "ring tilt SAFE_ABORT" Hooks/AxsBeautifyRing.xm || { echo "SAFE_ABORT log missing"; exit 1; }
+          # no stray title font sizes (group titles/footers render elsewhere)
+          grep -Fq "SHADOW_SIB_ADDED" Hooks/AxsBeautifyRing.xm || { echo "shadow sibling completion missing"; exit 1; }
+          grep -Fq "static UIImage *axs_open_captureWallpaper(void)" Hooks/AxsDismissEffect.xm || { echo "wallpaper capture missing"; exit 1; }
+          # image top at row 0; the extra flip rendered the card upside down.
+          grep -Fq "subT=%@ presT=%@" Hooks/AxsBeautifyRing.xm || { echo "hierarchy sublayer/presentation transform fields missing"; exit 1; }
+      - name: Build Tweak (rootless, arm64 + arm64e)
+    runs-on: ${{ inputs.runner_label || 'macos-15' }}
+          grep -Fq "axs_metalAssemblePlay" Hooks/AxsDismissEffect.xm || { echo "assemble call missing in dismiss"; exit 1; }
+          grep -Fq "driver.ring.hidden = !ringAllowed;" Hooks/AxsBeautifyRing.xm || { echo "ring hidden commit missing"; exit 1; }
+          test "$(grep -c "axs_holdlaunch_theirValueForKey" Hooks/AxsBeautifyRing.xm)" -eq 15 || { echo "config reads drifted (expected 15 = 14 snapshot reads incl. debug mode + 1 selector)"; exit 1; }
+          # tick 一帧不早退：直接调用 syncDriver（指令 三.1/三.3）
+          ! grep -Fq "axs_ring_resumeAllLinks" Hooks/AxsBeautifyRing.xm || { echo "resumeAllLinks still present"; exit 1; }
+          # genuine open (no particles, card pops in). The flags now carry
+          # beautify.95: remote-scene-root ban + local wrapper hosts + clip fix
+          # cell and crossfades to the real texel in the SAME draw call; the
+          echo "final verify ok"
+          strings -a "$B/zh-Hans.lproj/SplitSettings.strings" > "$EXTRACT/zh.strings"
+          grep -Fq "axs_ring_syncDriver(self);" Hooks/AxsBeautifyRing.xm || { echo "tick->syncDriver missing"; exit 1; }
+        description: 'macOS runner pool (switch pools if one is congested)'
+          grep -Fq "snapshot corners opaque=" Hooks/AxsDismissEffect.xm || { echo "corner decision log missing"; exit 1; }
+          grep -Fq "BASE_PENDING" Hooks/AxsBeautifyRing.xm || { echo "BASE_PENDING log missing"; exit 1; }
+                     splitBeautifyGlowColor splitBeautifyGlowRadius \
+          keys = [it.get("key") for it in pl["items"] if it.get("key")]
+          sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
+          grep -Fq "const size_t S = 64;" Hooks/AxsDismissEffect.xm || { echo "64x64 blank probe missing"; exit 1; }
+          grep -Fq "BOOL lastRingAllowed" Hooks/AxsBeautifyRing.xm || { echo "lastRingAllowed missing"; exit 1; }
+          grep -Fq "axs_open_setAssembled(container, NO)" Hooks/AxsDismissEffect.xm || { echo "assembled release-on-dismiss missing"; exit 1; }
+          test -f "$RH_EXTRACT/Library/PreferenceBundles/ScreenCorePrefs.bundle/SplitSettings.plist" || { echo "roothide panel plist missing"; exit 1; }
+          grep -Fq "splitBeautifyOpenAnimEnabled" Hooks/AxsDismissEffect.xm || { echo "open switch key missing in source"; exit 1; }
+          grep -Fq "constraintEqualToConstant:18" Hooks/AxsHoldLaunchMain.xm || { echo "glyph 18 missing"; exit 1; }
+          grep -Fq "光圈(ring)/光晕" Hooks/AxsBeautifyRing.xm || { echo "decor layers follow tilt missing"; exit 1; }
+          grep -Fq "metal first-frame probe" "$EXTRACT/dylib34.strings" || { echo "first-frame probe log not compiled into dylib"; exit 1; }
+                     splitBeautifyGlowEnabled splitBeautifyGlowCustomEnabled \
+      - name: Collect Repack Files
+          # per-host nativeBase keyed by pointer address; sampled once before first tilt write
+                   "splitBeautifyGlowColor", "splitBeautifyRingThickness",
+          # prefs snapshot: all config reads funnel through refreshConfigSnapshot
+          grep -Fq "snapshotMismatch" Hooks/AxsBeautifyRing.xm || { echo "pref snapshot mismatch detection missing"; exit 1; }
+          grep -Fq "static void axs_open_gpuTextureRetry(UIView *card, void *renderer, NSInteger triesLeft)" Hooks/AxsDismissEffect.xm || { echo "async texture retry missing"; exit 1; }
+          grep -Fq "#define AXS_TILT_PERSPECTIVE_GAIN  (2.6)" Hooks/AxsBeautifyRing.xm || { echo "perspective gain missing"; exit 1; }
+    name: Build rootless beautify.182
+          grep -Fq "BOOL docked = axs_ring_containerIsDocked(container);" Hooks/AxsBeautifyRing.xm || { echo "attach docked classify missing"; exit 1; }
+          grep -Fq "BEAUTIFY_EDGE_ICON" "$EXTRACT/zh.strings" && { echo "BEAUTIFY_EDGE_ICON still in zh strings"; exit 1; }
+          grep -Fq "static UIImage *axs_dm_fixSnapshotCorners(UIImage *img, UIView *refView)" Hooks/AxsDismissEffect.xm || { echo "true-corner fix missing"; exit 1; }
+          grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/zh.strings" || { echo "ColorSand zh label missing"; exit 1; }
+          grep -Fq "static void axs_ring_refreshConfigSnapshot(void)" Hooks/AxsBeautifyRing.xm || { echo "config snapshot missing"; exit 1; }
+      - name: Pin Package Version
+          if zh.get("BEAUTIFY_TILT_ENABLED") != "侧倾功能开关" \
+          grep -Fq "SCFloatingContainerView" Hooks/AxsDismissEffect.xm || { echo "open visibility hook missing"; exit 1; }
+          grep -Fq "tiltVisualClips" Hooks/AxsBeautifyRing.xm || { echo "clips original-value cache missing"; exit 1; }
+        env:
+          grep -Fq "h.layer.sublayerTransform = want;" Hooks/AxsBeautifyRing.xm || { echo "sublayer transform write missing"; exit 1; }
+          grep -Fq "splitBeautifyDismissDensity" "$EXTRACT/plist.strings" || { echo "density panel option missing"; exit 1; }
+          grep -Fq "BOOL hIsScene" Hooks/AxsBeautifyRing.xm || { echo "scene-root branch missing"; exit 1; }
+          grep -Fq "splitBeautifyOpenAnimEnabled" "$EXTRACT/plist.strings" || { echo "open switch panel option missing"; exit 1; }
+              sys.exit("beautify group order wrong: %r" % idx)
+          grep -Fq "static void axs_ring_queueScan(void)" Hooks/AxsBeautifyRing.xm || { echo "scan dedupe missing"; exit 1; }
+          grep -Fq "BOOL changed = visChanged" Hooks/AxsBeautifyRing.xm || { echo "state-change not treated as changed"; exit 1; }
+          # .157: ALL-GPU reference reveal. Dust rises from the viewport
+          grep -Fq "constraintEqualToConstant:78" Hooks/AxsHoldLaunchMain.xm || { echo "title width 78 missing"; exit 1; }
+          echo "roothide verify ok: $RH_DEB"
+          strings -a "$B/SplitSettings.plist" > "$EXTRACT/plist.strings"
+          grep -Fq "want.m11 < 0.02" Hooks/AxsBeautifyRing.xm || { echo "scale-degradation guard missing"; exit 1; }
+          grep -Fq "UIImagePNGRepresentation" Hooks/AxsDismissEffect.xm || { echo "snapshot png persistence missing"; exit 1; }
+          ! grep -Fq "shouldRasterize" Hooks/AxsBeautifyRing.xm || { echo "shouldRasterize still present"; exit 1; }
+          grep -Fq "splitBeautifyEdgeIconEnabled" "$EXTRACT/plist.strings" && { echo "edge icon switch still in plist"; exit 1; }
+          grep -Fq "ring tilt DOCK container=" Hooks/AxsBeautifyRing.xm || { echo "dock log line missing"; exit 1; }
+          # official Patcher conversion checks: rpaths must be rewritten away from
+          ! grep -Fq 'UIView \*v = item\[@"v"\];' Hooks/AxsBeautifyRing.xm || { echo "crash pattern: bare node read as dict still present"; exit 1; }
+          # per-driver 状态记录 + visChanged 视为 changed 项（指令 六.1/六.5）
+          strings -a "$DYLIB" > "$EXTRACT/dylib.strings"
+          ! grep -Fq "ov.layer.transform = owant;" Hooks/AxsBeautifyRing.xm || { echo "overlay inverse 3D still written (must stay planar)"; exit 1; }
+          VERSION="2.0.5+beautify.182"
+          grep -Fq "static void axs_ring_syncAllDriversNow(void)" Hooks/AxsBeautifyRing.xm || { echo "event sync helper missing"; exit 1; }
+          grep -Fq "UITouchPhaseEnded" Hooks/AxsDismissEffect.xm || { echo "touch-ended filter missing"; exit 1; }
+          grep -Fq "static BOOL axs_ring_subtreeHasSceneContent(UIView *v)" Hooks/AxsBeautifyRing.xm || { echo "scene content classifier missing"; exit 1; }
+          grep -Fq "overlayAncestorTilted" Hooks/AxsBeautifyRing.xm || { echo "overlay ancestor tilt check missing"; exit 1; }
+          echo "=== beautify.95 slider compact check (source-level) ==="
+          # second openMode=2 pass deposits REAL card texels gated by the
+          path: packaging/out/*.deb
+          grep -Fq "@property (nonatomic, assign) BOOL cardReady;" Hooks/AxsMetalSand.xm || { echo "cardReady property missing"; exit 1; }
+          grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/plist.strings" || { echo "ColorSand panel option missing"; exit 1; }
+          # refreshed at every dismiss and 0.35s after every open.
+          grep -Fq "static void axs_ring_tiltLogPreferenceSources" Hooks/AxsBeautifyRing.xm || { echo "pref dual-source logger missing"; exit 1; }
+          grep -Fq "CATransform3D restore = (baseVal != nil) ? [baseVal CATransform3DValue]" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on detach missing"; exit 1; }
+          # .105 visibility fix assertions
+          ! grep -Fq "ov.userInteractionEnabled = NO" Hooks/AxsBeautifyRing.xm || { echo "overlay interaction disabled"; exit 1; }
+          ls -la ./repack
+          grep -Fq "static void axs_dm_scanLayers(CALayer *layer, int depth, CGFloat *best, CGFloat *bgRadius)" Hooks/AxsDismissEffect.xm || { echo "layer radius scan missing"; exit 1; }
+          # is gone entirely.
+          grep -Fq "first-frame probe" Hooks/AxsMetalSand.xm || { echo "first-frame self-probe missing"; exit 1; }
+          grep -Fq "NSMutableArray *hosts = [NSMutableArray arrayWithArray:axs_ring_collectVisualHosts" Hooks/AxsBeautifyRing.xm || { echo "mutable hosts for shadow completion missing"; exit 1; }
+          # .65 核心根因修复：m34 必须经 R·P 复合写入 m14/m34，不能只塞 m34（对 z=0 平面透视失效）
+          # strings "failed to flush output" and pipefail fails the step spuriously.
+          grep -Fq "setThumbImage:forState:" "$EXTRACT/dylib34.strings" || { echo "thumb selector missing"; exit 1; }
+          grep -Fq "driver.lastPathBounds" Hooks/AxsBeautifyRing.xm || { echo "path cache missing"; exit 1; }
+          grep -Fq "static CGFloat axs_dm_speedScale" Hooks/AxsDismissEffect.xm || { echo "speed scale fn missing"; exit 1; }
+          # beautify.95: container-as-host regression with native corner preservation
+      - name: Setup Environment
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          grep -Fq "ring tilt BASE_STALE" Hooks/AxsBeautifyRing.xm || { echo "BASE_STALE log missing"; exit 1; }
+          grep -Fq "FSP module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "probe load log not compiled into dylib"; exit 1; }
+          grep -Fq "CGGradientCreateWithColors" Hooks/AxsDismissEffect.xm || { echo "sand gradient missing"; exit 1; }
+          # per-driver docked-side probe (internal state first, geometry fallback)
+        type: choice
+          grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/en.strings" || { echo "ColorSand en label missing"; exit 1; }
+          done
+          - macos-14
+jobs:
+          grep -Fq "static void axs_ring_resetTilt(AXSRingLinkDriver *driver)" Hooks/AxsBeautifyRing.xm || { echo "tilt reset missing"; exit 1; }
+          grep -Fq "connectedScenes" Hooks/AxsBeautifyRing.xm || { echo "multi-window scan missing"; exit 1; }
+          grep -Fq "CALayer *mount = driver.mountLayer;" Hooks/AxsBeautifyRing.xm || { echo "mount cache-first missing"; exit 1; }
+          grep -Fq "if (particles > 48000) particles = 48000" Hooks/AxsMetalSand.xm || { echo "grains cap raise missing"; exit 1; }
+          # .177: majority center check + use-time guard + loop break.
+          grep -Fq "DockedFloatingItem" Hooks/AxsBeautifyRing.xm || { echo "prefix docked-item match missing"; exit 1; }
+                   "splitBeautifyGlowRadius", "splitBeautifyGlowBrightness"]
+          rm -rf "$RH_EXTRACT"
+          grep -Fq "residual(m13=" Hooks/AxsBeautifyRing.xm || { echo "reset residual log missing"; exit 1; }
+          grep -Fq "DISMISS_SPEED" "$EXTRACT/zh.strings" || { echo "speed zh label missing"; exit 1; }
+          # .127: the native animation is swallowed (zero execution) and its
+          grep -Fq 'isEqualToString:@"splitBeautifyTiltAngle"' Hooks/AxsHoldLaunchMain.xm || { echo "tilt angle precision key check missing"; exit 1; }
+            echo "iPhoneOS16.5.sdk already present"
+          grep -Fq "DME module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "dismiss load log not compiled into dylib"; exit 1; }
+          # separate second pass (which silently rendered nothing on device)
+          test "$(grep -c "decor classify" Hooks/AxsBeautifyRing.xm)" -eq 2 || { echo "classify log missing (expect attach + sync)"; exit 1; }
+          grep -Fq "DOCK_MANAGER_PROBE" Hooks/AxsBeautifyRing.xm || { echo "dock manager probe missing"; exit 1; }
+          grep -Fq "float2 finger = float2(u.sourceX, u.sourceY);" Hooks/AxsMetalSand.xm || { echo "finger origin missing"; exit 1; }
+          grep -Fq "splitBeautifyTiltAngle" "$EXTRACT/dylib34.strings" || { echo "tilt angle key missing from dylib"; exit 1; }
+          grep -Fq "static CFAbsoluteTime axs_open_openActiveUntil = 0;" Hooks/AxsDismissEffect.xm || { echo "open ownership window missing"; exit 1; }
+          # .170: lag fixes -- corner/blank probes sample tiny buffers, PNG at 2x.
+          grep -Fq "BEAUTIFY_EDGE_ICON" "$EXTRACT/en.strings" && { echo "BEAUTIFY_EDGE_ICON still in en strings"; exit 1; }
+          grep -Fq "driver.lastGradientDiag" Hooks/AxsBeautifyRing.xm || { echo "gradient cache missing"; exit 1; }
+          trap 'rm -rf "$SDK_STAGE"' EXIT
+             != ["splitBeautifyTiltEnabled", "splitBeautifyTiltAngle"]:
+          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/ScreenCore.dylib" || { echo "roothide ScreenCore dylib missing"; exit 1; }
+          grep -Fq "axs_open_revealLive = YES;" Hooks/AxsDismissEffect.xm || { echo "reveal-live flag missing"; exit 1; }
+                   "splitBeautifyGlowEnabled", "splitBeautifyGlowCustomEnabled",
+          grep -Fq "ring tilt SHADOW_PROBE" Hooks/AxsBeautifyRing.xm || { echo "shadow probe diagnostics missing"; exit 1; }
+          rm -rf "$EXTRACT"
+          pl = plistlib.load(open(b + "SplitSettings.plist", "rb"), fmt=plistlib.FMT_BINARY)
+          grep -Fq "tiltVisualBase" Hooks/AxsBeautifyRing.xm || { echo "per-host nativeBase dict missing"; exit 1; }
+          ! grep -Fq "[sceneRoots containsObject:v]) \[hosts addObject" Hooks/AxsBeautifyRing.xm || { echo "remote root still chosen as host"; exit 1; }
+          grep -Fq "SCENE_HOST" Hooks/AxsBeautifyRing.xm || { echo "scene host selection missing"; exit 1; }
+          # container background painted right-angle corner glows otherwise.
+          grep -Fq "static char axs_open_assembledKey;" Hooks/AxsDismissEffect.xm || { echo "assembled key missing"; exit 1; }
+          grep -Fq "BOOL lastGlowAllowed" Hooks/AxsBeautifyRing.xm || { echo "lastGlowAllowed missing"; exit 1; }
+          test -f Hooks/AxsMetalSand.xm || { echo "Metal engine source missing"; exit 1; }
+          # materialize strings once: grep -q on a pipe closes early -> SIGPIPE makes
+          if tilt.get("cell") != "PSSliderCell" or tilt.get("min") != 0.0 \
+          # .166: snapshots are clipped to the card rounded radius -- the square
+          grep -Fq "candidate skipped (open still active" Hooks/AxsDismissEffect.xm || { echo "open-active event guard missing"; exit 1; }
+          # geometry slimming: path/gradient/glow caches
+          grep -Fq "CGRect refBounds = container.bounds;" Hooks/AxsBeautifyRing.xm || { echo "stable sibling size ref missing"; exit 1; }
+          grep -Fq "axs_open_armSelfRestore();" Hooks/AxsDismissEffect.xm || { echo "arm sites not converted"; exit 1; }
+          grep -Fq "metal compiled OK pipeline ready" "$EXTRACT/dylib34.strings" || { echo "Metal compile log not compiled into dylib"; exit 1; }
+          grep -Fq "float2 c2 = dest + float2((r-0.5)*u.cardSize.x*0.45, approach*(0.4 + 1.0*r3));" Hooks/AxsMetalSand.xm || { echo "randomized c2 missing"; exit 1; }
+          echo "=== beautify.95 safe optimizations kept (source-level) ==="
+          grep -Fq "rad = rad * AXS_TILT_PERSPECTIVE_GAIN;" Hooks/AxsBeautifyRing.xm || { echo "perspective gain application missing"; exit 1; }
+                     splitBeautifyGlowBrightness ; do
+          grep -Fq '#define AXS_TILT_ANGLE_MAX    (30.0)' Hooks/AxsBeautifyRing.xm || { echo "AXS_TILT_ANGLE_MAX 12 missing"; exit 1; }
+          dpkg-deb -c "$DEB"
+          grep -Fq "ring native chain probe (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "native chain probe log missing"; exit 1; }
+          grep -Fq "CATransform3D safeRestore = (baseVal != nil)" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on SAFE_ABORT missing"; exit 1; }
+          find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
+          grep -Fq "hasBG=%d" Hooks/AxsBeautifyRing.xm || { echo "hierarchy background/content/overlay flags missing"; exit 1; }
+          # .157: ALL-GPU reveal on the CPU side too -- the CAShapeLayer
+          grep -Fq "axs_open_gpuTextureRetry(c, renderer, 30);" Hooks/AxsDismissEffect.xm || { echo "retry not scheduled"; exit 1; }
+          grep -Fq "BOOL visChanged" Hooks/AxsBeautifyRing.xm || { echo "visChanged missing"; exit 1; }
+          grep -Fq "isRightDocked" Hooks/AxsBeautifyRing.xm || { echo "right side internal probe missing"; exit 1; }
+          grep -Fq "axs_ring_resetTilt(driver);" Hooks/AxsBeautifyRing.xm || { echo "tilt reset call missing"; exit 1; }
+        run: |
+          # layout must be flattened: files directly under Library/usr, NO var/jb
+          # beautify.95: sublayerTransform path for the remote scene root host
+          grep -Fq "static BOOL axs_open_dismissedSinceAssemble = NO;" Hooks/AxsDismissEffect.xm || { echo "dismiss-aware guard flag missing"; exit 1; }
+          # .39 bug pattern must be gone: master gate inside the pure sub-switch readers
+          grep -Fq "static CGFloat axs_ring_tiltProbeCornerRadius" Hooks/AxsBeautifyRing.xm || { echo "corner radius probe missing"; exit 1; }
+          grep -Fq "axs_open_selfRestore" Hooks/AxsDismissEffect.xm || { echo "self-restore loop guard missing"; exit 1; }
+          # master appears in: decl + def + 2 per-type helpers + 2 classify logs = 6;
+          echo "THEOS_IGNORE_PARALLEL_BUILDING_NOTICE=yes" >> "$HOME/.theosrc"
+          # until its real dismiss -- repeated presents / overlay cleanup must
+          grep -Fq "tiltRotation.m34 =  cosRad * AXS_TILT_M34;" Hooks/AxsBeautifyRing.xm || { echo "m34*cos perspective term missing (.65 root fix)"; exit 1; }
+          grep -Fq "axs_ring_insideDockedItemSubtree" Hooks/AxsBeautifyRing.xm || { echo "docked subtree exclusion missing"; exit 1; }
+          # roothide bootstrap marker: Sileo installs arm64e directly, but pops
+          strings -a "$DYLIB34" > "$EXTRACT/dylib34.strings"
+          echo "=== beautify.95 dylib selector check ==="
+          grep -Fq "static NSString *axs_ring_nsTransform3D" Hooks/AxsBeautifyRing.xm || { echo "3D transform describe helper missing"; exit 1; }
+          if-no-files-found: error
+          grep -Fq "static BOOL axs_ring_tiltMatrixFinite" Hooks/AxsBeautifyRing.xm || { echo "matrix finite check missing"; exit 1; }
+          - macos-15
+          echo "=== beautify.95 decor master switch check ==="
+          grep -Fq "hasCALayerHost" Hooks/AxsBeautifyRing.xm || { echo "CALayerHost detection missing"; exit 1; }
+          grep -Fq "promoteSceneToFullscreenForSession:completion:" Hooks/AxsFullscreenProbe.xm || { echo "probe promoteSession hook missing"; exit 1; }
+          grep -Fq "uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;" Hooks/AxsMetalSand.xm || { echo "per-cell integer hash missing"; exit 1; }
+          grep -Fq "setMinimumTrackImage:forState:" "$EXTRACT/dylib34.strings" || { echo "track selector missing"; exit 1; }
+              sys.exit("tilt angle slider spec wrong (expect 0..12 default 3): %r" % tilt)
+          echo "=== roothide (hidden-root) variant verification ==="
+          # the 3x screen read as a corner morph), and the cache persists to disk.
+          # beautify.95: metadata type guard + per-node exception + explicit classify/probe logs
+          grep -Fq "axs_fs_argsAreObjects" Hooks/AxsFullscreenProbe.xm || { echo "probe args-safety guard missing"; exit 1; }
+          grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/en.strings" || { echo "open en label missing"; exit 1; }
+          # orphaned one-shot selfRestore used to silently EAT the user's next
+          grep -Fq "OPEN snapshot rejected (empty center)" Hooks/AxsDismissEffect.xm || { echo "empty-center rejection missing"; exit 1; }
+          # whole shader fail to compile and killed BOTH animations.
+          # .180: largest rounded-bg radius + double-aggregation hard guard.
+          grep -Fq "axs_open_setAssembled(card, YES)" Hooks/AxsDismissEffect.xm || { echo "assembled mark-on-accept missing"; exit 1; }
+          grep -Fq "static BOOL axs_ring_glowAllowedFor(BOOL docked, UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "glowAllowedFor missing"; exit 1; }
+          ! grep -Fq "@\"fallback-card-center\"" Hooks/AxsDismissEffect.xm || { echo "stale card-center fallback still present"; exit 1; }
+          grep -Fq "static BOOL axs_ring_containerIsDocked(UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "docked classifier missing"; exit 1; }
+          grep -Fq "style=%ld(%@)" Hooks/AxsDismissEffect.xm || { echo "dismiss style log missing"; exit 1; }
+          grep -Fq "self.cardReady = NO;" Hooks/AxsMetalSand.xm || { echo "cardReady reset missing"; exit 1; }
+          grep -Fq "axs_dm_sigMatches" Hooks/AxsDismissEffect.xm || { echo "dismiss sig guard missing"; exit 1; }
+          grep -Fq "axs_open_selfRestoreAt > 0.15" Hooks/AxsDismissEffect.xm || { echo "selfRestore age check missing"; exit 1; }
+          - macos-15-intel
+          ! grep -Fq "tiltRotation.m34 = AXS_TILT_M34;" Hooks/AxsBeautifyRing.xm || { echo "old broken m34-only write still present"; exit 1; }
+          # beneath the overlay and is uncovered cell by cell (fresh content,
+          grep -Fq "axs_ring_queueScan();" Hooks/AxsBeautifyRing.xm || { echo "queueScan call missing"; exit 1; }
+          echo "=== intermediate .deb files ==="
+          # layer/mask cache-first (no per-frame findMount/findRealClip/selectMask)
+          grep -Fq "CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg)" Hooks/AxsMetalSand.xm || { echo "plain texture draw missing"; exit 1; }
+          echo "=== rootless deb: $DEB ==="
+          grep -Fq "t.m13 = 0; t.m23 = 0; t.m31 = 0; t.m32 = 0; t.m34 = 0;" Hooks/AxsBeautifyRing.xm || { echo "3D perspective strip on reset missing"; exit 1; }
+          mkdir -p "$THEOS/sdks"
+          grep -Fq "return texel*(1.0-in.dock)*in.fade;" Hooks/AxsMetalSand.xm || { echo "cover fade missing"; exit 1; }
+          # .165: randomized per-grain paths + sway; handoff-before-fade.
+          grep -Fq "ring tilt BASE_CLEAN" Hooks/AxsBeautifyRing.xm || { echo "BASE_CLEAN log missing"; exit 1; }
+          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib" || { echo "roothide dylib missing"; exit 1; }
+          grep -Fq "ring tilt HOST_EVICTED" Hooks/AxsBeautifyRing.xm || { echo "HOST_EVICTED log missing"; exit 1; }
+          test "$(grep -c "axs_ring_tiltStripPerspective" Hooks/AxsBeautifyRing.xm)" -ge 5 || { echo "strip-perspective not applied to all reset points"; exit 1; }
+          en = plistlib.load(open(b + "en.lproj/SplitSettings.strings", "rb"), fmt=plistlib.FMT_BINARY)
+          DEB=$(find ./packages -name "*.deb" | head -n 1)
+          # beautify.95: 3D card side-flip — rotationY around Y axis + m34 perspective, NOT 2D rotation.z
+          # overlay class probe + finder, stays in identity plane (no inverse 3D written to overlay)
+          # beautify.95: full-size sibling shadow-shell follows tilt + angle max 12
+          grep -Fq "ring tilt VISUAL HOSTS (beautify.95)" Hooks/AxsBeautifyRing.xm || { echo "visual hosts log missing"; exit 1; }
+          grep -Fq "if (openMode == 1u && tex.width >= 256 && tex.height >= 256) {" Hooks/AxsMetalSand.xm || { echo "initial-texture cardReady arming missing"; exit 1; }
+  build:
+          # .106/.107 command queue fix assertions
+          # .172: single-pass docking -- the arriving grain expands into its
+    inputs:
+             or tilt.get("max") != 30.0 or tilt.get("step") != 0.5 or tilt.get("default") != 3.0:
+          grep -Fq "static NSString *axs_open_windowKeyForView(UIView *view)" Hooks/AxsDismissEffect.xm || { echo "window identity key missing"; exit 1; }
+                   "splitBeautifyRingFrameColor", "splitBeautifyDecorEnabled",
+          grep -Fq "DISMISS_DENSITY" "$EXTRACT/en.strings" || { echo "density en label missing"; exit 1; }
+          grep -Fq "_u.openMode = 2u;" Hooks/AxsMetalSand.xm || { echo "cover pass toggle missing"; exit 1; }
+          grep -Fq "static void axs_open_setAssembled(UIView *v, BOOL yes)" Hooks/AxsDismissEffect.xm || { echo "assembled setter missing"; exit 1; }
+          # the deposit texture comes from the cached visible-card snapshot
+          # NOT be re-read as a new open (that caused the auto-open loop).
+          grep -Fq "static BOOL axs_ring_ringAllowedFor(BOOL docked, UIView *container)" Hooks/AxsBeautifyRing.xm || { echo "ringAllowedFor missing"; exit 1; }
+          echo "Using version: $VERSION"
+          # the CPU layer path must be fully retired
+          git -C "$SDK_STAGE/sdks" sparse-checkout set iPhoneOS16.5.sdk
+          grep -Fq "texture upload %lux%lu alpha" Hooks/AxsMetalSand.xm || { echo "texture upload readback diagnostic missing"; exit 1; }
+          ! grep -Fq "want.m11 < 0.35" Hooks/AxsBeautifyRing.xm || { echo "old 0.35 threshold still present"; exit 1; }
+          grep -Fq "constraintEqualToConstant:38" Hooks/AxsHoldLaunchMain.xm || { echo "value width 38 missing"; exit 1; }
+          grep -Fq "static CFAbsoluteTime axs_open_selfRestoreAt = -1e9;" Hooks/AxsDismissEffect.xm || { echo "selfRestore timestamp missing"; exit 1; }
+          # old .36 geometry must be gone
+          grep -Fq "CONTENT_WRAPPER" Hooks/AxsBeautifyRing.xm || { echo "content wrapper host missing"; exit 1; }
+              sys.exit("zh BEAUTIFY_RING_THICKNESS wrong: %r" % zh.get("BEAUTIFY_RING_THICKNESS"))
+          grep -Fq "cornersFinite" Hooks/AxsBeautifyRing.xm || { echo "projection finite guard missing"; exit 1; }
+          # centerLarge geometry: main-screen gaps + ratio >=0.45 -> no tilt; no presentationLayer feedback
+        uses: actions/upload-artifact@v4
+          grep -Fq "static CFAbsoluteTime axs_open_lastAssembleStart = -1e9;" Hooks/AxsDismissEffect.xm || { echo "recent-assemble guard missing"; exit 1; }
+          grep -Fq "BOOL docked = axs_ring_containerIsDocked(d.container);" Hooks/AxsBeautifyRing.xm || { echo "refresh per-driver classify missing"; exit 1; }
+          grep -Fq "CATransform3D oldRestore = (obaseVal != nil)" Hooks/AxsBeautifyRing.xm || { echo "full nativeBase restore on host evict missing"; exit 1; }
+          import plistlib, sys
+          if "边框粗细设置" in zh.values():
+          # real corners, no handoff swap).
+          grep -Fq "DME module loaded in SpringBoard" Hooks/AxsDismissEffect.xm || { echo "dismiss load log missing"; exit 1; }
+          test "$(grep -c "axs_ring_decorEnabled" Hooks/AxsBeautifyRing.xm)" -eq 6 || { echo "decorEnabled occurrences changed (expected 6)"; exit 1; }
+          grep -Fq "static CATransform3D axs_ring_tiltStripPerspective" Hooks/AxsBeautifyRing.xm || { echo "strip perspective helper missing"; exit 1; }
+          grep -Fq "DOCKED_ITEM_SUB_SKIPPED" Hooks/AxsBeautifyRing.xm || { echo "docked sub skip marker missing"; exit 1; }
+          # .168: the refresh capture uses the DEVICE scale (1x stretched across
+          grep -Fq "CGImageCreateWithImageInRect" Hooks/AxsDismissEffect.xm || { echo "cheap corner probe missing"; exit 1; }
+          if not en.get("BEAUTIFY_TILT_ENABLED") or not en.get("BEAUTIFY_TILT_ANGLE"):
+          # timestamps; stale ones are released and the open re-assembles.
+          PATH="$(brew --prefix)/bin:$PATH" sh packaging/package_beautify.sh
+          grep -Fq "pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)" Hooks/AxsMetalSand.xm || { echo "decaying sway missing"; exit 1; }
+          # snapshot is fetched by an async retry, then swapped mid-flight.
+          grep -Fq "ov.frame = inSuper;" Hooks/AxsBeautifyRing.xm || { echo "overlay projected hit-frame sync missing"; exit 1; }
+          grep -Fq "return opaqueCount >= 72;" Hooks/AxsDismissEffect.xm || { echo "majority center rule missing"; exit 1; }
+          # texel-alpha docked opacity, and dismiss-aware recent-assemble guard.
+          grep -Fq "(void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);" Hooks/AxsDismissEffect.xm || { echo "hidden-state ownership missing"; exit 1; }
+          grep -Fq "newLibraryWithSource" Hooks/AxsMetalSand.xm || { echo "runtime shader compile missing"; exit 1; }
+          - macos-13
+          grep -Fq "axs_open_sendEvent" Hooks/AxsDismissEffect.xm || { echo "finger-lift tracking missing"; exit 1; }
+          echo "=== beautify.182 unified GPU engine (no CPU path) + density slider check ==="
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$SDK_STAGE/sdks"
+          grep -Fq "axs_metalAssemblePlay" Hooks/AxsMetalSand.xm || { echo "assemble entry missing in Metal"; exit 1; }
+          grep -Fq "side = axs_ring_containerDockSide(container);" Hooks/AxsBeautifyRing.xm || { echo "tilt side gate missing"; exit 1; }
+      runner_label:
+          echo "=== beautify.95 regression fix check (source-level) ==="
+              sys.exit("zh BEAUTIFY_TILT_ENABLED must be exactly 6 chars 侧倾功能开关")
+          grep -Fq "driver.realLayer.superlayer == nil" Hooks/AxsBeautifyRing.xm || { echo "realLayer cache validity missing"; exit 1; }
+          # .111: hide the real card while the dissolve plays (no double image)
+          PYEOF
+          grep -Fq "DOCK_TRANSITION_SNAP" Hooks/AxsBeautifyRing.xm || { echo "dock transition snap missing"; exit 1; }
+          grep -Fq "float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;" Hooks/AxsMetalSand.xm || { echo "cubic Bezier flight missing"; exit 1; }
+          head -c 8 "$B/SplitSettings.plist" | grep -q "bplist00"
+          echo "=== beautify.182 dismiss speed + density control check ==="
+          test "$(grep -c "ring tilt .* exception" Hooks/AxsBeautifyRing.xm)" -ge 3 || { echo "tilt @try protection insufficient"; exit 1; }
+          grep -Fq "float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);" Hooks/AxsMetalSand.xm || { echo "finger burst missing"; exit 1; }
+          plutil -p packaging/overlay/SplitSettings.plist | grep -A8 "splitBeautifyDismissSpeed" | grep -q "step" || { echo "dismiss speed step missing"; exit 1; }
+          grep -Fq "leftGap" Hooks/AxsBeautifyRing.xm || { echo "dock geometry edge-gap probe missing"; exit 1; }
+          # SAME per-cell hash arrival clock. No CPU mask, no gap.
+          ! grep -Fq ".link.paused" Hooks/AxsBeautifyRing.xm || { echo "link paused still present"; exit 1; }
+          # the primary grain source (that leaked the home-screen clock)
+          echo "=== beautify.182 dismiss style selector check ==="
+          grep -Fq "BOOL geomChanged, BOOL colorChanged" Hooks/AxsBeautifyRing.xm || { echo "glow split rebuild missing"; exit 1; }
+          test "$(grep -cF 'axs_open_selfRestore = YES;' Hooks/AxsDismissEffect.xm)" -eq 1 || { echo "raw selfRestore assignment outside the arm helper"; exit 1; }
+          lipo -archs "$DYLIB"
+          echo "=== beautify.95 master switch scope check (source-level) ==="
+          grep -Fq "static BOOL axs_dm_emitParticlesFromView" Hooks/AxsDismissEffect.xm || { echo "emit result status missing"; exit 1; }
+          # .164: the reveal front sweeps TOP->DOWN (user-confirmed) while the
+          cp -R "$SDK_STAGE/sdks/iPhoneOS16.5.sdk" "$THEOS/sdks/"
+          grep -Fq "axs_metalSandPlay(shot, sourceFrameInWindow, duration," Hooks/AxsDismissEffect.xm || { echo "Metal call with style+density missing"; exit 1; }
+          if tiltsw.get("cell") != "PSSwitchCell" or tiltsw.get("default") is not False:
+          grep -Fq "METADATA_TYPE_SKIP" Hooks/AxsBeautifyRing.xm || { echo "metadata type skip log missing"; exit 1; }
+          grep -Fq "static void axs_open_armSelfRestore(void)" Hooks/AxsDismissEffect.xm || { echo "armSelfRestore helper missing"; exit 1; }
+          grep -Fq "nlDustVertex" Hooks/AxsMetalSand.xm || { echo "Metal shader vertex fn missing"; exit 1; }
+          grep -Fq "static double axs_ring_tiltAngle(void)" Hooks/AxsBeautifyRing.xm || { echo "tiltAngle getter missing"; exit 1; }
+          # .181: circular dock shape (no mid-dock square edges at corners),
+          grep -Fq "static void axs_ring_tiltLogDockState" Hooks/AxsBeautifyRing.xm || { echo "dock multi-state logger missing"; exit 1; }
+      - name: Checkout
+                     colorPickerControllerDidFinish: \
+          print("beautify.95 decor+tilt panel checks ok: order + zh 6-char copy + en labels")
+          grep -Fq "(accepted: window-hidden docked steady, .95)" Hooks/AxsBeautifyRing.xm || { echo "window-hidden sibling acceptance missing"; exit 1; }
+          # slider value format must be exact two decimals
+          python3 - <<PYEOF
+          grep -Fq "userInt=%d ges=%@" Hooks/AxsBeautifyRing.xm || { echo "hit region interaction log missing"; exit 1; }
+          grep -Fq "axs_open_lastDismissHide" Hooks/AxsDismissEffect.xm || { echo "dismiss-restore suppression missing"; exit 1; }
+          ! grep -Fq "axs_dm_emitColorSand" Hooks/AxsDismissEffect.xm || { echo "stale UIView ColorSand emitter still present"; exit 1; }
           ! grep -Fq "UIViewAnimationOptionCurve" Hooks/AxsDismissEffect.xm || { echo "stale UIView animation path still present"; exit 1; }
           ! grep -Fq "emit: sand cleaned grains=" Hooks/AxsDismissEffect.xm || { echo "stale CPU sand log still present"; exit 1; }
-          grep -Fq "emit: gpu engine active" Hooks/AxsDismissEffect.xm || { echo "gpu engine log missing"; exit 1; }
-          grep -Fq "axs_dm_styleBaseDuration" Hooks/AxsDismissEffect.xm || { echo "per-style base duration table missing"; exit 1; }
-          grep -Fq "axs_metalSandPlay(shot, sourceFrameInWindow, duration," Hooks/AxsDismissEffect.xm || { echo "Metal call with style+density missing"; exit 1; }
-          echo "=== beautify.182 dismiss speed + density control check ==="
-          grep -Fq "static CGFloat axs_dm_speedScale" Hooks/AxsDismissEffect.xm || { echo "speed scale fn missing"; exit 1; }
-          grep -Fq "splitBeautifyDismissSpeed" Hooks/AxsDismissEffect.xm || { echo "speed key missing in source"; exit 1; }
-          grep -Fq "axs_dm_styleBaseDuration(style) * speedScale" Hooks/AxsDismissEffect.xm || { echo "style speed scaling missing"; exit 1; }
-          grep -Fq "splitBeautifyDismissSpeed" "$EXTRACT/plist.strings" || { echo "speed panel option missing"; exit 1; }
-          grep -Fq "DISMISS_SPEED" "$EXTRACT/zh.strings" || { echo "speed zh label missing"; exit 1; }
-          grep -Fq "DISMISS_SPEED" "$EXTRACT/en.strings" || { echo "speed en label missing"; exit 1; }
-          grep -Fq "splitBeautifyDismissSpeed" "$EXTRACT/dylib34.strings" || { echo "speed key not compiled into dylib"; exit 1; }
-          # density slider (0.5..3.0, step 0.1)
-          grep -Fq "static CGFloat axs_dm_densityScale" Hooks/AxsDismissEffect.xm || { echo "density scale fn missing"; exit 1; }
-          grep -Fq "splitBeautifyDismissDensity" Hooks/AxsDismissEffect.xm || { echo "density key missing in source"; exit 1; }
-          grep -Fq "splitBeautifyDismissDensity" "$EXTRACT/plist.strings" || { echo "density panel option missing"; exit 1; }
-          grep -Fq "DISMISS_DENSITY" "$EXTRACT/zh.strings" || { echo "density zh label missing"; exit 1; }
-          grep -Fq "DISMISS_DENSITY" "$EXTRACT/en.strings" || { echo "density en label missing"; exit 1; }
-          grep -Fq "splitBeautifyDismissDensity" "$EXTRACT/dylib34.strings" || { echo "density key not compiled into dylib"; exit 1; }
-          echo "=== beautify.182 ARC-open assemble animation check ==="
-          grep -Fq "openMode" Hooks/AxsMetalSand.xm || { echo "shader openMode branch missing"; exit 1; }
-          grep -Fq "axs_metalAssemblePlay" Hooks/AxsMetalSand.xm || { echo "assemble entry missing in Metal"; exit 1; }
-          grep -Fq "axs_metalAssemblePlay" Hooks/AxsDismissEffect.xm || { echo "assemble call missing in dismiss"; exit 1; }
-          grep -Fq "SCFloatingContainerView" Hooks/AxsDismissEffect.xm || { echo "open visibility hook missing"; exit 1; }
-          grep -Fq "msgSendSuper" Hooks/AxsDismissEffect.xm || { echo "super-forward safety missing"; exit 1; }
-          grep -Fq "axs_open_lastDismissHide" Hooks/AxsDismissEffect.xm || { echo "dismiss-restore suppression missing"; exit 1; }
-          grep -Fq "splitBeautifyOpenAnimEnabled" Hooks/AxsDismissEffect.xm || { echo "open switch key missing in source"; exit 1; }
-          grep -Fq "splitBeautifyOpenAnimEnabled" "$EXTRACT/plist.strings" || { echo "open switch panel option missing"; exit 1; }
-          grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/zh.strings" || { echo "open zh label missing"; exit 1; }
-          grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/en.strings" || { echo "open en label missing"; exit 1; }
-          grep -Fq "splitBeautifyOpenAnimEnabled" "$EXTRACT/dylib34.strings" || { echo "open switch key not compiled into dylib"; exit 1; }
-          echo "=== beautify.182 finger-source assemble + loop fix check ==="
-          grep -Fq "sourcePoint" Hooks/AxsMetalSand.xm || { echo "shader sourcePoint missing"; exit 1; }
-          grep -Fq "axs_open_sendEvent" Hooks/AxsDismissEffect.xm || { echo "finger-lift tracking missing"; exit 1; }
-          grep -Fq "UITouchPhaseEnded" Hooks/AxsDismissEffect.xm || { echo "touch-ended filter missing"; exit 1; }
-          grep -Fq "axs_open_selfRestore" Hooks/AxsDismissEffect.xm || { echo "self-restore loop guard missing"; exit 1; }
-          grep -Fq "sendEvent:" Hooks/AxsDismissEffect.xm || { echo "sendEvent hook missing"; exit 1; }
-          # .127: the native animation is swallowed (zero execution) and its
-          # completion is fired manually
-          grep -Fq "OPEN native animation replaced" Hooks/AxsDismissEffect.xm || { echo "animation swallow missing"; exit 1; }
-          grep -Fq "animationDidStop:finished:" Hooks/AxsDismissEffect.xm || { echo "manual completion fire missing"; exit 1; }
-
-          echo "=== beautify.182 particle-is-window reveal + no-open-loop check ==="
-          # .144: a card stays "assembled" from the first frame of an open
-          # until its real dismiss -- repeated presents / overlay cleanup must
-          # NOT be re-read as a new open (that caused the auto-open loop).
-          grep -Fq "static char axs_open_assembledKey;" Hooks/AxsDismissEffect.xm || { echo "assembled key missing"; exit 1; }
-          grep -Fq "static void axs_open_setAssembled(UIView *v, BOOL yes)" Hooks/AxsDismissEffect.xm || { echo "assembled setter missing"; exit 1; }
-          grep -Fq "if (axs_open_isAssembled(v))" Hooks/AxsDismissEffect.xm || { echo "assembled guard in becameVisible missing"; exit 1; }
-          grep -Fq "candidate skipped (already assembled)" Hooks/AxsDismissEffect.xm || { echo "assembled skip log missing"; exit 1; }
-          grep -Fq "axs_open_setAssembled(card, YES)" Hooks/AxsDismissEffect.xm || { echo "assembled mark-on-accept missing"; exit 1; }
-          grep -Fq "axs_open_setAssembled(container, NO)" Hooks/AxsDismissEffect.xm || { echo "assembled release-on-dismiss missing"; exit 1; }
-          # .149: self-healing state flags -- a stale assembled flag or an
-          # orphaned one-shot selfRestore used to silently EAT the user's next
-          # genuine open (no particles, card pops in). The flags now carry
-          # timestamps; stale ones are released and the open re-assembles.
-          grep -Fq "static CFAbsoluteTime axs_open_selfRestoreAt = -1e9;" Hooks/AxsDismissEffect.xm || { echo "selfRestore timestamp missing"; exit 1; }
-          grep -Fq "static void axs_open_armSelfRestore(void)" Hooks/AxsDismissEffect.xm || { echo "armSelfRestore helper missing"; exit 1; }
-          grep -Fq "axs_open_armSelfRestore();" Hooks/AxsDismissEffect.xm || { echo "arm sites not converted"; exit 1; }
-          test "$(grep -cF 'axs_open_selfRestore = YES;' Hooks/AxsDismissEffect.xm)" -eq 1 || { echo "raw selfRestore assignment outside the arm helper"; exit 1; }
-          grep -Fq "static CFAbsoluteTime axs_open_openActiveUntil = 0;" Hooks/AxsDismissEffect.xm || { echo "open ownership window missing"; exit 1; }
-          grep -Fq "axs_open_openActiveUntil = CACurrentMediaTime() + duration + 0.3;" Hooks/AxsDismissEffect.xm || { echo "ownership window not armed on accept missing"; exit 1; }
-          grep -Fq "OPEN stale assembled flag released, re-assembling" Hooks/AxsDismissEffect.xm || { echo "stale assembled self-heal missing"; exit 1; }
-          grep -Fq "OPEN orphaned self-restore flag released, re-assembling" Hooks/AxsDismissEffect.xm || { echo "orphaned selfRestore self-heal missing"; exit 1; }
-          grep -Fq "axs_open_selfRestoreAt > 0.15" Hooks/AxsDismissEffect.xm || { echo "selfRestore age check missing"; exit 1; }
-          grep -Fq "candidate skipped (open still active" Hooks/AxsDismissEffect.xm || { echo "open-active event guard missing"; exit 1; }
-
-          # .157: ALL-GPU reference reveal. Dust rises from the viewport
-          # bottom band, flies into its own cell and dies at arrival; a
-          # second openMode=2 pass deposits REAL card texels gated by the
-          # SAME per-cell hash arrival clock. No CPU mask, no gap.
-          grep -Fq "float3 axsPalette(float p)" Hooks/AxsMetalSand.xm || { echo "rainbow palette function missing"; exit 1; }
-          grep -Fq "float4 position [[position]];" Hooks/AxsMetalSand.xm || { echo "vertex position missing"; exit 1; }
-          grep -Fq "    float dock;" Hooks/AxsMetalSand.xm || { echo "dock varying missing"; exit 1; }
-          grep -Fq "    float3 tint;" Hooks/AxsMetalSand.xm || { echo "tint varying missing"; exit 1; }
-          grep -Fq "    float isOpen;" Hooks/AxsMetalSand.xm || { echo "isOpen varying missing"; exit 1; }
-          grep -Fq "    float noiseX;" Hooks/AxsMetalSand.xm || { echo "dust noise varying missing"; exit 1; }
-          grep -Fq "if (u.openMode == 1u) {" Hooks/AxsMetalSand.xm || { echo "open mode branch missing"; exit 1; }
-          grep -Fq "uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;" Hooks/AxsMetalSand.xm || { echo "per-cell integer hash missing"; exit 1; }
-          grep -Fq "float hf = (float)(h & 0xffffu)/65535.0;" Hooks/AxsMetalSand.xm || { echo "hash normalization missing"; exit 1; }
-          # .164: the reveal front sweeps TOP->DOWN (user-confirmed) while the
-          # dust keeps bursting from the finger lift point and streaming in.
-          grep -Fq "float order = 0.96*unit.y + 0.04*hf;" Hooks/AxsMetalSand.xm || { echo "top-down arrival order missing"; exit 1; }
-          # .172: single-pass docking -- the arriving grain expands into its
-          # cell and crossfades to the real texel in the SAME draw call; the
-          # separate second pass (which silently rendered nothing on device)
-          # is gone entirely.
-          grep -Fq "float dock = smoothstep(arrival - 0.03, arrival - 0.004, u.time);" Hooks/AxsMetalSand.xm || { echo "docking gate missing"; exit 1; }
-          grep -Fq "texture upload %lux%lu alpha" Hooks/AxsMetalSand.xm || { echo "texture upload readback diagnostic missing"; exit 1; }
-          # .182: the WALLPAPER-COVER architecture -- the real card is visible
-          # beneath the overlay and is uncovered cell by cell (fresh content,
-          # real corners, no handoff swap).
-          grep -Fq "float2 uvS = pos/u.viewport;" Hooks/AxsMetalSand.xm || { echo "cover screen uv missing"; exit 1; }
-          grep -Fq "return texel*(1.0-in.dock)*in.fade;" Hooks/AxsMetalSand.xm || { echo "cover fade missing"; exit 1; }
-          grep -Fq "outO.fade=born*(1.0-dock);" Hooks/AxsMetalSand.xm || { echo "dust arrival fade missing"; exit 1; }
-          grep -Fq "_u.openMode = 2u;" Hooks/AxsMetalSand.xm || { echo "cover pass toggle missing"; exit 1; }
-          grep -Fq "static UIImage *axs_open_captureWallpaper(void)" Hooks/AxsDismissEffect.xm || { echo "wallpaper capture missing"; exit 1; }
-          grep -Fq "snapshotViewAfterScreenUpdates:YES" Hooks/AxsDismissEffect.xm || { echo "committed-state snapshot missing"; exit 1; }
-          grep -Fq "axs_open_revealLive = YES;" Hooks/AxsDismissEffect.xm || { echo "reveal-live flag missing"; exit 1; }
-          grep -Fq "float arrival = 0.35 + 0.65*order;" Hooks/AxsMetalSand.xm || { echo "staggered arrival missing"; exit 1; }
-          grep -Fq "float departure = arrival - 0.35;" Hooks/AxsMetalSand.xm || { echo "staggered departure missing"; exit 1; }
-          grep -Fq "float2 landing = (cell + 0.5 + jitter)/grid;" Hooks/AxsMetalSand.xm || { echo "jittered landing cell missing"; exit 1; }
-          # .162: the jitter declaration is compile-critical -- deleting it made the
-          # whole shader fail to compile and killed BOTH animations.
-          grep -Fq "float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;" Hooks/AxsMetalSand.xm || { echo "landing jitter declaration missing (shader would not compile)"; exit 1; }
-          grep -Fq "float2 finger = float2(u.sourceX, u.sourceY);" Hooks/AxsMetalSand.xm || { echo "finger origin missing"; exit 1; }
-          grep -Fq "float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);" Hooks/AxsMetalSand.xm || { echo "finger burst missing"; exit 1; }
-          grep -Fq "float2 pos = b*b*b*start + 3.0*b*b*t*c1 + 3.0*b*t*t*c2 + t*t*t*dest;" Hooks/AxsMetalSand.xm || { echo "cubic Bezier flight missing"; exit 1; }
-          # .165: randomized per-grain paths + sway; handoff-before-fade.
-          grep -Fq "pos.x += sin(t*(4.0 + 5.0*r3)*6.2831853 + r*6.2831853)" Hooks/AxsMetalSand.xm || { echo "decaying sway missing"; exit 1; }
-          grep -Fq "float2 c2 = dest + float2((r-0.5)*u.cardSize.x*0.45, approach*(0.4 + 1.0*r3));" Hooks/AxsMetalSand.xm || { echo "randomized c2 missing"; exit 1; }
-          grep -Fq "dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.06 * NSEC_PER_SEC))," Hooks/AxsMetalSand.xm || { echo "handoff-before-fade delay missing"; exit 1; }
           ! grep -Fq "b*b*b*src" Hooks/AxsMetalSand.xm || { echo "stale src-based pos line still present (redefinition)"; exit 1; }
-          grep -Fq "outO.noiseX=r;" Hooks/AxsMetalSand.xm || { echo "dust noise output missing"; exit 1; }
-          grep -Fq "out.isOpen=0.0;" Hooks/AxsMetalSand.xm || { echo "dismiss branch open flag reset missing"; exit 1; }
-          grep -Fq "if (in.isOpen > 0.5) {" Hooks/AxsMetalSand.xm || { echo "fragment open branch missing"; exit 1; }
-          grep -Fq "float3 grain=mix(axsPalette(in.noiseX + phase*0.025), texelC, 0.35);" Hooks/AxsMetalSand.xm || { echo "35% real-texel dust mix missing"; exit 1; }
-          grep -Fq "float roundDust=1.0-smoothstep(0.32,0.51,length(in.local-0.5));" Hooks/AxsMetalSand.xm || { echo "round dust shape missing"; exit 1; }
-          grep -Fq "CFTimeInterval axs_metalAssembleStartTime(void *renderer)" Hooks/AxsMetalSand.xm || { echo "shared renderer clock accessor missing"; exit 1; }
-          grep -Fq "OPEN start tex=" Hooks/AxsMetalSand.xm || { echo "open start diagnostic log missing"; exit 1; }
-          grep -Fq "@property (nonatomic, assign) BOOL cardReady;" Hooks/AxsMetalSand.xm || { echo "cardReady property missing"; exit 1; }
-          grep -Fq "self.cardReady = NO;" Hooks/AxsMetalSand.xm || { echo "cardReady reset missing"; exit 1; }
-          grep -Fq "if (openMode == 1u && tex.width >= 256 && tex.height >= 256) {" Hooks/AxsMetalSand.xm || { echo "initial-texture cardReady arming missing"; exit 1; }
-          grep -Fq "self.cardReady = YES;" Hooks/AxsMetalSand.xm || { echo "cardReady arming missing"; exit 1; }
-          grep -Fq "![sMsdActiveRenderers containsObject:r]" Hooks/AxsMetalSand.xm || { echo "stale-renderer guard missing"; exit 1; }
           ! grep -Fq "startWithCardIdle" Hooks/AxsDismissEffect.xm || { echo "stale idle driver anchor still present"; exit 1; }
-          # density=3 must actually deliver full grains (no rows>240 truncation)
-          grep -Fq "if (particles > 48000) particles = 48000" Hooks/AxsMetalSand.xm || { echo "grains cap raise missing"; exit 1; }
-          grep -Fq "if (rows > 320) rows = 320" Hooks/AxsMetalSand.xm || { echo "rows clamp raise missing"; exit 1; }
-          # .145: generated rainbow sand texture -- NO full-screen capture as
-          # the primary grain source (that leaked the home-screen clock)
-          grep -Fq "static UIImage *axs_open_sandTexture(void)" Hooks/AxsDismissEffect.xm || { echo "sand texture generator missing"; exit 1; }
-          grep -Fq "CGGradientCreateWithColors" Hooks/AxsDismissEffect.xm || { echo "sand gradient missing"; exit 1; }
-          grep -Fq "tex = axs_open_sandTexture(); texKind = @\"reference-dust\";" Hooks/AxsDismissEffect.xm || { echo "sand placeholder texture not used"; exit 1; }
           ! grep -Fq "UIImage *tex = axs_open_captureCardForAssembly(card);" Hooks/AxsDismissEffect.xm || { echo "stale hidden-card snapshot still present"; exit 1; }
-          # .157: ALL-GPU reveal on the CPU side too -- the CAShapeLayer
-          # mask driver (CADisplayLink + per-frame CGPath rebuild, the laggy
-          # "CPU engine") is fully removed; the card stays hidden and the
-          # snapshot is fetched by an async retry, then swapped mid-flight.
-          grep -Fq "static UIImage *axs_open_captureCardCheap(UIView *card)" Hooks/AxsDismissEffect.xm || { echo "cheap card capture missing"; exit 1; }
-          # .166: snapshots are clipped to the card rounded radius -- the square
-          # container background painted right-angle corner glows otherwise.
-          grep -Fq "static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView)" Hooks/AxsDismissEffect.xm || { echo "rounded snapshot clip missing"; exit 1; }
-          # .167: true alpha corners via background clearing; radius clip is fallback.
-          grep -Fq "static UIImage *axs_dm_fixSnapshotCorners(UIImage *img, UIView *refView)" Hooks/AxsDismissEffect.xm || { echo "true-corner fix missing"; exit 1; }
-          grep -Fq "return axs_dm_fixSnapshotCorners(shot, card);" Hooks/AxsDismissEffect.xm || { echo "open capture not corner-fixed"; exit 1; }
-          # .176: empty-center captures (accept-time pre-hide) must be rejected
-          # -- caching them overwrote the good snapshot and emptied the deposit.
-          grep -Fq "static BOOL axs_dm_centerHasContent(UIImage *img)" Hooks/AxsDismissEffect.xm || { echo "center-content probe missing"; exit 1; }
-          # .177: majority center check + use-time guard + loop break.
-          grep -Fq "return opaqueCount >= 72;" Hooks/AxsDismissEffect.xm || { echo "majority center rule missing"; exit 1; }
-          # .181: circular dock shape (no mid-dock square edges at corners),
-          # texel-alpha docked opacity, and dismiss-aware recent-assemble guard.
-          grep -Fq "static BOOL axs_open_dismissedSinceAssemble = NO;" Hooks/AxsDismissEffect.xm || { echo "dismiss-aware guard flag missing"; exit 1; }
-          grep -Fq "axs_open_dismissedSinceAssemble = YES;" Hooks/AxsDismissEffect.xm || { echo "dismiss-side flag set missing"; exit 1; }
-          grep -Fq "if (nowT - goneAt < 0.15) {" Hooks/AxsDismissEffect.xm || { echo "quick-toggle 0.15 missing"; exit 1; }
-          # .180: largest rounded-bg radius + double-aggregation hard guard.
-          grep -Fq "static CFAbsoluteTime axs_open_lastAssembleStart = -1e9;" Hooks/AxsDismissEffect.xm || { echo "recent-assemble guard missing"; exit 1; }
-          grep -Fq "OPEN candidate skipped (recent assemble)" Hooks/AxsDismissEffect.xm || { echo "recent-assemble skip missing"; exit 1; }
-          grep -Fq "axs_open_openActiveUntil = CACurrentMediaTime() + 3.0;" Hooks/AxsDismissEffect.xm || { echo "handoff ownership refresh missing"; exit 1; }
-          grep -Fq "OPEN snapshot rejected (empty center)" Hooks/AxsDismissEffect.xm || { echo "empty-center rejection missing"; exit 1; }
-          grep -Fq "static void axs_open_gpuTextureRetry(UIView *card, void *renderer, NSInteger triesLeft)" Hooks/AxsDismissEffect.xm || { echo "async texture retry missing"; exit 1; }
-          grep -Fq "axs_open_gpuTextureRetry(c, renderer, 30);" Hooks/AxsDismissEffect.xm || { echo "retry not scheduled"; exit 1; }
-          # .158: hidden-card capture is impossible (cross-process content);
-          # the deposit texture comes from the cached visible-card snapshot
-          # refreshed at every dismiss and 0.35s after every open.
-          # .161: the cache is keyed by the window bundle identity (survives
-          # view recreation -- associated objects died with the container).
-          grep -Fq "static NSString *axs_open_windowKeyForView(UIView *view)" Hooks/AxsDismissEffect.xm || { echo "window identity key missing"; exit 1; }
-          grep -Fq "sessionsByBundleID" Hooks/AxsDismissEffect.xm || { echo "bundle-id session lookup missing"; exit 1; }
-          grep -Fq "static void axs_open_cacheCardSnapshot(UIView *owner, UIImage *img)" Hooks/AxsDismissEffect.xm || { echo "snapshot cache helper missing"; exit 1; }
-          grep -Fq "axs_open_cacheCardSnapshot(sourceView, shot);" Hooks/AxsDismissEffect.xm || { echo "dismiss-time cache update missing"; exit 1; }
-          grep -Fq "texKind = @\"cached-card\";" Hooks/AxsDismissEffect.xm || { echo "cached-card texture tag missing"; exit 1; }
-          grep -Fq "axs_open_captureVisibleCardCheap(c)" Hooks/AxsDismissEffect.xm || { echo "post-open cache refresh missing"; exit 1; }
-          grep -Fq "if (axs_metalReplaceTexture(renderer, shot))" Hooks/AxsDismissEffect.xm || { echo "mid-flight texture swap missing"; exit 1; }
-          # .168: the refresh capture uses the DEVICE scale (1x stretched across
-          # the 3x screen read as a corner morph), and the cache persists to disk.
-          grep -Fq "/var/mobile/Library/Caches/sc-open-cache" Hooks/AxsDismissEffect.xm || { echo "persistent snapshot cache missing"; exit 1; }
-          # .170: lag fixes -- corner/blank probes sample tiny buffers, PNG at 2x.
-          grep -Fq "CGImageCreateWithImageInRect" Hooks/AxsDismissEffect.xm || { echo "cheap corner probe missing"; exit 1; }
-          grep -Fq "const size_t S = 64;" Hooks/AxsDismissEffect.xm || { echo "64x64 blank probe missing"; exit 1; }
-          grep -Fq "fmt.scale = 2.0;" Hooks/AxsDismissEffect.xm || { echo "2x png encode missing"; exit 1; }
-          grep -Fq "UIImagePNGRepresentation" Hooks/AxsDismissEffect.xm || { echo "snapshot png persistence missing"; exit 1; }
-          grep -Fq "OPEN snapshot loaded from disk" Hooks/AxsDismissEffect.xm || { echo "disk cache load missing"; exit 1; }
-          grep -Fq "snapshot corners opaque=" Hooks/AxsDismissEffect.xm || { echo "corner decision log missing"; exit 1; }
-          grep -Fq "static void axs_dm_scanLayers(CALayer *layer, int depth, CGFloat *best, CGFloat *bgRadius)" Hooks/AxsDismissEffect.xm || { echo "layer radius scan missing"; exit 1; }
-          grep -Fq "(void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);" Hooks/AxsDismissEffect.xm || { echo "hidden-state ownership missing"; exit 1; }
-          grep -Fq "axs_open_interceptUntil = 0" Hooks/AxsDismissEffect.xm || { echo "intercept disarm missing"; exit 1; }
           ! grep -Fq "AXSOpenWipeDriver" Hooks/AxsDismissEffect.xm || { echo "stale CPU mask driver class still present"; exit 1; }
           ! grep -Fq "axs_open_gridForDensity" Hooks/AxsDismissEffect.xm || { echo "stale CPU grid helper still present"; exit 1; }
           ! grep -Fq "displayLinkWithTarget:self selector:@selector(tick:)" Hooks/AxsDismissEffect.xm || { echo "stale per-frame CPU tick still present"; exit 1; }
           ! grep -Fq "CGPathAddLineToPoint(path, NULL, x, boundary*sz.height);" Hooks/AxsDismissEffect.xm || { echo "stale per-frame mask path still present"; exit 1; }
-          # .147: fallback source must be screen-bottom, never card center
-          grep -Fq "screenH - 90.0" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback source missing"; exit 1; }
-          grep -Fq "@\"fallback-screen-bottom\"" Hooks/AxsDismissEffect.xm || { echo "screen-bottom fallback tag missing"; exit 1; }
-          ! grep -Fq "@\"fallback-card-center\"" Hooks/AxsDismissEffect.xm || { echo "stale card-center fallback still present"; exit 1; }
           ! grep -Fq "card.layer.mask = mv.layer;" Hooks/AxsDismissEffect.xm || { echo "stale flat rect mask still present"; exit 1; }
           ! grep -Fq "mv.frame = CGRectMake(-ov, -ov, sz.width + 2 * ov, sz.height + ov);" Hooks/AxsDismissEffect.xm || { echo "stale flat mask expand still present"; exit 1; }
           ! grep -Fq "card.alpha = 0.0;" Hooks/AxsDismissEffect.xm || { echo "whole-card alpha fade still present"; exit 1; }
           ! grep -Fq "CGFloat revealAt = duration * 0.92;" Hooks/AxsDismissEffect.xm || { echo "stale instant card swap still present"; exit 1; }
-
-          echo "=== beautify.182 GPU Metal fine-dust engine check ==="
-          test -f Hooks/AxsMetalSand.xm || { echo "Metal engine source missing"; exit 1; }
-          grep -Fq "nlDustVertex" Hooks/AxsMetalSand.xm || { echo "Metal shader vertex fn missing"; exit 1; }
-          grep -Fq "nlDustFragment" Hooks/AxsMetalSand.xm || { echo "Metal shader fragment fn missing"; exit 1; }
-          grep -Fq "CAMetalLayer" Hooks/AxsMetalSand.xm || { echo "CAMetalLayer missing"; exit 1; }
-          grep -Fq "instanceCount:(NSUInteger)" Hooks/AxsMetalSand.xm || { echo "single instanced draw call missing"; exit 1; }
-          grep -Fq "newLibraryWithSource" Hooks/AxsMetalSand.xm || { echo "runtime shader compile missing"; exit 1; }
-          grep -Fq "axs_metalSandPlay" Hooks/AxsDismissEffect.xm || { echo "Metal hookup in dismiss missing"; exit 1; }
-          grep -Fq "Metal QuartzCore" Makefile || { echo "Metal framework not linked"; exit 1; }
-          grep -Fq "metal compiled OK pipeline ready" "$EXTRACT/dylib34.strings" || { echo "Metal compile log not compiled into dylib"; exit 1; }
-          grep -Fq "metal started open=" "$EXTRACT/dylib34.strings" || { echo "Metal start log not compiled into dylib"; exit 1; }
-          # .105 visibility fix assertions
-          grep -Fq "MTLStorageModeShared" Hooks/AxsMetalSand.xm || { echo "shared texture storage fix missing"; exit 1; }
-          grep -Fq "drawableSize = CGSizeMake" Hooks/AxsMetalSand.xm || { echo "drawable size fix missing"; exit 1; }
-          grep -Fq "first-frame probe" Hooks/AxsMetalSand.xm || { echo "first-frame self-probe missing"; exit 1; }
-          grep -Fq "metal first-frame probe" "$EXTRACT/dylib34.strings" || { echo "first-frame probe log not compiled into dylib"; exit 1; }
-          # .106/.107 command queue fix assertions
-          grep -Fq "id<MTLCommandQueue> sMsdQueue" Hooks/AxsMetalSand.xm || { echo "MTLCommandQueue singleton missing"; exit 1; }
-          grep -Fq "sMsdQueue = [sMsdDevice newCommandQueue]" Hooks/AxsMetalSand.xm || { echo "command queue creation missing"; exit 1; }
-          grep -Fq "@selector(commandBuffer)" Hooks/AxsMetalSand.xm || { echo "reference-plugin commandBuffer selector missing"; exit 1; }
-          grep -Fq "[sMsdQueue respondsToSelector:cbSel]" Hooks/AxsMetalSand.xm || { echo "runtime selector probe missing"; exit 1; }
-          grep -Fq "sMsdQueue, cbSel" Hooks/AxsMetalSand.xm || { echo "command buffer must be sent to queue, not device"; exit 1; }
-          grep -Fq "metal queue exposes no command buffer selector" "$EXTRACT/dylib34.strings" || { echo "safe selector fallback log not compiled into dylib"; exit 1; }
           ! grep -Fq "sMsdDevice, @selector(newCommandBuffer)" Hooks/AxsMetalSand.xm || { echo "stale device newCommandBuffer call still present"; exit 1; }
-          # .110: no manual texture flip -- a raw CGBitmapContext already lands
-          # image top at row 0; the extra flip rendered the card upside down.
-          grep -Fq "CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), cg)" Hooks/AxsMetalSand.xm || { echo "plain texture draw missing"; exit 1; }
           ! grep -Fq "CGContextScaleCTM(ctx, 1, -1)" Hooks/AxsMetalSand.xm || { echo "stale texture flip still present (upside-down card)"; exit 1; }
-          echo "=== roothide (hidden-root) variant verification ==="
-          RH_DEB=$(find ./packaging/out -name "*roothide*.deb" | head -n 1)
-          test -n "$RH_DEB" || { echo "roothide deb missing"; exit 1; }
-          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.182"
-          # roothide bootstrap marker: Sileo installs arm64e directly, but pops
-          # the "convert .deb" dialog for plain iphoneos-arm64 (rootless) debs.
-          dpkg-deb -f "$RH_DEB" Architecture | grep -qx "iphoneos-arm64e" || { echo "roothide deb must be Architecture iphoneos-arm64e"; exit 1; }
-          RH_EXTRACT="$(mktemp -d)"
-          dpkg-deb -x "$RH_DEB" "$RH_EXTRACT"
-          # layout must be flattened: files directly under Library/usr, NO var/jb
-          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib" || { echo "roothide dylib missing"; exit 1; }
-          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.plist" || { echo "roothide filter plist missing"; exit 1; }
-          test -f "$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/ScreenCore.dylib" || { echo "roothide ScreenCore dylib missing"; exit 1; }
-          test -f "$RH_EXTRACT/Library/PreferenceBundles/ScreenCorePrefs.bundle/SplitSettings.plist" || { echo "roothide panel plist missing"; exit 1; }
-          test ! -e "$RH_EXTRACT/var/jb" || { echo "roothide still has var/jb prefix"; exit 1; }
-          # official Patcher conversion checks: rpaths must be rewritten away from
-          # /var/jb, binary must carry a code signature, AutoPatches markers present
-          AXSD="$RH_EXTRACT/Library/MobileSubstrate/DynamicLibraries/AxsHoldLaunch.dylib"
-          if otool -l "$AXSD" | grep -Fq "path /var/jb"; then echo "roothide dylib still has /var/jb rpath"; exit 1; fi
-          otool -l "$AXSD" | grep -Fq "path @loader_path/.jbroot/usr/lib" || { echo "roothide dylib missing .jbroot rpath"; exit 1; }
-          codesign -dv "$AXSD" >/dev/null 2>&1 || { echo "roothide dylib has no code signature"; exit 1; }
-          test -L "$AXSD.roothidepatch" || { echo "roothide AutoPatches marker missing"; exit 1; }
-          dpkg-deb -f "$RH_DEB" Pre-Depends | grep -q "rootless-compat" || { echo "roothide deb missing Pre-Depends rootless-compat"; exit 1; }
-          echo "roothide verify ok: $RH_DEB"
-          rm -rf "$RH_EXTRACT"
-          echo "final verify ok"
-          rm -rf "$EXTRACT"
-
-      - name: Upload Beautify Package
-        uses: actions/upload-artifact@v4
-        with:
-          name: beautify-package
-          path: packaging/out/*.deb
-          if-no-files-found: error
