@@ -1575,9 +1575,12 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         });
         // Release the in-flight guard partway through so a genuine re-open can
         // still self-heal, and do the final safety sweep at overlay dissolve.
+        // .194: own weak capture -- weakCardTex is now scoped inside the
+        // !liveCover block (live cover skips the mid-flight texture swap).
+        __weak UIView *weakCardGuard = card;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * 0.55 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            UIView *c = weakCardTex;
+            UIView *c = weakCardGuard;
             if (c != nil) {
                 axs_open_assembleInFlight = NO;
                 axs_open_armSelfRestore();
