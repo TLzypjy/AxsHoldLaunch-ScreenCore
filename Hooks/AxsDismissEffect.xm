@@ -968,40 +968,16 @@ static CGFloat axs_open_centerAlpha(UIImage *img) {
     return a;
 }
 
-// .194: build the LIVE COVER plate from the card's OWN visible pixels.
-// `src` is the fresh card snapshot (already corner-clipped by
-// axs_open_captureVisibleCardCheap). We darken it into a dark rounded
-// silhouette that fully hides the real card beneath the alpha-cleared overlay.
-// The cover shader then erases it cell by cell exactly where each grain lands,
-// uncovering the live card (fresh content, never hidden). Corner alpha is kept
-// verbatim so the plate matches the window's rounded shape 1:1.
+// .195: the live style uses the card's REAL pixels as the DEPOSIT texture.
+// .194 darkened this into a near-black silhouette and erased it cell by cell,
+// which looked like a black floating-window image being wiped away. The
+// reference effect is the opposite: the real card stays hidden, the desktop
+// shows through, and each arriving grain paints that cell's real window
+// pixels (classic .168 deposit pipeline, openMode=2). No darkening, no cover
+// pipeline -- `src` is already corner-clipped by axs_dm_fixSnapshotCorners.
 static UIImage *axs_open_makeLiveCover(UIImage *src) {
     if (src == nil || src.CGImage == NULL) return nil;
-    UIImage *out = nil;
-    @try {
-        CGSize sz = src.size;
-        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.opaque = NO;
-        fmt.scale = src.scale;
-        UIGraphicsImageRenderer *r =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, sz.width, sz.height) format:fmt];
-        out = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            CGRect b = CGRectMake(0, 0, sz.width, sz.height);
-            [src drawInRect:b];
-            // Darken to ~10% luminance, keeping a faint ghost of the real
-            // content so the plate reads as a covered window, not a blank box.
-            // SourceAtop paints ONLY where the snapshot already has alpha, so
-            // the exact rounded-corner mask survives -- no square dark corners
-            // (the .188 failure mode).
-            CGContextRef c = ctx.CGContext;
-            CGContextSaveGState(c);
-            CGContextSetBlendMode(c, kCGBlendModeSourceAtop);
-            [[UIColor colorWithWhite:0.0 alpha:0.90] setFill];
-            CGContextFillRect(c, b);
-            CGContextRestoreGState(c);
-        }];
-    } @catch (NSException *ignored) { out = nil; }
-    return out;
+    return src;
 }
 
 // .190: capture the screen state while the card is hidden -- this becomes the
@@ -1475,7 +1451,9 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         UIImage *tex = nil;
         NSString *texKind = nil;
         BOOL liveCover = axs_open_liveCoverStyle() && axs_open_wallpaperShot != nil;
-        BOOL useCover = liveCover || (axs_open_coverStyle() && axs_open_wallpaperShot != nil);
+        // .195: style 2 deposits real pixels (classic pipeline); only style 1
+        // uses the cover/erase pipeline.
+        BOOL useCover = !liveCover && (axs_open_coverStyle() && axs_open_wallpaperShot != nil);
         UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);
         if (cachedCard != nil && cachedCard.CGImage != NULL
             && CGImageGetWidth(cachedCard.CGImage) >= 256) {
@@ -1487,8 +1465,9 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             // as dust arrives, uncovering the REAL card beneath. Applied after
             // the cached-card fallback so the classic path stays byte-identical.
             tex = axs_open_wallpaperShot;
-            texKind = liveCover ? @"live-cover" : @"wallpaper";
+            texKind = @"wallpaper";
         }
+        if (liveCover && tex != nil) texKind = @"live-cover";
         if (tex == nil) { tex = axs_open_sandTexture(); texKind = @"reference-dust"; }
         if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
         if (tex == nil) {
@@ -1529,8 +1508,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         @try {
             card.alpha = 1.0;
             if (useCover) {
-                // .188/.194: unhide through the ORIGINAL IMP so our hook does
-                // not re-enter; the card sits visible beneath the cover overlay.
+                // .188: unhide through the ORIGINAL IMP so our hook does not
+                // re-enter; the card sits visible beneath the cover overlay.
                 if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
                     ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
                 } else if (axs_open_orig_setHidden == (IMP)1) {
@@ -1546,9 +1525,10 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 }
             }
         } @catch (NSException *ignored) { }
-        // .194: LIVE COVER must keep its darkened texture -- a mid-flight swap
-        // to real card pixels would erase the cover and kill the reveal.
-        if (!liveCover) {
+        // .195: the live style DEPOSITS real pixels, so a mid-flight swap to a
+        // fresher capture improves content freshness (never kills the effect).
+        // Only the wallpaper-cover style must keep its cover texture intact.
+        if (!useCover) {
             __weak UIView *weakCardTex = card;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.016 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
@@ -1575,8 +1555,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         });
         // Release the in-flight guard partway through so a genuine re-open can
         // still self-heal, and do the final safety sweep at overlay dissolve.
-        // .194: own weak capture -- weakCardTex is now scoped inside the
-        // !liveCover block (live cover skips the mid-flight texture swap).
+        // .195: own weak capture -- weakCardTex is scoped inside the
+        // !useCover block (only the wallpaper cover skips the swap).
         __weak UIView *weakCardGuard = card;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * 0.55 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
@@ -1729,7 +1709,7 @@ static void axs_open_becameVisible(UIView *v) {
             UIImage *plate = axs_open_makeLiveCover(src);
             if (plate != nil) {
                 axs_open_wallpaperShot = plate;
-                axs_dm_log(@"OPEN live cover captured %.0fx%.0f (card own pixels)",
+                axs_dm_log(@"OPEN live cover captured %.0fx%.0f (card own pixels, deposit)",
                            plate.size.width, plate.size.height);
             } else {
                 axs_dm_log(@"OPEN live cover failed, using classic style");

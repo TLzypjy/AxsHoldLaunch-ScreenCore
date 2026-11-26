@@ -1,3 +1,9 @@
+beautify.195 变更（修复样式2黑块：沉积方向还原真实浮窗逐格显现）：
+- 样式2（splitBeautifyOpenStyle=2）不再把浮窗快照压暗成黑色剪影；黑块彻底移除。
+- 样式2 从 cover 擦除管线切回经典 deposit 管线：真浮窗全程隐藏、背景可见，粒子飞到的格子才画出真实浮窗像素，与参考插件一致。
+- 样式2 重新启用 mid-flight 实时纹理替换（gpuTextureRetry），有机会拿到更新的浮窗内容。
+- 设置面板值含义更新为 2=实景显现（沉积）；0=经典、1=壁纸擦除不变。Metal shader 未改。
+
 beautify.194 变更（第三种呼出样式：实景擦除 / Live Window Reveal）：
 - 背景：log73 确认全屏截图四条路全部失败（CGDisplay 符号缺失、离屏空白、
   layer 无 CGImage、UIGetScreenImage 为 nil），所以每次都回退经典样式；
