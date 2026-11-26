@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <dlfcn.h>
+#include <stdint.h>
 
 // Logos does not inject substrate.h into a translation unit with no %hook
 // block. Declare the entry point directly.
@@ -737,6 +738,143 @@ static BOOL axs_open_liveCoverStyle(void) {
     return on;
 }
 
+// .196: style 3 -- REAL-WINDOW REVEAL. The live card is never hidden and no
+// screen/card snapshot is used at all. A per-cell CALayer mask opens on the
+// exact hash clock shared with the metal dust, so the flying grains appear to
+// carry the real window into place. Content is always the LIVE view tree.
+static BOOL axs_open_realRevealStyle(void) {
+    BOOL on = NO;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return NO;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyOpenStyle", @0);
+            if ([value isKindOfClass:[NSNumber class]]) on = [value integerValue] == 3;
+        }
+    } @catch (NSException *ignored) {
+        on = NO;
+    }
+    return on;
+}
+
+// .196: mask driver. Paints a cols x rows alpha bitmap every display frame;
+// CALayer scales it over the whole card. Only the alpha matters to a mask.
+@interface AXSOpenRevealDriver : NSObject
+@property (nonatomic, weak) UIView *card;
+@property (nonatomic, assign) CFTimeInterval start;
+@property (nonatomic, assign) NSTimeInterval duration;
+@property (nonatomic, assign) NSUInteger cols;
+@property (nonatomic, assign) NSUInteger rows;
+@property (nonatomic, strong) CADisplayLink *link;
+@property (nonatomic, strong) NSMutableData *bits;
+@property (nonatomic, assign) CGContextRef bmp;
+@property (nonatomic, strong) CALayer *maskLayer;
+- (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
+           duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density;
+- (void)stop;
+@end
+
+static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
+    CGFloat t = (x - a) / (b - a);
+    if (t < 0) t = 0; if (t > 1) t = 1;
+    return t * t * (3.0 - 2.0 * t);
+}
+
+@implementation AXSOpenRevealDriver
+
+- (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
+           duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density {
+    self.card = card;
+    self.start = start;
+    self.duration = duration;
+    // Mirror the metal open-mode grid (style 8 / openMode 1) so every mask
+    // cell lines up with the dust grain landing on that exact cell.
+    int particles = (int)lround(22000.0 * density);
+    if (particles < 200) particles = 200;
+    if (particles > 48000) particles = 48000;
+    CGFloat aspect = frame.size.height > 0.5 ? frame.size.width / frame.size.height : 1.0;
+    NSUInteger c = (NSUInteger)lround(sqrtf((float)particles * (float)aspect));
+    NSUInteger r = (NSUInteger)((particles + (int)c - 1) / (int)c);
+    if (c < 2) c = 2; if (c > 320) c = 320;
+    if (r < 2) r = 2; if (r > 320) r = 320;
+    self.cols = c; self.rows = r;
+    NSUInteger bpr = c * 4;
+    self.bits = [NSMutableData dataWithLength:bpr * r];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    self.bmp = CGBitmapContextCreate([self.bits mutableBytes], c, r, 8, bpr, cs,
+                                    kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    CALayer *mask = [CALayer layer];
+    mask.frame = card.bounds;
+    mask.contentsGravity = kCAGravityResize;
+    mask.backgroundColor = [UIColor clearColor].CGColor;
+    self.maskLayer = mask;
+    card.layer.mask = mask;
+    SEL tick196 = @selector(tick:);
+    self.link = [CADisplayLink displayLinkWithTarget:self selector:tick196];
+    [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+}
+
+- (void)paintAtTime:(CGFloat)t {
+    CGContextRef ctx = self.bmp;
+    if (ctx == NULL) return;
+    NSUInteger cols = self.cols, rows = self.rows;
+    UInt8 *bytes = (UInt8 *)[self.bits mutableBytes];
+    size_t bpr = cols * 4;
+    memset(bytes, 0, bpr * rows);
+    for (NSUInteger cy = 0; cy < rows; cy++) {
+        CGFloat uy = (cy + 0.5f) / (CGFloat)rows;
+        // CGImage data row 0 renders at the VISUAL TOP; shader cell y=0 is
+        // also the top (order=0.96*unit.y opens top first). Keep them aligned
+        // so each cell opens exactly where its dust grain lands.
+        UInt8 *row = bytes + cy * bpr;
+        for (NSUInteger cx = 0; cx < cols; cx++) {
+            uint32_t h = (uint32_t)cx * 73856093u ^ (uint32_t)cy * 19349663u ^ 83492791u;
+            h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
+            CGFloat hf = (CGFloat)(h & 0xffffu) / 65535.0f;
+            CGFloat order = 0.96f * uy + 0.04f * hf;
+            CGFloat arrival = 0.35f + 0.65f * order;
+            CGFloat dock = axs_open_smoothstep196(arrival - 0.03f, arrival - 0.004f, t);
+            UInt8 a = (UInt8)(dock * 255.0f);
+            UInt8 *p = row + cx * 4;
+            p[0] = a; p[1] = a; p[2] = a; p[3] = a;   // premultiplied white
+        }
+    }
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
+    if (img != NULL) {
+        self.maskLayer.contents = (__bridge id)img;
+        CGImageRelease(img);
+    }
+}
+
+- (void)tick:(CADisplayLink *)link {
+    @try {
+        UIView *card = self.card;
+        if (card == nil || card.window == nil) { [self stop]; return; }
+        CFTimeInterval elapsed = CACurrentMediaTime() - self.start;
+        CGFloat t = self.duration > 0 ? (CGFloat)(elapsed / self.duration) : 1.0f;
+        if (t < 0) t = 0; if (t > 1) t = 1;
+        [self paintAtTime:t];
+    } @catch (NSException *ignored) {
+        [self stop];
+    }
+}
+
+- (void)stop {
+    @try {
+        [_link invalidate];
+        _link = nil;
+        UIView *card = self.card;
+        if (card != nil && card.layer.mask == self.maskLayer) card.layer.mask = nil;
+        if (_bmp != NULL) { CGContextRelease(_bmp); _bmp = NULL; }
+        self.bits = nil;
+    } @catch (NSException *ignored) { }
+}
+@end
+
 // .188: wallpaper-cover state, declared before markGone which resets it.
 static BOOL axs_open_revealLive = NO;
 static UIImage *axs_open_wallpaperShot = nil;
@@ -1450,15 +1588,24 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // only the last-resort placeholder (dust color stays palette-driven).
         UIImage *tex = nil;
         NSString *texKind = nil;
-        BOOL liveCover = axs_open_liveCoverStyle() && axs_open_wallpaperShot != nil;
+        BOOL realReveal = axs_open_realRevealStyle();
+        BOOL liveCover = !realReveal && axs_open_liveCoverStyle() && axs_open_wallpaperShot != nil;
         // .195: style 2 deposits real pixels (classic pipeline); only style 1
-        // uses the cover/erase pipeline.
-        BOOL useCover = !liveCover && (axs_open_coverStyle() && axs_open_wallpaperShot != nil);
+        // uses the cover/erase pipeline. .196: style 3 uses NO screenshot at
+        // all -- metal draws dust only, the live card is revealed by a mask.
+        BOOL useCover = !realReveal && !liveCover && (axs_open_coverStyle() && axs_open_wallpaperShot != nil);
+        if (realReveal) {
+            axs_dm_log(@"OPEN real reveal: live window + per-cell mask, no snapshot");
+        }
         UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);
         if (cachedCard != nil && cachedCard.CGImage != NULL
             && CGImageGetWidth(cachedCard.CGImage) >= 256) {
             tex = cachedCard;
             texKind = @"cached-card";
+        }
+        if (realReveal) {
+            tex = axs_open_sandTexture();
+            texKind = @"real-reveal";
         }
         if (useCover) {
             // .188: the WALLPAPER is the cover texture -- it fades out per cell
@@ -1479,7 +1626,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         }
         // .188: arm the chosen shader pipeline BEFORE the first draw (the
         // Metal pipeline is compiled lazily on first render).
-        axs_msd_setCoverMode(useCover);
+        axs_msd_setCoverMode(useCover);   // .196: realReveal -> NO (dust only)
         void *renderer = axs_metalAssemblePlayRet(tex, frame, duration, density, sourcePoint);
         if (renderer == NULL) {
             axs_open_assembleInFlight = NO;
@@ -1517,6 +1664,10 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                     ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&sup, @selector(setHidden:), NO);
                 }
                 axs_open_revealLive = YES;
+            } else if (realReveal) {
+                // .196: the REAL window is the content -- keep it visible the
+                // whole time; the mask hides it until each cell opens.
+                axs_open_revealLive = YES;
             } else {
                 if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
                     ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
@@ -1525,10 +1676,23 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 }
             }
         } @catch (NSException *ignored) { }
+        // .196: start the reveal mask on the renderer's EXACT clock so each
+        // cell opens precisely when its dust grain lands.
+        if (realReveal) {
+            AXSOpenRevealDriver *drv = [AXSOpenRevealDriver new];
+            CFTimeInterval metalStart = axs_metalAssembleStartTime(renderer);
+            [drv startOnCard:card
+                       start:(metalStart > 0 ? metalStart : CACurrentMediaTime())
+                    duration:duration frame:frame density:density];
+            objc_setAssociatedObject(card, &axs_open_wipeDriverKey, drv,
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            axs_dm_log(@"OPEN real reveal mask armed %lux%lu duration=%.2f",
+                       (unsigned long)drv.cols, (unsigned long)drv.rows, duration);
+        }
         // .195: the live style DEPOSITS real pixels, so a mid-flight swap to a
         // fresher capture improves content freshness (never kills the effect).
         // Only the wallpaper-cover style must keep its cover texture intact.
-        if (!useCover) {
+        if (!useCover && !realReveal) {
             __weak UIView *weakCardTex = card;
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.016 * NSEC_PER_SEC)),
                            dispatch_get_main_queue(), ^{
@@ -1691,11 +1855,12 @@ static void axs_open_becameVisible(UIView *v) {
         // .123: the whole flow runs OUTSIDE the UIKit window-setup stack and
         // the poll uses weak captures only (see axs_open_pollStep) -- no
         // block-copy of strong view captures anywhere.
-        BOOL wantLiveCover = axs_open_liveCoverStyle();
+        BOOL wantRealReveal = axs_open_realRevealStyle();
+        BOOL wantLiveCover = !wantRealReveal && axs_open_liveCoverStyle();
         // .194: hide at frame 0 for ALL styles (no real-card flash before the
-        // cover overlay's first frame). The live-cover style unhides the card
-        // beneath the cover in pollStep, exactly like the wallpaper style.
-        card.hidden = YES;
+        // cover overlay's first frame). .196: style 3 keeps the LIVE card
+        // present (masked) from frame 0 -- it IS the revealed content.
+        if (!wantRealReveal) card.hidden = YES;
         if (wantLiveCover) {
             // .194: cover = darkened copy of the card's OWN pixels. The
             // accept-time capture (preShot) is usually blank because remote
@@ -1715,6 +1880,10 @@ static void axs_open_becameVisible(UIView *v) {
                 axs_dm_log(@"OPEN live cover failed, using classic style");
                 axs_open_wallpaperShot = nil;
             }
+        } else if (wantRealReveal) {
+            // .196: no capture at all. The live window is shown through the
+            // per-cell mask; there is no stale image to capture or deposit.
+            axs_dm_log(@"OPEN real reveal accepted, snapshot bypassed");
         } else if (axs_open_coverStyle()) {
             // .188: capture the screen WITHOUT the card; failure falls back to
             // the classic cached-card deposit for this open.
@@ -1726,9 +1895,11 @@ static void axs_open_becameVisible(UIView *v) {
                 axs_open_wallpaperShot = wall;
             }
         }
-        // reset unconditionally: pollStep re-arms YES only if a cover is live;
-        // on any fallback the classic path must still unhide at the handoff.
-        axs_open_revealLive = NO;
+        // .196: style 3 holds the LIVE card visible (behind the mask) from
+        // frame 0, so arm revealLive now -- otherwise a native setHidden:NO
+        // during the settle polls would be snapped back to hidden. Other
+        // styles keep the unconditional reset; pollStep re-arms YES on cover.
+        axs_open_revealLive = wantRealReveal;
         axs_open_assembleInFlight = YES;
         // .144: mark the card as owned from the FIRST frame. Every later
         // visibility event (our reveal, overlay cleanup, repeated present)
