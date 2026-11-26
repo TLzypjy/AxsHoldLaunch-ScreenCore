@@ -30,6 +30,7 @@ void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat dura
 // .188: choose which compiled shader pipeline the open pass uses.
 void axs_msd_setCoverMode(BOOL on);
 void axs_msd_setCornerKill(uint32_t on, float radius);
+void axs_msd_setDirectionMode(uint32_t mode);
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
 // .155: exact shared clock of the running open renderer.
 CFTimeInterval axs_metalAssembleStartTime(void *renderer);
@@ -743,6 +744,28 @@ static BOOL axs_open_liveCoverStyle(void) {
 // screen/card snapshot is used at all. A per-cell CALayer mask opens on the
 // exact hash clock shared with the metal dust, so the flying grains appear to
 // carry the real window into place. Content is always the LIVE view tree.
+// .201: reveal direction. 0 = top->down (original), 1 = top-left->bottom-right.
+// Applies to the shared open clock, so styles 0-3 all follow it; 0 keeps the
+// pre-.201 behavior.
+static uint32_t axs_open_directionMode(void) {
+    uint32_t mode = 0;
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return 0;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id value = imp(cfg, sel, @"splitBeautifyOpenDirection", @0);
+            if ([value isKindOfClass:[NSNumber class]]) mode = (uint32_t)[value integerValue];
+        }
+        if (mode > 1) mode = 1;
+    } @catch (NSException *ignored) {
+        mode = 0;
+    }
+    return mode;
+}
+
 static BOOL axs_open_realRevealStyle(void) {
     BOOL on = NO;
     @try {
@@ -776,9 +799,11 @@ static BOOL axs_open_realRevealStyle(void) {
 @property (nonatomic, assign) CGFloat frameW;      // .198 corner-aware reveal
 @property (nonatomic, assign) CGFloat frameH;
 @property (nonatomic, assign) CGFloat cornerRadius;
+@property (nonatomic, assign) uint32_t dirMode;
 - (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
            duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density
-                radius:(CGFloat)radius;
+                radius:(CGFloat)radius
+                 dirMode:(uint32_t)dirMode;
 - (void)stop;
 @end
 
@@ -792,8 +817,10 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
 
 - (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
            duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density
-                radius:(CGFloat)radius {
+                radius:(CGFloat)radius
+                 dirMode:(uint32_t)dirMode {
     self.card = card;
+    self.dirMode = dirMode;   // .201: mask clock must match the metal clock
     self.start = start;
     self.duration = duration;
     self.frameW = frame.size.width;
@@ -844,7 +871,10 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
             uint32_t h = (uint32_t)cx * 73856093u ^ (uint32_t)cy * 19349663u ^ 83492791u;
             h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
             CGFloat hf = (CGFloat)(h & 0xffffu) / 65535.0f;
-            CGFloat order = 0.96f * uy + 0.04f * hf;
+            CGFloat ux = (cx + 0.5f) / (CGFloat)cols;
+            CGFloat order = (self.dirMode == 1u)
+                ? 0.96f * (ux + uy) * 0.5f + 0.04f * hf
+                : 0.96f * uy + 0.04f * hf;
             CGFloat arrival = 0.35f + 0.65f * order;
             CGFloat dock = axs_open_smoothstep196(arrival - 0.03f, arrival - 0.004f, t);
             // .198: cells outside the card's rounded corner arc NEVER open.
@@ -1679,6 +1709,9 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         } else {
             axs_msd_setCornerKill(0u, 0.0f);
         }
+        // .201: reveal direction (0 top->down, 1 TL->BR) -- the dust clock and
+        // the mask clock both read this, so they stay aligned.
+        axs_msd_setDirectionMode(axs_open_directionMode());
         void *renderer = axs_metalAssemblePlayRet(tex, frame, duration, density, sourcePoint);
         if (renderer == NULL) {
             axs_open_assembleInFlight = NO;
@@ -1739,7 +1772,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             [drv startOnCard:card
                        start:(metalStart > 0 ? metalStart : CACurrentMediaTime())
                     duration:duration frame:frame density:density
-                     radius:revealRadius];
+                     radius:revealRadius
+                    dirMode:axs_open_directionMode()];
             objc_setAssociatedObject(card, &axs_open_wipeDriverKey, drv,
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             axs_dm_log(@"OPEN real reveal mask armed %lux%lu duration=%.2f",

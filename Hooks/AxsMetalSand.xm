@@ -88,6 +88,7 @@ struct DustUniforms {\n\
     float sourceY;\n\
     uint cornerKill;\n\
     float cornerRadius;\n\
+    uint dirMode;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -129,7 +130,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = 0.96*unit.y + 0.04*hf;\n\
+        float order = (u.dirMode == 1u)\n\
+            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf\n\
+            : 0.96*unit.y + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
@@ -176,7 +179,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = 0.96*unit.y + 0.04*hf2;\n\
+        float order2 = (u.dirMode == 1u)\n\
+            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf2\n\
+            : 0.96*unit.y + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
         float open = step(arrival2 - 0.006, u.time);\n\
         float2 tile = u.cardSize/grid;\n\
@@ -342,6 +347,7 @@ struct DustUniforms {\n\
     float sourceY;\n\
     uint cornerKill;\n\
     float cornerRadius;\n\
+    uint dirMode;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -383,7 +389,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = 0.96*unit.y + 0.04*hf;\n\
+        float order = (u.dirMode == 1u)\n\
+            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf\n\
+            : 0.96*unit.y + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
@@ -431,7 +439,9 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = 0.96*unit.y + 0.04*hf2;\n\
+        float order2 = (u.dirMode == 1u)\n\
+            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf2\n\
+            : 0.96*unit.y + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
         float dock = smoothstep(arrival2 - 0.03, arrival2 - 0.004, u.time);\n\
         float2 tile = u.cardSize/grid;\n\
@@ -591,6 +601,7 @@ typedef struct {
     float sourcePoint[2];
     uint32_t cornerKill;
     float cornerRadius;
+    uint32_t dirMode;
 } AXSMetalDustUniforms;
 
 // ---- cached device + queue + pipeline (compiled once, reused) --------------
@@ -621,6 +632,10 @@ static uint32_t sMsdCornerKill = 0;
 static float sMsdCornerKillRadius = 0.0f;
 void axs_msd_setCornerKill(uint32_t on, float radius);
 void axs_msd_setCornerKill(uint32_t on, float radius) { sMsdCornerKill = on; sMsdCornerKillRadius = radius; }
+// .201: reveal direction. 0 = top->down (original), 1 = top-left->bottom-right.
+static uint32_t sMsdDirMode = 0;
+void axs_msd_setDirectionMode(uint32_t mode);
+void axs_msd_setDirectionMode(uint32_t mode) { sMsdDirMode = mode; }
 static BOOL sMsdTried = NO;
 
 static NSString *sMsdFailReason = nil;   // .114: survives log rotation
@@ -785,6 +800,7 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     u.sourcePoint[1] = (float)sourcePoint.y;
     u.cornerKill = sMsdCornerKill;
     u.cornerRadius = sMsdCornerKillRadius;
+    u.dirMode = sMsdDirMode;
     // Grid = per-style base resolution scaled by the density slider.
     // Style 8 (sand) and open mode use the reference plugin's particle-count
     // model (14000 * density distributed by card aspect); the 8 grid styles

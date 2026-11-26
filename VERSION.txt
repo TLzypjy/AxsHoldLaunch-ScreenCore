@@ -1,3 +1,10 @@
+beautify.201 变更（新增呼出显现方向选项）：
+- 设置面板新增「呼出显现方向」：0=自上而下（默认，与 .200 及之前完全一致）、
+  1=左上→右下（对角逐格打开）。
+- 顺序公式三副本同步：classic/cover 两个 shader 的 openMode=1 粒子时钟、openMode=2
+  沉积时钟、mask 驱动 paintAtTime——粒子飞到哪格、哪格才打开，对角线方向同样严格对齐。
+- DustUniforms 新增 dirMode（C 侧镜像同步）；驱动经 startOnCard radius:/dirMode: 传入。
+
 beautify.200 变更（修复快速关→开无呼出动画）：
 - log80 时间线：关闭浮窗后 1.3s 内再开，候选被所有权窗口吃掉（剩 0.13s），随后两次
   又被 dismiss 溶解收尾新 arm 的 self-restore 吃掉，4.5s 后才恢复动画。
