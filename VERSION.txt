@@ -1,3 +1,7 @@
+beautify.215 变更（ⓘ 位置微调：紧贴值文字）：
+- 定位逻辑从「标题标签右缘+6」改为「值标签左缘-34」（标题标签常为全宽，右缘无用）；
+  ⓘ 右缘距值文字 4pt，紧贴「左上 → 右下」。
+
 beautify.214 变更（方向行 ⓘ 移到值前面 + 点击弹说明）：
 - 修复点击无反应：不再依赖 accessoryType+列表代理（PSListController 未实现该回调），
   改为注入 UIButtonTypeInfoDark 蓝 ⓘ 按钮 + 控制器级 action（axs_showDirectionInfo:，

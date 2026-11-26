@@ -897,15 +897,19 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
                   forControlEvents:UIControlEventTouchUpInside];
                 [rowContent addSubview:infoBtn];
             }
-            // park the (i) just left of the rightmost label (the selected value)
-            CGFloat vx = rowContent.bounds.size.width - 150.0;
+            // .215: park the (i) SNUG against the left edge of the selected-
+            // value label (the label with the largest minX -- the title sits
+            // at the left and often stretches full-width, so its right edge
+            // was useless for positioning). 4pt gap to the value text.
+            CGFloat valueMinX = -1.0;
             for (UIView *sv in rowContent.subviews) {
                 if ([sv isKindOfClass:[UILabel class]] && sv.tag != 0x213) {
-                    CGFloat right = sv.frame.origin.x + sv.frame.size.width;
-                    if (right > vx && right <= rowContent.bounds.size.width) vx = right;
+                    if (sv.frame.origin.x > valueMinX) valueMinX = sv.frame.origin.x;
                 }
             }
-            CGFloat bx = vx + 6.0;
+            CGFloat bx = (valueMinX > 0) ? (valueMinX - 34.0)
+                                         : (rowContent.bounds.size.width - 150.0);
+            if (bx < 40.0) bx = 40.0;
             CGFloat by = (rowContent.bounds.size.height - 30.0) / 2.0;
             infoBtn.frame = CGRectMake(bx, by, 30, 30);
         }
