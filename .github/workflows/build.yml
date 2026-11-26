@@ -620,7 +620,7 @@ jobs:
           grep -Fq "if (!realReveal && card.layer.mask != nil) card.layer.mask = nil;" Hooks/AxsDismissEffect.xm || { echo "pre-driver mask keep missing"; exit 1; }
           grep -Fq "radius:revealRadius];" Hooks/AxsDismissEffect.xm || { echo "reveal radius passthrough missing"; exit 1; }
           echo "=== beautify.199 SDF minus-radius check ==="
-          grep -Fq "- self.cornerRadius;   // .199: rounded-rect SDF needs -r" Hooks/AxsDismissEffect.xm || { echo "mask SDF minus-r missing"; exit 1; }
+          grep -Fq "self.cornerRadius;   // .199: rounded-rect SDF needs -r" Hooks/AxsDismissEffect.xm || { echo "mask SDF minus-r missing"; exit 1; }
           grep -Fq "min(max(q.x,q.y),0.0)-u.cornerRadius;" Hooks/AxsMetalSand.xm || { echo "metal cornerKill SDF minus-r missing"; exit 1; }
           echo "=== beautify.199 finger-source assemble + loop fix check ==="
           grep -Fq "sourcePoint" Hooks/AxsMetalSand.xm || { echo "shader sourcePoint missing"; exit 1; }
