@@ -849,6 +849,15 @@ static CGFloat axs_ringPage_height_imp(id self, SEL _cmd, id tableView, id index
     return ((CGFloat(*)(id, SEL, id, id))axs_ringPage_origHeight)(self, _cmd, tableView, indexPath);
 }
 
+// .219: collect every UILabel in the view tree (recursive) -- the menu
+// cell's selected-value label is nested, not a direct contentView child.
+static void axs_holdlaunch_collectLabels(UIView *v, NSMutableArray *out) {
+    for (UIView *sv in v.subviews) {
+        if ([sv isKindOfClass:[UILabel class]]) [out addObject:sv];
+        if (sv.subviews.count > 0) axs_holdlaunch_collectLabels(sv, out);
+    }
+}
+
 static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexPath) {
     @try {
         PSSpecifier *spec = nil;
@@ -1000,15 +1009,6 @@ static void axs_ringPage_colorTapped_imp(id self, SEL _cmd, UIButton *sender) {
 // SCSplitSettingsController: threshold quantize + ring row rendering hooks.
 // The ring rows sit flat in SplitSettings.plist; every other row is
 // declarative and passes through untouched.
-// .219: collect every UILabel in the view tree (recursive) -- the menu
-// cell's selected-value label is nested, not a direct contentView child.
-static void axs_holdlaunch_collectLabels(UIView *v, NSMutableArray *out) {
-    for (UIView *sv in v.subviews) {
-        if ([sv isKindOfClass:[UILabel class]]) [out addObject:sv];
-        if (sv.subviews.count > 0) axs_holdlaunch_collectLabels(sv, out);
-    }
-}
-
 // .214: tapping the direction-row (i) presents the localized explanation.
 static void axs_showDirectionInfo_imp(id self, SEL _cmd, id sender) {
     @try {
