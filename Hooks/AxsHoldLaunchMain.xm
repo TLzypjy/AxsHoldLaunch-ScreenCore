@@ -935,7 +935,16 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
                     }
                 }
                 if ([vl isKindOfClass:[UILabel class]]) {
-                    bx = bestFr.origin.x - 34.0;
+                    // .221: the label frame is WIDER than its rendered text
+                    // (alignment padding), so anchor to the TEXT itself:/n                    // measure the text width and assume right-alignment
+                    // (the selected value sits flush before the chevron).
+                    NSString *vt = vl.text ?: @"";
+                    CGFloat tw = [vt sizeWithAttributes:@{@"NSFontAttributeName": vl.font}].width;
+                    CGFloat textLeft = bestFr.origin.x;
+                    if (tw > 0 && tw < bestFr.size.width) {
+                        textLeft = bestFr.origin.x + bestFr.size.width - tw;
+                    }
+                    bx = textLeft - 34.0;
                     by = bestFr.origin.y + bestFr.size.height / 2.0 - 15.0;
                     if (bx < 40.0) bx = 40.0;
                 }
