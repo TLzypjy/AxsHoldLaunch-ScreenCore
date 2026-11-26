@@ -1,3 +1,13 @@
+beautify.225 变更（修复光晕直角边）：
+- 根因：光晕两层 CAShapeLayer 投圆角阴影，但 mask 外框用 bezierPathWithRect(方形)，
+  阴影在窗口圆角外侧扩散时被方角外框硬切 → 四条边露出直角边（范围拉到 200 时
+  blur=170 最明显）。
+- 修复 1：mask 外框改为窗口圆角同心外扩 pad 的圆角矩形 cornerRadius=pathRadius+pad，
+  阴影外轮廓四角随窗口圆角保持圆滑，不再有直角。
+- 修复 2：pad 从 blur+8 放大到 2*blur+8（阴影视觉扩散约 2x radius），让阴影在
+  触及外框前自然衰减；pad 纳入 geomChanged 缓存（lastGlowGeomPad），调节光晕范围
+  时外框同步重建。
+
 beautify.224 变更（ⓘ 间距二次校准）：
 - .223 实测（日志 bx=185 + 截图像素 716-769/855px）：字形右缘距文字仍有 ≈21pt——
   TypeInfoDark 字形在 30pt 按钮内有 ~5pt 内边距，按按钮边缘算差了一段。zone 52→31。

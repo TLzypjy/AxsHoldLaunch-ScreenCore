@@ -946,6 +946,7 @@ static void axs_ring_detachDriver(NSString *key);   // beautify.95：前置声�
 @property (nonatomic, assign) double lastPathRadius;    // beautify.42：上帧描边路径圆角
 @property (nonatomic, assign) CGFloat lastGradientDiag; // beautify.42：上帧渐变层对角线（未变不更新 frame）
 @property (nonatomic, assign) CGRect lastGlowGeomBounds;   // beautify.42：上帧光晕几何矩形
+@property (nonatomic, assign) CGFloat lastGlowGeomPad;     // beautify.225：上帧外扩 pad（随范围/blur 变，需触发几何重建）
 @property (nonatomic, assign) CGFloat lastGlowGeomRadius;  // beautify.42：上帧光晕几何圆角
 @property (nonatomic, assign) CGFloat lastGlowInnerBlur;   // beautify.42
 @property (nonatomic, assign) CGFloat lastGlowOuterBlur;   // beautify.42
@@ -1079,8 +1080,12 @@ static void axs_ring_configGlowLayer(CAShapeLayer *glow, CGRect bounds,
         glow.path = winPath.CGPath;
         glow.shadowPath = winPath.CGPath;
 
-        // even-odd mask：外框(整层) + 内孔(窗口圆角矩形) → 内部完全不染色
-        UIBezierPath *maskPath = [UIBezierPath bezierPathWithRect:glow.bounds];
+        // beautify.225 修复直角边：外框必须与窗口圆角同心外扩 pad（= winPath 的
+        // 向外 offset），而不是方形 bezierPathWithRect。旧外框是方角，大 blur 时
+        // 阴影还没衰减就被方角外框硬切，四条边就露出直角；改成圆角外框后
+        // 阴影外轮廓四角随窗口圆角保持圆滑。
+        UIBezierPath *maskPath = [UIBezierPath bezierPathWithRoundedRect:glow.bounds
+                                                            cornerRadius:(pathRadius + pad)];
         [maskPath appendPath:winPath];
         ((CAShapeLayer *)glow.mask).frame = glow.bounds;
         ((CAShapeLayer *)glow.mask).path = maskPath.CGPath;
@@ -1123,7 +1128,10 @@ static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
     CGFloat r = (CGFloat)axs_ring_clamp(range, 0.0, 200.0);
     CGFloat innerBlur = (CGFloat)axs_ring_clamp(r * 0.30, 1.0, 60.0);
     CGFloat outerBlur = (CGFloat)axs_ring_clamp(r * 0.85, 2.0, 170.0);
-    CGFloat pad = MAX(innerBlur, outerBlur) + lineWidth + 8.0;   // 最大 blur + 线宽 + 余量
+    // beautify.225：mask 外框会裁切阴影，而 CALayer 阴影视觉扩散约 2x shadowRadius；
+    // 旧 pad 只留 1x blur + 8，大范围(200→blur170)时阴影冲出外框被方角硬切出直角边。
+    // 留 2x blur 让阴影在触及外框前自然衰减。
+    CGFloat pad = MAX(innerBlur, outerBlur) * 2.0 + lineWidth + 8.0;
     CGFloat scale = axs_ring_glowOpacityScale(range);
     CGFloat bright = axs_ring_glowBrightnessFactor();            // 亮度系数（不改 blur/色相）
     UIColor *color = axs_ring_glowColor();
@@ -1134,7 +1142,8 @@ static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
     // （shadowPath 只在 bounds/圆角变化时重建，颜色/blur/opacity 只在
     // 偏好或缓存值变化时更新）
     BOOL geomChanged = !CGRectEqualToRect(bounds, driver.lastGlowGeomBounds)
-                    || fabs(driver.lastGlowGeomRadius - pathRadius) > 0.05;
+                    || fabs(driver.lastGlowGeomRadius - pathRadius) > 0.05
+                    || fabs(driver.lastGlowGeomPad - pad) > 0.5;  // .225: pad 随范围变化，外框需重建
     BOOL colorChanged = driver.lastGlowColorObj == nil || ![color isEqual:driver.lastGlowColorObj];
     BOOL innerChanged = fabs(driver.lastGlowInnerBlur - innerBlur) > 0.05
                      || fabs(driver.lastGlowInnerOp - innerOp) > 0.002;
@@ -1149,6 +1158,7 @@ static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
 
     driver.lastGlowGeomBounds = bounds;
     driver.lastGlowGeomRadius = pathRadius;
+    driver.lastGlowGeomPad = pad;
     driver.lastGlowInnerBlur = innerBlur;
     driver.lastGlowOuterBlur = outerBlur;
     driver.lastGlowInnerOp = innerOp;
