@@ -849,15 +849,6 @@ static CGFloat axs_ringPage_height_imp(id self, SEL _cmd, id tableView, id index
     return ((CGFloat(*)(id, SEL, id, id))axs_ringPage_origHeight)(self, _cmd, tableView, indexPath);
 }
 
-// .219: collect every UILabel in the view tree (recursive) -- the menu
-// cell's selected-value label is nested, not a direct contentView child.
-static void axs_holdlaunch_collectLabels(UIView *v, NSMutableArray *out) {
-    for (UIView *sv in v.subviews) {
-        if ([sv isKindOfClass:[UILabel class]]) [out addObject:sv];
-        if (sv.subviews.count > 0) axs_holdlaunch_collectLabels(sv, out);
-    }
-}
-
 static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexPath) {
     @try {
         PSSpecifier *spec = nil;
@@ -906,48 +897,29 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
                   forControlEvents:UIControlEventTouchUpInside];
                 [rowContent addSubview:infoBtn];
             }
-            // .219: the value label is NESTED in the private cell layout, so
-            // scan the whole cell recursively and pick the RIGHTMOST UILabel
-            // (the title sits left, the selected value sits right) -- park
-            // the (i) 34pt before its left edge, vertically centered on it.
-            CGFloat bx = rowContent.bounds.size.width - 150.0;
-            CGFloat by = (rowContent.bounds.size.height - 30.0) / 2.0;
+            // .222: DETERMINISTIC placement -- label scanning kept failing
+            // (the value label is nested in private layout). The value text
+            // + chevron occupy the row's right edge: chevron zone ~55pt,
+            // then the value text (measured), then the (i) 34pt before it.
+            CGFloat rowW = rowContent.bounds.size.width;
+            CGFloat rowH = rowContent.bounds.size.height;
+            CGFloat bx = rowW - 175.0;
+            CGFloat by = (rowH - 30.0) / 2.0;
             @try {
-                NSMutableArray *labels = [NSMutableArray array];
-                axs_holdlaunch_collectLabels(cell, labels);
-                // .220: ONLY consider labels whose converted frame lands
-                // INSIDE this row -- the recursive scan also sees labels from
-                // neighbouring rows (the table reuses cells), which placed
-                // the (i) above/below the row in .219.
-                CGFloat rowH = rowContent.bounds.size.height;
-                CGFloat rowW = rowContent.bounds.size.width;
-                UILabel *vl = nil;
-                CGFloat bestX = -1.0;
-                CGRect bestFr = CGRectZero;
-                for (UILabel *l in labels) {
-                    CGRect fr = [l convertRect:l.bounds toView:rowContent];
-                    if (fr.origin.y < -2.0 || fr.origin.y > rowH - 10.0) continue;
-                    if (fr.origin.x < 10.0 || fr.origin.x > rowW - 20.0) continue;
-                    if (fr.origin.x > bestX) {
-                        bestX = fr.origin.x;
-                        bestFr = fr;
-                        vl = l;
-                    }
-                }
-                if ([vl isKindOfClass:[UILabel class]]) {
-                    // .221: the label frame is WIDER than its rendered text
-                    // (alignment padding), so anchor to the TEXT itself:/n                    // measure the text width and assume right-alignment
-                    // (the selected value sits flush before the chevron).
-                    NSString *vt = vl.text ?: @"";
-                    CGFloat tw = [vt sizeWithAttributes:@{@"NSFontAttributeName": vl.font}].width;
-                    CGFloat textLeft = bestFr.origin.x;
-                    if (tw > 0 && tw < bestFr.size.width) {
-                        textLeft = bestFr.origin.x + bestFr.size.width - tw;
-                    }
-                    bx = textLeft - 34.0;
-                    by = bestFr.origin.y + bestFr.size.height / 2.0 - 15.0;
-                    if (bx < 40.0) bx = 40.0;
-                }
+                NSUserDefaults *pd = [[NSUserDefaults alloc] initWithSuiteName:@"com.susudear.screencoreprefs"];
+                NSInteger selIdx = [pd integerForKey:@"splitBeautifyOpenDirection"];
+                // legacy migration: 3 -> 0, 4 -> 1 (beautify.208)
+                if (selIdx == 3) selIdx = 0;
+                else if (selIdx == 4) selIdx = 1;
+                if (selIdx < 0 || selIdx > 7) selIdx = 0;
+                NSArray *dirKeys = @[@"OPEN_DIR_TOP_DOWN", @"OPEN_DIR_BOTTOM_UP", @"OPEN_DIR_TL_BR", @"OPEN_DIR_TR_BL", @"OPEN_DIR_BL_TR", @"OPEN_DIR_BR_TL", @"OPEN_DIR_FROM_TOUCH", @"OPEN_DIR_INWARD"];
+                NSBundle *pb = [NSBundle bundleForClass:NSClassFromString(@"SCSplitSettingsController")];
+                NSString *vt = [pb localizedStringForKey:(NSString *)dirKeys[selIdx] value:nil table:@"SplitSettings"];
+                if (![vt isKindOfClass:[NSString class]] || vt.length == 0) vt = @"Value";
+                CGFloat tw = [vt sizeWithAttributes:@{@"NSFontAttributeName": [UIFont systemFontOfSize:14.0]}].width;
+                bx = rowW - 55.0 - tw - 34.0;
+                if (bx < 40.0) bx = 40.0;
+                axs_holdlaunch_log(@"DIRECTION i: rowW=%.0f sel=%ld vt=%@ tw=%.0f bx=%.0f", rowW, (long)selIdx, vt, tw, bx);
             } @catch (NSException *ignored) { }
             infoBtn.frame = CGRectMake(bx, by, 30, 30);
         }

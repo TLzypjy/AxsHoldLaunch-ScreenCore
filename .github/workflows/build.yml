@@ -618,10 +618,8 @@ jobs:
           grep -Fq 'if ([key isEqualToString:@"splitBeautifyOpenDirection"] && cell != nil) {' Hooks/AxsHoldLaunchMain.xm || { echo "direction row match missing"; exit 1; }
           grep -Fq "static void axs_showDirectionInfo_imp(id self, SEL _cmd, id sender)" Hooks/AxsHoldLaunchMain.xm || { echo "direction info action missing"; exit 1; }
           grep -Fq "axs_showDirectionInfo:" Hooks/AxsHoldLaunchMain.xm || { echo "direction info action reg missing"; exit 1; }
+          grep -Fq "DIRECTION i: rowW" Hooks/AxsHoldLaunchMain.xm || { echo "direction deterministic placement log missing"; exit 1; }
           grep -Fq "infoBtn.tag = 0x213;" Hooks/AxsHoldLaunchMain.xm || { echo "direction info button missing"; exit 1; }
-          grep -Fq "axs_holdlaunch_collectLabels(UIView *v, NSMutableArray *out)" Hooks/AxsHoldLaunchMain.xm || { echo "direction label collector missing"; exit 1; }
-          grep -Fq "if (fr.origin.y < -2.0 || fr.origin.y > rowH - 10.0) continue;" Hooks/AxsHoldLaunchMain.xm || { echo "direction row bounds filter missing"; exit 1; }
-          grep -Fq "textLeft = bestFr.origin.x + bestFr.size.width - tw;" Hooks/AxsHoldLaunchMain.xm || { echo "direction text-left anchor missing"; exit 1; }
           echo "=== beautify.221 direction-row grey-out check ==="
           echo "=== beautify.221 shockwave + jelly check ==="
           grep -Fq "static void axs_open_playShockwave(UIWindow *win, CGPoint point)" Hooks/AxsDismissEffect.xm || { echo "shockwave helper missing"; exit 1; }
