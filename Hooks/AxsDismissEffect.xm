@@ -800,6 +800,7 @@ static BOOL axs_open_realRevealStyle(void) {
 @property (nonatomic, assign) CGFloat frameH;
 @property (nonatomic, assign) CGFloat cornerRadius;
 @property (nonatomic, assign) uint32_t dirMode;
+@property (nonatomic, assign) BOOL jellyDone;   // .206: fire jelly once at t=1
 @property (nonatomic, assign) CGFloat srcX;        // .206 radial-from-touch
 @property (nonatomic, assign) CGFloat srcY;
 @property (nonatomic, assign) CGFloat maxDist;     // farthest-corner distance
@@ -815,6 +816,70 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
     CGFloat t = (x - a) / (b - a);
     if (t < 0) t = 0; if (t > 1) t = 1;
     return t * t * (3.0 - 2.0 * t);
+}
+
+// .206: jelly finish -- spring overshoot on the whole card right after the
+// per-cell reveal completes. Keyframed scale (public API only, no spring class).
+static void axs_open_playJelly(UIView *card) {
+    @try {
+        if (card == nil || card.layer == nil) return;
+        CAKeyframeAnimation *anim = [CAKeyframeAnimation animationWithKeyPath:@"transform.scale"];
+        anim.values = @[ @1.0, @1.055, @0.965, @1.012, @1.0 ];
+        anim.keyTimes = @[ @0.0, @0.30, @0.55, @0.80, @1.0 ];
+        anim.duration = 0.5;
+        anim.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+        anim.removedOnCompletion = YES;
+        [card.layer addAnimation:anim forKey:@"axs_open_jelly206"];
+    } @catch (NSException *ignored) { }
+}
+
+// .206: double shockwave ring at the burst point when the summon is accepted.
+// Two expanding stroked circles in the card's own window; GPU-composited,
+// self-removing, touches nothing else.
+static void axs_open_playShockwave(UIWindow *win, CGPoint point) {
+    @try {
+        if (win == nil) return;
+        NSArray *waveCols = @[
+            [UIColor colorWithRed:0.10 green:0.86 blue:0.94 alpha:1.0],
+            [UIColor colorWithRed:0.68 green:0.28 blue:0.98 alpha:1.0],
+        ];
+        for (NSUInteger i = 0; i < 2; i++) {
+            CGFloat r0 = 8.0;
+            UIBezierPath *pth = [UIBezierPath bezierPathWithArcCenter:point
+                                                              radius:r0
+                                                          startAngle:0.0
+                                                            endAngle:6.2831853
+                                                           clockwise:YES];
+            CAShapeLayer *ring = [CAShapeLayer layer];
+            ring.path = pth.CGPath;
+            ring.fillColor = [UIColor clearColor].CGColor;
+            ring.strokeColor = [(UIColor *)waveCols[i] CGColor];
+            ring.lineWidth = (i == 0 ? 5.0 : 9.0);
+            ring.opacity = (i == 0 ? 0.9 : 0.45);
+            ring.frame = CGRectMake(point.x - r0, point.y - r0, r0 * 2.0, r0 * 2.0);
+            [win.layer addSublayer:ring];
+            CGFloat dur = 0.55 + 0.20 * i;
+            CABasicAnimation *scale = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+            scale.fromValue = @1.0;
+            scale.toValue = @(16.0 + 8.0 * i);
+            scale.duration = dur;
+            scale.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+            CABasicAnimation *fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
+            fade.fromValue = (i == 0 ? @0.9 : @0.45);
+            fade.toValue = @0.0;
+            fade.duration = dur;
+            CAAnimationGroup *grp = [CAAnimationGroup animation];
+            grp.animations = @[ scale, fade ];
+            grp.duration = dur;
+            grp.removedOnCompletion = YES;
+            [ring addAnimation:grp forKey:@"axs_open_wave206"];
+            __weak CAShapeLayer *wring = ring;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((dur + 0.05) * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                @try { [wring removeFromSuperlayer]; } @catch (NSException *ignored) { }
+            });
+        }
+    } @catch (NSException *ignored) { }
 }
 
 @implementation AXSOpenRevealDriver
@@ -936,6 +1001,13 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
         CGFloat t = self.duration > 0 ? (CGFloat)(elapsed / self.duration) : 1.0f;
         if (t < 0) t = 0; if (t > 1) t = 1;
         [self paintAtTime:t];
+        if (t >= 1.0) {
+            if (!self.jellyDone) {
+                self.jellyDone = YES;
+                axs_open_playJelly(card);   // .206: jelly overshoot at reveal end
+            }
+            [self stop];   // fully open, release the display link
+        }
     } @catch (NSException *ignored) {
         [self stop];
     }
@@ -2020,6 +2092,7 @@ static void axs_open_becameVisible(UIView *v) {
                     } @catch (NSException *ignored) { }
                 });
             } @catch (NSException *ignored) { }
+            axs_open_playShockwave(card.window, sourcePoint);   // .206 burst rings
         } else if (axs_open_coverStyle()) {
             // .188: capture the screen WITHOUT the card; failure falls back to
             // the classic cached-card deposit for this open.
