@@ -897,33 +897,26 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
                   forControlEvents:UIControlEventTouchUpInside];
                 [rowContent addSubview:infoBtn];
             }
-            // .218: anchor to the VALUE TEXT's right edge, not the label frame
-            // (the private value label stretches wide, so its frame edge sits
-            // far from the rendered text). Measure the text with the label's
-            // own font and park the (i) 6pt after it.
-            CGFloat valueMinX = -1.0;
-            UILabel *valueLabel = nil;
-            for (UIView *sv in rowContent.subviews) {
-                if ([sv isKindOfClass:[UILabel class]] && sv.tag != 0x213) {
-                    if (sv.frame.origin.x > valueMinX) {
-                        valueMinX = sv.frame.origin.x;
-                        valueLabel = (UILabel *)sv;
-                    }
-                }
-            }
+            // .219: the value label is NESTED in the private cell layout, so
+            // scan the whole cell recursively and pick the RIGHTMOST UILabel
+            // (the title sits left, the selected value sits right) -- park
+            // the (i) 34pt before its left edge, vertically centered on it.
             CGFloat bx = rowContent.bounds.size.width - 150.0;
-            if ([valueLabel isKindOfClass:[UILabel class]]) {
-                NSString *vt = valueLabel.text ?: @"";
-                CGFloat tw = [vt sizeWithAttributes:@{@"NSFontAttributeName": valueLabel.font}].width;
-                CGFloat textRight = valueLabel.frame.origin.x + tw;
-                if (textRight > 40.0 && textRight < rowContent.bounds.size.width - 40.0) {
-                    bx = textRight + 6.0;
-                }
-            }
-            CGFloat maxBx = rowContent.bounds.size.width - 60.0;
-            if (bx > maxBx) bx = maxBx;
-            if (bx < 40.0) bx = 40.0;
             CGFloat by = (rowContent.bounds.size.height - 30.0) / 2.0;
+            @try {
+                NSMutableArray *labels = [NSMutableArray array];
+                axs_holdlaunch_collectLabels(cell, labels);
+                UILabel *vl = nil;
+                for (UILabel *l in labels) {
+                    if (vl == nil || l.frame.origin.x > vl.frame.origin.x) vl = l;
+                }
+                if ([vl isKindOfClass:[UILabel class]]) {
+                    CGRect fr = [vl convertRect:vl.bounds toView:rowContent];
+                    bx = fr.origin.x - 34.0;
+                    by = fr.origin.y + fr.size.height / 2.0 - 15.0;
+                    if (bx < 40.0) bx = 40.0;
+                }
+            } @catch (NSException *ignored) { }
             infoBtn.frame = CGRectMake(bx, by, 30, 30);
         }
 
@@ -1007,6 +1000,15 @@ static void axs_ringPage_colorTapped_imp(id self, SEL _cmd, UIButton *sender) {
 // SCSplitSettingsController: threshold quantize + ring row rendering hooks.
 // The ring rows sit flat in SplitSettings.plist; every other row is
 // declarative and passes through untouched.
+// .219: collect every UILabel in the view tree (recursive) -- the menu
+// cell's selected-value label is nested, not a direct contentView child.
+static void axs_holdlaunch_collectLabels(UIView *v, NSMutableArray *out) {
+    for (UIView *sv in v.subviews) {
+        if ([sv isKindOfClass:[UILabel class]]) [out addObject:sv];
+        if (sv.subviews.count > 0) axs_holdlaunch_collectLabels(sv, out);
+    }
+}
+
 // .214: tapping the direction-row (i) presents the localized explanation.
 static void axs_showDirectionInfo_imp(id self, SEL _cmd, id sender) {
     @try {
