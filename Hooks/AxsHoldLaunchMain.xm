@@ -897,10 +897,12 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
                   forControlEvents:UIControlEventTouchUpInside];
                 [rowContent addSubview:infoBtn];
             }
-            // .222: DETERMINISTIC placement -- label scanning kept failing
+            // .223: DETERMINISTIC placement -- label scanning kept failing
             // (the value label is nested in private layout). The value text
-            // + chevron occupy the row's right edge: chevron zone ~55pt,
-            // then the value text (measured), then the (i) 34pt before it.
+            // + chevron occupy the row's right edge: chevron zone ~65pt
+            // (calibrated from the user's .222 screenshot -- 55 was 12pt
+            // short), then the value text (measured), then the (i) with a
+            // 4pt gap to the text.
             CGFloat rowW = rowContent.bounds.size.width;
             CGFloat rowH = rowContent.bounds.size.height;
             CGFloat bx = rowW - 175.0;
@@ -917,7 +919,7 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
                 NSString *vt = [pb localizedStringForKey:(NSString *)dirKeys[selIdx] value:nil table:@"SplitSettings"];
                 if (![vt isKindOfClass:[NSString class]] || vt.length == 0) vt = @"Value";
                 CGFloat tw = [vt sizeWithAttributes:@{@"NSFontAttributeName": [UIFont systemFontOfSize:14.0]}].width;
-                bx = rowW - 55.0 - tw - 34.0;
+                bx = rowW - 52.0 - tw - 34.0;
                 if (bx < 40.0) bx = 40.0;
                 axs_holdlaunch_log(@"DIRECTION i: rowW=%.0f sel=%ld vt=%@ tw=%.0f bx=%.0f", rowW, (long)selIdx, vt, tw, bx);
             } @catch (NSException *ignored) { }
