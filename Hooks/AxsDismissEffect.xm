@@ -917,6 +917,15 @@ static void axs_open_markGone(UIView *v) {
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     // .188: a real hide/dismiss ends any wallpaper-cover reveal in flight.
     axs_open_revealLive = NO;
+    // .200: a REAL close is explicit user intent -- expire BOTH loop
+    // protection gates so the immediate close->reopen animates (log80:
+    // reopen 1.3s after a close was eaten by the ownership window with
+    // 0.13s left, then twice more by fresh self-restore arms). Loop
+    // artifacts only occur while the card stays visible with no close
+    // event, so this cannot re-open that hole; the window is re-armed by
+    // endWipeReveal/pollStep on the next accepted open anyway.
+    axs_open_openActiveUntil = 0;
+    axs_open_selfRestore = NO;
     // .146: a real dismiss/hide must stop any running reveal driver and drop
     // its mask, otherwise a reused card keeps a half-built ragged mask.
     @try {
