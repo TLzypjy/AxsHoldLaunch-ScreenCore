@@ -766,23 +766,11 @@ static uint32_t axs_open_directionMode(void) {
     return mode;
 }
 
+// .208: only two styles remain -- 0 = live reveal, 1 = shockwave summon.
+// Both are live-window reveals, so this is always YES; legacy stored values
+// 3 (reveal) / 4 (shockwave) map inside the sibling getter.
 static BOOL axs_open_realRevealStyle(void) {
-    BOOL on = NO;
-    @try {
-        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
-        if (cfgClass == nil) return NO;
-        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
-        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
-        if (cfg != nil && [cfg respondsToSelector:sel]) {
-            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
-            id value = imp(cfg, sel, @"splitBeautifyOpenStyle", @0);
-            NSInteger sv = [value integerValue];
-            on = (sv == 3 || sv == 4);   // .207: style 4 joins the live reveal family
-        }
-    } @catch (NSException *ignored) {
-        on = NO;
-    }
-    return on;
+    return YES;
 }
 // .207: style 4 -- shockwave summon. Live reveal forced radial from the touch,
 // opening with double burst rings at the summon point.
@@ -796,26 +784,8 @@ static BOOL axs_open_shockwaveStyle(void) {
         if (cfg != nil && [cfg respondsToSelector:sel]) {
             id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
             id value = imp(cfg, sel, @"splitBeautifyOpenStyle", @0);
-            if ([value isKindOfClass:[NSNumber class]]) on = [value integerValue] == 4;
-        }
-    } @catch (NSException *ignored) {
-        on = NO;
-    }
-    return on;
-}
-// .207: style 5 -- glow outline trace. A rainbow stroke runs along the rounded
-// outline once, then the live card fades in. Pure CA; no metal, no snapshots.
-static BOOL axs_open_glowStyle(void) {
-    BOOL on = NO;
-    @try {
-        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
-        if (cfgClass == nil) return NO;
-        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
-        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
-        if (cfg != nil && [cfg respondsToSelector:sel]) {
-            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
-            id value = imp(cfg, sel, @"splitBeautifyOpenStyle", @0);
-            if ([value isKindOfClass:[NSNumber class]]) on = [value integerValue] == 5;
+            NSInteger sv = [value integerValue];
+            on = (sv == 1 || sv == 4);   // .208: 1 = shockwave, legacy 4 migrates
         }
     } @catch (NSException *ignored) {
         on = NO;
@@ -1762,108 +1732,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             card.hidden = NO;
             return;
         }
-        // .207 STYLE 5: glow outline trace -- pure CA, no metal, no snapshots.
-        // A rainbow stroke (with a soft white glow) runs along the rounded
-        // outline once (~0.95s), then the live card fades in over 0.3s.
-        if (axs_open_glowStyle()) {
-            @try {
-                UIWindow *win = card.window;
-                CGRect frameWin = [card convertRect:card.bounds toView:nil];
-                CGFloat rad = axs_dm_cornerRadiusForView(card);
-                if (rad < 1.0) rad = 40.0;
-                if (win == nil || frameWin.size.width < 40.0) {
-                    axs_open_assembleInFlight = NO;
-                    axs_open_armSelfRestore();
-                    card.hidden = NO;
-                    return;
-                }
-                axs_open_assembleInFlight = NO;   // no metal assemble in this style
-                CGFloat pad = 40.0;
-                CGRect band = CGRectMake(frameWin.origin.x - pad, frameWin.origin.y - pad,
-                                         frameWin.size.width + 2.0 * pad,
-                                         frameWin.size.height + 2.0 * pad);
-                UIBezierPath *outline = [UIBezierPath bezierPathWithRoundedRect:                    CGRectMake(pad, pad, frameWin.size.width, frameWin.size.height)
-                    cornerRadius:rad];
-                CAShapeLayer *glow = [CAShapeLayer layer];
-                glow.frame = band;
-                glow.path = outline.CGPath;
-                glow.fillColor = [UIColor clearColor].CGColor;
-                glow.strokeColor = [UIColor whiteColor].CGColor;
-                glow.lineWidth = 4.0;
-                glow.shadowColor = [UIColor whiteColor].CGColor;
-                glow.shadowRadius = 18.0;
-                glow.shadowOpacity = 0.85;
-                glow.shadowOffset = CGSizeZero;
-                glow.strokeEnd = 0.0;
-                [win.layer addSublayer:glow];
-                CAGradientLayer *grad = [CAGradientLayer layer];
-                grad.frame = band;
-                grad.colors = @[ (id)[UIColor colorWithRed:0.10 green:0.86 blue:0.94 alpha:1].CGColor,
-                                 (id)[UIColor colorWithRed:0.25 green:0.45 blue:0.98 alpha:1].CGColor,
-                                 (id)[UIColor colorWithRed:0.68 green:0.28 blue:0.98 alpha:1].CGColor,
-                                 (id)[UIColor colorWithRed:0.98 green:0.30 blue:0.68 alpha:1].CGColor,
-                                 (id)[UIColor colorWithRed:1.00 green:0.68 blue:0.22 alpha:1].CGColor ];
-                grad.startPoint = CGPointMake(0.0, 0.0);
-                grad.endPoint = CGPointMake(1.0, 1.0);
-                CAShapeLayer *ringMask = [CAShapeLayer layer];
-                ringMask.frame = band;
-                ringMask.path = outline.CGPath;
-                ringMask.fillColor = [UIColor clearColor].CGColor;
-                ringMask.strokeColor = [UIColor whiteColor].CGColor;
-                ringMask.lineWidth = 6.0;
-                ringMask.strokeEnd = 0.0;
-                grad.mask = ringMask;
-                [win.layer addSublayer:grad];
-                CABasicAnimation *draw = [CABasicAnimation animationWithKeyPath:@"strokeEnd"];
-                draw.fromValue = @0.0;
-                draw.toValue = @1.0;
-                draw.duration = 0.95;
-                draw.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
-                draw.removedOnCompletion = YES;
-                [glow addAnimation:draw forKey:@"axs_glow_draw"];
-                [ringMask addAnimation:draw forKey:@"axs_glow_draw"];
-                __weak UIView *wcard5 = card;
-                __weak CAShapeLayer *wglow = glow;
-                __weak CAGradientLayer *wgrad = grad;
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.00 * NSEC_PER_SEC)),
-                               dispatch_get_main_queue(), ^{
-                    @try {
-                        [wglow removeFromSuperlayer];
-                        [wgrad removeFromSuperlayer];
-                        UIView *c = wcard5;
-                        if (c == nil || c.window == nil || !axs_open_isAssembled(c)) return;
-                        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(c, @selector(setHidden:), NO);
-                        } else if (axs_open_orig_setHidden == (IMP)1) {
-                            struct objc_super sup5 = { (id)c, class_getSuperclass(object_getClass(c)) };
-                            ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&sup5, @selector(setHidden:), NO);
-                        } else {
-                            c.hidden = NO;
-                        }
-                        // fade-in via CA only (UIView.animate is banned by a
-                        // legacy CI rule): model alpha is 1, the animation
-                        // draws 0 -> 1 and snaps seamlessly on removal.
-                        c.alpha = 1.0;
-                        CABasicAnimation *fadeIn = [CABasicAnimation animationWithKeyPath:@"opacity"];
-                        fadeIn.fromValue = @0.0;
-                        fadeIn.toValue = @1.0;
-                        fadeIn.duration = 0.30;
-                        fadeIn.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
-                        fadeIn.removedOnCompletion = YES;
-                        [c.layer addAnimation:fadeIn forKey:@"axs_glow_fadein"];
-                        axs_open_setAssembled(c, NO);
-                        axs_open_openActiveUntil = CACurrentMediaTime() + 0.8;
-                        axs_dm_log(@"OPEN glow outline complete, live card faded in");
-                    } @catch (NSException *ignored) { }
-                });
-                axs_dm_log(@"OPEN glow outline lap started duration=0.95");
-            } @catch (NSException *ignored) {
-                axs_open_assembleInFlight = NO;
-                axs_open_armSelfRestore();
-                card.hidden = NO;
-            }
-            return;   // style 5 never reaches the metal assemble
-        }
         // .157: the deposit pass needs the real card texels. .158: a hidden
         // card cannot be rasterized (cross-process content), so seed the
         // texture with the cached visible-card snapshot from the last
@@ -2220,9 +2088,6 @@ static void axs_open_becameVisible(UIView *v) {
             if (axs_open_shockwaveStyle()) {
                 axs_open_playShockwave(card.window, sourcePoint);   // .207 style 4 opening
             }
-        } else if (axs_open_glowStyle()) {
-            // .207 style 5: no capture at all; the CA lap runs in pollStep.
-            axs_dm_log(@"OPEN glow outline accepted, snapshot bypassed");
         } else if (axs_open_coverStyle()) {
             // .188: capture the screen WITHOUT the card; failure falls back to
             // the classic cached-card deposit for this open.
