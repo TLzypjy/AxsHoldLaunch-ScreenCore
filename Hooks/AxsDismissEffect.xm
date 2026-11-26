@@ -773,8 +773,12 @@ static BOOL axs_open_realRevealStyle(void) {
 @property (nonatomic, strong) NSMutableData *bits;
 @property (nonatomic, assign) CGContextRef bmp;
 @property (nonatomic, strong) CALayer *maskLayer;
+@property (nonatomic, assign) CGFloat frameW;      // .198 corner-aware reveal
+@property (nonatomic, assign) CGFloat frameH;
+@property (nonatomic, assign) CGFloat cornerRadius;
 - (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
-           duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density;
+           duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density
+                radius:(CGFloat)radius;
 - (void)stop;
 @end
 
@@ -787,10 +791,14 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
 @implementation AXSOpenRevealDriver
 
 - (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
-           duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density {
+           duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density
+                radius:(CGFloat)radius {
     self.card = card;
     self.start = start;
     self.duration = duration;
+    self.frameW = frame.size.width;
+    self.frameH = frame.size.height;
+    self.cornerRadius = radius;   // .198: reveal mask respects the rounded corners
     // Mirror the metal open-mode grid (style 8 / openMode 1) so every mask
     // cell lines up with the dust grain landing on that exact cell.
     int particles = (int)lround(22000.0 * density);
@@ -839,7 +847,24 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
             CGFloat order = 0.96f * uy + 0.04f * hf;
             CGFloat arrival = 0.35f + 0.65f * order;
             CGFloat dock = axs_open_smoothstep196(arrival - 0.03f, arrival - 0.004f, t);
-            UInt8 a = (UInt8)(dock * 255.0f);
+            // .198: cells outside the card's rounded corner arc NEVER open.
+            // The container's square bounds carry a pale wash beyond the
+            // rounded content; opening those cells flashed a square halo.
+            CGFloat aF = dock;
+            if (self.cornerRadius > 0.5f && self.frameW > 1.0f && self.frameH > 1.0f) {
+                CGFloat px = (cx + 0.5f) / (CGFloat)cols * self.frameW;
+                CGFloat py = uy * self.frameH;
+                CGFloat qx = fabs(px - self.frameW * 0.5f) - (self.frameW * 0.5f - self.cornerRadius);
+                CGFloat qy = fabs(py - self.frameH * 0.5f) - (self.frameH * 0.5f - self.cornerRadius);
+                CGFloat dxo = qx > 0 ? qx : 0;
+                CGFloat dyo = qy > 0 ? qy : 0;
+                CGFloat innerMax = qx > qy ? qx : qy;   // MAX(qx,qy)
+                CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo)
+                             + (innerMax < 0 ? innerMax : 0);   // rounded-rect SDF
+                CGFloat kill = 1.0f - axs_open_smoothstep196(-1.5f, 1.5f, dOut);
+                aF *= kill;
+            }
+            UInt8 a = (UInt8)(aF * 255.0f);
             UInt8 *p = row + cx * 4;
             p[0] = a; p[1] = a; p[2] = a; p[3] = a;   // premultiplied white
         }
@@ -882,6 +907,9 @@ static UIImage *axs_open_wallpaperShot = nil;
 
 // .146: wipe driver association key (declared early so markGone can clear it)
 static char axs_open_wipeDriverKey;
+// .198: accept-time static hide-mask association key (identity for the
+// safety timer so only OUR mask is ever dropped)
+static char axs_open_staticMaskKey;
 
 static void axs_open_markGone(UIView *v) {
     objc_setAssociatedObject(v, &axs_open_goneKey, @(CACurrentMediaTime()),
@@ -1622,6 +1650,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             axs_dm_log(@"OPEN texture unavailable, native card restored");
             axs_open_assembleInFlight = NO;
             axs_open_armSelfRestore();
+            if (realReveal && card.layer.mask != nil) card.layer.mask = nil;  // .198 static hide-mask
             card.hidden = NO;
             return;
         }
@@ -1630,9 +1659,11 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_msd_setCoverMode(useCover);   // .196: realReveal -> NO (dust only)
         // .197: style 3 also kills grains landing outside the rounded corners
         // (square-corner halo). Other styles pass 0 => shader unchanged.
+        CGFloat revealRadius = 0;   // .198 shared by corner-kill + reveal mask
         if (realReveal) {
             CGFloat rr = axs_dm_cornerRadiusForView(card);
             if (rr < 1.0) rr = 40.0;
+            revealRadius = rr;
             axs_msd_setCornerKill(1u, (float)rr);
             axs_dm_log(@"OPEN real reveal corner kill armed radius=%.1f", rr);
         } else {
@@ -1642,6 +1673,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         if (renderer == NULL) {
             axs_open_assembleInFlight = NO;
             axs_open_armSelfRestore();
+            if (realReveal && card.layer.mask != nil) card.layer.mask = nil;  // .198 static hide-mask
             card.hidden = NO;
             axs_dm_log(@"OPEN assemble unavailable, native card restored");
             return;
@@ -1650,7 +1682,9 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // .157: the card stays hidden the WHOLE time; the Metal overlay draws
         // both the dust and the deposited real-card texels (all GPU).
         @try {
-            if (card.layer.mask != nil) card.layer.mask = nil;
+            // .198: style 3 keeps its accept-time static hide-mask here;
+            // the driver below swaps in the clocked mask this same tick.
+            if (!realReveal && card.layer.mask != nil) card.layer.mask = nil;
             card.alpha = 1.0;
         } @catch (NSException *ignored) { }
         axs_dm_log(@"OPEN assemble started duration=%.2f density=%.2f polls=%ld texture=%@ source=%@ (%@)",
@@ -1694,7 +1728,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             CFTimeInterval metalStart = axs_metalAssembleStartTime(renderer);
             [drv startOnCard:card
                        start:(metalStart > 0 ? metalStart : CACurrentMediaTime())
-                    duration:duration frame:frame density:density];
+                    duration:duration frame:frame density:density
+                     radius:revealRadius];
             objc_setAssociatedObject(card, &axs_open_wipeDriverKey, drv,
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             axs_dm_log(@"OPEN real reveal mask armed %lux%lu duration=%.2f",
@@ -1894,7 +1929,31 @@ static void axs_open_becameVisible(UIView *v) {
         } else if (wantRealReveal) {
             // .196: no capture at all. The live window is shown through the
             // per-cell mask; there is no stale image to capture or deposit.
+            // .198: hide the LIVE card behind a static full mask from the
+            // accept frame. Between accept and the driver's first paint
+            // (~90ms of poll settle) the card was previously visible
+            // UNMASKED -> one-frame flash with square pale corners. An
+            // empty CALayer has alpha 0 = fully hidden; the driver swaps
+            // in its clocked mask seamlessly when it arms.
             axs_dm_log(@"OPEN real reveal accepted, snapshot bypassed");
+            @try {
+                CALayer *hideAll = [CALayer layer];
+                hideAll.frame = card.bounds;
+                hideAll.backgroundColor = [UIColor clearColor].CGColor;
+                card.layer.mask = hideAll;
+                objc_setAssociatedObject(card, &axs_open_staticMaskKey, hideAll,
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                __weak UIView *wcard = card;
+                __weak CALayer *wmask = hideAll;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{
+                    @try {
+                        UIView *c = wcard;
+                        CALayer *m = wmask;
+                        if (c != nil && m != nil && c.layer.mask == m) c.layer.mask = nil;
+                    } @catch (NSException *ignored) { }
+                });
+            } @catch (NSException *ignored) { }
         } else if (axs_open_coverStyle()) {
             // .188: capture the screen WITHOUT the card; failure falls back to
             // the classic cached-card deposit for this open.
