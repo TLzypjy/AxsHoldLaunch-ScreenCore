@@ -1782,7 +1782,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                 CGRect band = CGRectMake(frameWin.origin.x - pad, frameWin.origin.y - pad,
                                          frameWin.size.width + 2.0 * pad,
                                          frameWin.size.height + 2.0 * pad);
-                UIBezierPath *outline = [UIBezierPath bezierPathWithRoundedRect:/n                    CGRectMake(pad, pad, frameWin.size.width, frameWin.size.height)
+                UIBezierPath *outline = [UIBezierPath bezierPathWithRoundedRect:                    CGRectMake(pad, pad, frameWin.size.width, frameWin.size.height)
                     cornerRadius:rad];
                 CAShapeLayer *glow = [CAShapeLayer layer];
                 glow.frame = band;
