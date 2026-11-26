@@ -1,3 +1,14 @@
+beautify.212 变更（死代码清理：移除已删呼出样式的底层实现）：
+- 移除 壁纸擦除/实景擦除/经典聚合 的不可达底层代码：四条截屏策略簇
+  （captureWallpaper/offscreenRender/largestSnapCGImage/UIGetScreenImage/CGDisplay）、
+  makeLiveCover、live-cover 分支、gpuTextureRetry 纹理交换、cover shader 整段与
+  cover 管线、setCoverMode、coverStyle/liveCoverStyle getter、captureCardForAssembly/
+  captureCardCheap/collectSceneViews/captureAppContent 死函数。
+- 保留共用部分：imageIsBlank（消散快照仍在用）、cachedCardSnapshotForView、
+  sandTexture/bgTexture、classic shader 的 openMode=2（休眠）、密度/消散收尾等。
+- 面板与运行时行为零变化（两个存活样式不经过任何被删代码路径）；净删约 1300 行。
+- CI 断言同步清理 23 条引用已删代码的断言。
+
 beautify.211 变更（方案B：撤面板 hook，方向行改 ⓘ 说明弹窗）：
 - 撤下 .209/.210 的面板置灰 hook（axs_pref_* 全部：layoutSubviews 替换、懒安装重试、
   通知回调、%ctor 调用）——用户选择不 hook 面板。
