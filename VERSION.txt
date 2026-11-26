@@ -1,3 +1,13 @@
+beautify.226 变更（光晕亮度提升）：
+- 用户反馈光晕颜色不够亮。亮度链路：面板 splitBeautifyGlowBrightness 0–100，
+  默认 100 → 系数 1.0（已是滑块上限）；真正压暗的是 applyGlow 的基础 opacity
+  和大范围衰减：innerOp=0.35*scale*bright、outerOp=0.14*scale*bright，
+  scale 在 range>116 时最多砍到 0.65，范围 200 时有效 opacity 仅 0.23/0.09。
+- 修复 1：基础 opacity inner 0.35→0.50、outer 0.14→0.24（+43%/+71%）。
+- 修复 2：大范围衰减系数 0.35→0.18（下限 0.6→0.8），范围 200 时 scale=0.82，
+  有效 opacity≈0.41/0.20——明显更亮，但仍低于 1.0，不会爆白。
+- 不改面板参数/色相/模糊半径，亮度滑块仍按原比例缩放。
+
 beautify.225 变更（修复光晕直角边）：
 - 根因：光晕两层 CAShapeLayer 投圆角阴影，但 mask 外框用 bezierPathWithRect(方形)，
   阴影在窗口圆角外侧扩散时被方角外框硬切 → 四条边露出直角边（范围拉到 200 时

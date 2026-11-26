@@ -1053,10 +1053,12 @@ static CAShapeLayer *axs_ring_makeGlowLayer(NSString *name) {
     return glow;
 }
 
-// 大半径降低不透明度，防止亮部爆白/爆色（116 默认 1.0，200 约 0.65）。
+// 大半径只做轻微衰减，避免亮部爆白同时保留色彩（116 默认 1.0，200 约 0.82）。
+// beautify.226：旧衰减 0.35 让范围拉到 200 时光晕暗到 0.65 倍，用户反馈"颜色不够亮"；
+// 收敛到 0.18，大范围也明显更亮，配合下面基础 opacity 提升。
 static CGFloat axs_ring_glowOpacityScale(double range) {
     if (range <= 116.0) return 1.0;
-    return (CGFloat)axs_ring_clamp(1.0 - (range - 116.0) / 84.0 * 0.35, 0.6, 1.0);
+    return (CGFloat)axs_ring_clamp(1.0 - (range - 116.0) / 84.0 * 0.18, 0.8, 1.0);
 }
 
 // 用窗口矩形 + 圆角 + 外扩余量，配置一层柔光的 frame / shadowPath / mask / 颜色。
@@ -1135,8 +1137,12 @@ static void axs_ring_applyGlow(AXSRingLinkDriver *driver, CGRect bounds,
     CGFloat scale = axs_ring_glowOpacityScale(range);
     CGFloat bright = axs_ring_glowBrightnessFactor();            // 亮度系数（不改 blur/色相）
     UIColor *color = axs_ring_glowColor();
-    CGFloat innerOp = 0.35 * scale * bright;
-    CGFloat outerOp = 0.14 * scale * bright;
+    // beautify.226：提高基础不透明度，让光晕颜色更亮更显色。
+    // 旧值 inner=0.35 / outer=0.14 在大 blur 下撑不起颜色，用户反馈偏暗。
+    // 新值 inner=0.50 / outer=0.24（+43% / +71%），范围 200 时 scale=0.82，
+    // 有效 inner≈0.41 / outer≈0.20，仍低于 1.0 不会爆白。
+    CGFloat innerOp = 0.50 * scale * bright;
+    CGFloat outerOp = 0.24 * scale * bright;
 
     // beautify.42：几何/颜色/参数缓存比对——全未变则跳过整帧光晕重建
     // （shadowPath 只在 bounds/圆角变化时重建，颜色/blur/opacity 只在
