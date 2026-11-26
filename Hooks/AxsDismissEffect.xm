@@ -1318,27 +1318,9 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         axs_open_interceptUntil = 0;
         @try {
             card.alpha = 1.0;
-            if (useCover) {
-                // .188: unhide through the ORIGINAL IMP so our hook does not
-                // re-enter; the card sits visible beneath the cover overlay.
-                if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                    ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
-                } else if (axs_open_orig_setHidden == (IMP)1) {
-                    struct objc_super sup = { (id)card, class_getSuperclass(object_getClass(card)) };
-                    ((void (*)(struct objc_super *, SEL, BOOL))objc_msgSendSuper)(&sup, @selector(setHidden:), NO);
-                }
-                axs_open_revealLive = YES;
-            } else if (realReveal) {
-                // .196: the REAL window is the content -- keep it visible the
-                // whole time; the mask hides it until each cell opens.
-                axs_open_revealLive = YES;
-            } else {
-                if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                    ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
-                } else {
-                    card.hidden = YES;
-                }
-            }
+            // .208: only live-reveal styles remain -- the card stays visible
+            // the whole time; the mask hides it until each cell opens.
+            axs_open_revealLive = YES;
         } @catch (NSException *ignored) { }
         // .196: start the reveal mask on the renderer's EXACT clock so each
         // cell opens precisely when its dust grain lands.
@@ -1375,8 +1357,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         });
         // Release the in-flight guard partway through so a genuine re-open can
         // still self-heal, and do the final safety sweep at overlay dissolve.
-        // .195: own weak capture -- weakCardTex is scoped inside the
-        // !useCover block (only the wallpaper cover skips the swap).
+        // .195: own weak capture.
         __weak UIView *weakCardGuard = card;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(duration * 0.55 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
