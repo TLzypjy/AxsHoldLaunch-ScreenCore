@@ -1,3 +1,11 @@
+beautify.211 变更（方案B：撤面板 hook，方向行改 ⓘ 说明弹窗）：
+- 撤下 .209/.210 的面板置灰 hook（axs_pref_* 全部：layoutSubviews 替换、懒安装重试、
+  通知回调、%ctor 调用）——用户选择不 hook 面板。
+- 方向行自带蓝色 ⓘ（infoTitle/infoMessage 机制，与样式行同款），说明文字更新为联动
+  语义：「方向仅粒子聚合生效；冲击波召唤固定从爆点径向显现，此选项不生效」。
+- 运行时闸门不变：冲击波召唤下方向设置自动被忽略（强制径向）。
+
+
 beautify.210 变更（修复方向行置灰不生效）：
 - 根因（三重兜底修复）：①SCMenuSelectionCell 非 PSTableCell 体系，valueForKey:@"specifier"
   可能直接抛异常被吞——主识别改为行内本地化标题匹配（BEAUTIFY_OPEN_DIRECTION，深 4 层
