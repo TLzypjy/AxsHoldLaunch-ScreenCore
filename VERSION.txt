@@ -1,3 +1,10 @@
+beautify.213 变更（呼出显现方向行加蓝色 ⓘ）：
+- 菜单选择 cell（SCMenuSelectionCell）不渲染 infoTitle/infoMessage 的标准 ⓘ 附件
+  （开关 cell 才渲染）——呼出显现方向行因此在 .211 里看不到 ⓘ。
+- 修复：在既有的面板 cellForRow hook 中，为方向行设置
+  accessoryType=DetailDisclosureButton（蓝色 ⓘ）；点击走 PSListController 自带的
+  infoTitle/infoMessage 弹窗（文案已在 strings 里，中英皆有）。无新增 hook。
+
 beautify.212 变更（死代码清理：移除已删呼出样式的底层实现）：
 - 移除 壁纸擦除/实景擦除/经典聚合 的不可达底层代码：四条截屏策略簇
   （captureWallpaper/offscreenRender/largestSnapCGImage/UIGetScreenImage/CGDisplay）、

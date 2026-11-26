@@ -880,6 +880,15 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
             axs_ring_page_applyUnifiedFontDeep(cell);
         }
 
+        // .213: menu-selection cells (SCMenuSelectionCell) do not render the
+        // standard info accessory for specifiers carrying infoTitle/infoMessage
+        // (switch cells do). Give the reveal-direction row the blue detail-
+        // disclosure accessory; tapping it fires the list controller's own
+        // info popup with the spec's localized infoTitle/infoMessage.
+        if ([key isEqualToString:@"splitBeautifyOpenDirection"] && cell != nil) {
+            cell.accessoryType = UITableViewCellAccessoryDetailDisclosureButton;
+        }
+
         if ([key isEqualToString:AxsHoldLaunchKeyExclude]) {
             NSString *subtitle = axs_ringPage_subtitle_imp(self, _cmd, spec);
             if (subtitle != nil && cell.detailTextLabel != nil) {
