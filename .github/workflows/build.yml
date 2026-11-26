@@ -619,7 +619,7 @@ jobs:
           grep -Fq "static void axs_showDirectionInfo_imp(id self, SEL _cmd, id sender)" Hooks/AxsHoldLaunchMain.xm || { echo "direction info action missing"; exit 1; }
           grep -Fq "axs_showDirectionInfo:" Hooks/AxsHoldLaunchMain.xm || { echo "direction info action reg missing"; exit 1; }
           grep -Fq "infoBtn.tag = 0x213;" Hooks/AxsHoldLaunchMain.xm || { echo "direction info button missing"; exit 1; }
-          grep -Fq "sizeWithAttributes:@{\"NSFontAttributeName\": valueLabel.font}" Hooks/AxsHoldLaunchMain.xm || { echo "direction info text-width anchor missing"; exit 1; }
+          grep -Fq "valueLabel.font}].width;" Hooks/AxsHoldLaunchMain.xm || { echo "direction info text-width anchor missing"; exit 1; }
           echo "=== beautify.218 direction-row grey-out check ==="
           echo "=== beautify.218 shockwave + jelly check ==="
           grep -Fq "static void axs_open_playShockwave(UIWindow *win, CGPoint point)" Hooks/AxsDismissEffect.xm || { echo "shockwave helper missing"; exit 1; }
