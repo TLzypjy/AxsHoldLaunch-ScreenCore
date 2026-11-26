@@ -915,14 +915,28 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
             @try {
                 NSMutableArray *labels = [NSMutableArray array];
                 axs_holdlaunch_collectLabels(cell, labels);
+                // .220: ONLY consider labels whose converted frame lands
+                // INSIDE this row -- the recursive scan also sees labels from
+                // neighbouring rows (the table reuses cells), which placed
+                // the (i) above/below the row in .219.
+                CGFloat rowH = rowContent.bounds.size.height;
+                CGFloat rowW = rowContent.bounds.size.width;
                 UILabel *vl = nil;
+                CGFloat bestX = -1.0;
+                CGRect bestFr = CGRectZero;
                 for (UILabel *l in labels) {
-                    if (vl == nil || l.frame.origin.x > vl.frame.origin.x) vl = l;
+                    CGRect fr = [l convertRect:l.bounds toView:rowContent];
+                    if (fr.origin.y < -2.0 || fr.origin.y > rowH - 10.0) continue;
+                    if (fr.origin.x < 10.0 || fr.origin.x > rowW - 20.0) continue;
+                    if (fr.origin.x > bestX) {
+                        bestX = fr.origin.x;
+                        bestFr = fr;
+                        vl = l;
+                    }
                 }
                 if ([vl isKindOfClass:[UILabel class]]) {
-                    CGRect fr = [vl convertRect:vl.bounds toView:rowContent];
-                    bx = fr.origin.x - 34.0;
-                    by = fr.origin.y + fr.size.height / 2.0 - 15.0;
+                    bx = bestFr.origin.x - 34.0;
+                    by = bestFr.origin.y + bestFr.size.height / 2.0 - 15.0;
                     if (bx < 40.0) bx = 40.0;
                 }
             } @catch (NSException *ignored) { }
