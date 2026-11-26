@@ -759,7 +759,7 @@ static uint32_t axs_open_directionMode(void) {
             id value = imp(cfg, sel, @"splitBeautifyOpenDirection", @0);
             if ([value isKindOfClass:[NSNumber class]]) mode = (uint32_t)[value integerValue];
         }
-        if (mode > 4) mode = 0;
+        if (mode > 5) mode = 0;
     } @catch (NSException *ignored) {
         mode = 0;
     }
@@ -877,6 +877,7 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
             else if (self.dirMode == 1u) orderBase = (ux + uy) * 0.5f;
             else if (self.dirMode == 2u) orderBase = ((1.0f - ux) + uy) * 0.5f;
             else if (self.dirMode == 3u) orderBase = (ux + (1.0f - uy)) * 0.5f;
+            else if (self.dirMode == 5u) orderBase = 1.0f - uy;
             else orderBase = ((1.0f - ux) + (1.0f - uy)) * 0.5f;
             CGFloat order = 0.96f * orderBase + 0.04f * hf;
             CGFloat arrival = 0.35f + 0.65f * order;
