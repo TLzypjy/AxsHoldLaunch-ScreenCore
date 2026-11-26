@@ -2564,6 +2564,61 @@ static void axs_dm_installAll(void) {
     axs_open_installAll();
 }
 
+// .209: prefs panel -- grey out the reveal-direction row unless the style is
+// particle assembly (0). The panel lives in SpringBoard (same process as this
+// tweak); the SCMenuSelectionCell class loads only when the user opens the
+// panel, so the hook installs lazily with retries. Runtime already ignores
+// the stored direction for style 1; this is the matching UI hint.
+static IMP axs_pref_orig_layoutSubviews = NULL;
+static __weak UITableViewCell *axs_pref_dirCell = nil;
+static void axs_pref_saved_cb(CFNotificationCenterRef center, void *observer,
+                              CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UITableViewCell *cell = axs_pref_dirCell;
+        if (cell != nil) [cell setNeedsLayout];
+    });
+}
+static void axs_pref_layoutSubviews(id self, SEL _cmd) {
+    if (axs_pref_orig_layoutSubviews) axs_pref_orig_layoutSubviews(self, _cmd);
+    @try {
+        id spec = nil;
+        @try { spec = [(id)self valueForKey:@"specifier"]; } @catch (NSException *ignored) { }
+        if (spec == nil) return;
+        id key = nil;
+        @try { key = [spec valueForKey:@"key"]; } @catch (NSException *ignored) { }
+        if (![key isKindOfClass:[NSString class]]) return;
+        if (![key isEqualToString:@"splitBeautifyOpenDirection"]) return;
+        BOOL allowed = !axs_open_shockwaveStyle();
+        [(id)self setUserInteractionEnabled:allowed];
+        UIView *cv = [(id)self valueForKey:@"contentView"];
+        if (cv != nil) cv.alpha = allowed ? 1.0 : 0.35;
+        axs_pref_dirCell = (UITableViewCell *)self;
+    } @catch (NSException *ignored) { }
+}
+static void axs_pref_installCellHook(void) {
+    if (axs_pref_orig_layoutSubviews != NULL) return;
+    Class cls = objc_getClass("SCMenuSelectionCell");
+    if (cls == nil) return;
+    Method m = class_getInstanceMethod(cls, @selector(layoutSubviews));
+    if (m == nil) return;
+    MSHookMessageEx(cls, @selector(layoutSubviews), (IMP)axs_pref_layoutSubviews,
+                    (IMP *)&axs_pref_orig_layoutSubviews);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    NULL,
+                                    &axs_pref_saved_cb,
+                                    CFSTR("com.susudear.screencoreprefs/saved"),
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+    axs_dm_log(@"INSTALL SCMenuSelectionCell layoutSubviews HOOKED");
+}
+static void axs_pref_retryInstall(NSInteger tries) {
+    if (axs_pref_orig_layoutSubviews != NULL || tries <= 0) return;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        axs_pref_installCellHook();
+        axs_pref_retryInstall(tries - 1);
+    });
+}
 %ctor {
     @autoreleasepool {
         if (objc_getClass("SpringBoard") == nil) return;
@@ -2573,5 +2628,9 @@ static void axs_dm_installAll(void) {
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ axs_dm_installAll(); });
+        // .209: prefs panel direction-row grey-out hook (lazy, retried until
+        // the user opens the panel and the cell class loads; caps at 1h).
+        axs_pref_installCellHook();
+        axs_pref_retryInstall(720);
     }
 }
