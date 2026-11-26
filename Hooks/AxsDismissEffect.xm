@@ -2579,7 +2579,7 @@ static void axs_pref_saved_cb(CFNotificationCenterRef center, void *observer,
     });
 }
 static void axs_pref_layoutSubviews(id self, SEL _cmd) {
-    if (axs_pref_orig_layoutSubviews) axs_pref_orig_layoutSubviews(self, _cmd);
+    if (axs_pref_orig_layoutSubviews) ((void (*)(id, SEL))axs_pref_orig_layoutSubviews)(self, _cmd);
     @try {
         id spec = nil;
         @try { spec = [(id)self valueForKey:@"specifier"]; } @catch (NSException *ignored) { }
