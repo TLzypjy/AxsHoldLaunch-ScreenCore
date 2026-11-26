@@ -1,3 +1,11 @@
+beautify.227 变更（亮度上限 200%，面板仍 0–100）：
+- 用户要求：面板显示保持 0–100，但内部亮度上限加到 200。
+- 实现：axs_ring_glowBrightnessFactor 从 brightness/100 改为 brightness/100*2.0。
+  面板拉到 100 → 系数 2.0（200%）；配合 .226 的 base opacity，默认即满亮度。
+- 面板 plist（splitBeautifyGlowBrightness max=100/default=100）不改，色相/模糊半径不改；
+  仅缩放 shadowOpacity/fillAlpha。innerOp 峰值 = 0.50*1.0*2.0 = 1.0（shadowOpacity 上限），
+  outerOp 峰值 = 0.24*1.0*2.0 = 0.48，均不越界。
+
 beautify.226 变更（光晕亮度提升）：
 - 用户反馈光晕颜色不够亮。亮度链路：面板 splitBeautifyGlowBrightness 0–100，
   默认 100 → 系数 1.0（已是滑块上限）；真正压暗的是 applyGlow 的基础 opacity

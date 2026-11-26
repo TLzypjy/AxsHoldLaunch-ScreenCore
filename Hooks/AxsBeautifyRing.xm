@@ -782,6 +782,8 @@ static double axs_ring_glowRange(void) {
 }
 
 // beautify.32 光晕亮度：面板 0–100，默认 100 → 系数 0.0–1.0。
+// beautify.227：面板显示仍为 0–100（plist 不动），但内部系数上限放大到 200%：
+// 面板 100 → factor 2.0，配合 .226 基础 opacity，默认即达满亮度。
 // 只缩放光晕不透明度/alpha，不改色相、范围、模糊半径或光圈描边。
 static double axs_ring_glowBrightness(void) {
     // beautify.42：读快照
@@ -790,7 +792,7 @@ static double axs_ring_glowBrightness(void) {
 }
 
 static CGFloat axs_ring_glowBrightnessFactor(void) {
-    return (CGFloat)(axs_ring_glowBrightness() / 100.0);
+    return (CGFloat)(axs_ring_glowBrightness() / 100.0 * 2.0);
 }
 
 // --- 跑马灯：conic 闭环取色 + 渐变层线性旋转（TXT beautify.24 三.3.A） --------
