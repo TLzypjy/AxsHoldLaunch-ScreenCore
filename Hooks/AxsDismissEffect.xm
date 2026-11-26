@@ -1288,7 +1288,13 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         uint32_t openDir = axs_open_directionMode();
         if (axs_open_shockwaveStyle()) openDir = 6u;
         axs_msd_setDirectionMode(openDir);
-        void *renderer = axs_metalAssemblePlayRet(tex, frame, duration, density, sourcePoint);
+        // .216: dirMode 6 now expands from the CARD CENTER outward (user
+        // request) instead of from the touch point -- feed the geometric
+        // center as the radial source to both the dust clock and the mask
+        // driver; the distance normalization is reused unchanged.
+        CGPoint radialSource = sourcePoint;
+        if (openDir == 6u) radialSource = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+        void *renderer = axs_metalAssemblePlayRet(tex, frame, duration, density, radialSource);
         if (renderer == NULL) {
             axs_open_assembleInFlight = NO;
             axs_open_armSelfRestore();
@@ -1332,7 +1338,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                     duration:duration frame:frame density:density
                      radius:revealRadius
                     dirMode:openDir
-                      source:sourcePoint];
+                      source:radialSource];
             objc_setAssociatedObject(card, &axs_open_wipeDriverKey, drv,
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             axs_dm_log(@"OPEN real reveal mask armed %lux%lu duration=%.2f",
