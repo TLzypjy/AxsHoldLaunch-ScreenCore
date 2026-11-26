@@ -1,3 +1,12 @@
+beautify.210 变更（修复方向行置灰不生效）：
+- 根因（三重兜底修复）：①SCMenuSelectionCell 非 PSTableCell 体系，valueForKey:@"specifier"
+  可能直接抛异常被吞——主识别改为行内本地化标题匹配（BEAUTIFY_OPEN_DIRECTION，深 4 层
+  递归找 UILabel），spec key 仅作兜底；②改读面板自己的 defaults 域
+  com.susudear.screencoreprefs/splitBeautifyOpenStyle（保存即写、布局时即读，无桥接同步
+  延迟），allowed=!(sv==1||sv==4)；③置灰同时作用 cell.alpha/contentView.alpha/
+  textLabel.alpha，状态切换写日志 PREFS direction row gate。
+
+
 beautify.209 变更（方向选项联动 + 改名粒子聚合）：
 - 「呼出显现方向」仅在呼出动画样式=粒子聚合（值0）时可选；选冲击波召唤（值1）时该行
   置灰（userInteractionEnabled=NO + 35% 透明度），切换后通过面板保存通知实时刷新。

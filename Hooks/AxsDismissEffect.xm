@@ -2578,20 +2578,69 @@ static void axs_pref_saved_cb(CFNotificationCenterRef center, void *observer,
         if (cell != nil) [cell setNeedsLayout];
     });
 }
+static NSString *axs_pref_firstLabel(UIView *v, NSInteger depth) {
+    if (depth > 4) return nil;
+    for (UIView *sv in [v subviews]) {
+        if ([sv isKindOfClass:[UILabel class]]) {
+            NSString *t = [(UILabel *)sv text];
+            if ([t isKindOfClass:[NSString class]] && t.length > 0) return t;
+        }
+        NSString *deep = axs_pref_firstLabel(sv, depth + 1);
+        if (deep != nil) return deep;
+    }
+    return nil;
+}
 static void axs_pref_layoutSubviews(id self, SEL _cmd) {
     if (axs_pref_orig_layoutSubviews) ((void (*)(id, SEL))axs_pref_orig_layoutSubviews)(self, _cmd);
     @try {
-        id spec = nil;
-        @try { spec = [(id)self valueForKey:@"specifier"]; } @catch (NSException *ignored) { }
-        if (spec == nil) return;
-        id key = nil;
-        @try { key = [spec valueForKey:@"key"]; } @catch (NSException *ignored) { }
-        if (![key isKindOfClass:[NSString class]]) return;
-        if (![key isEqualToString:@"splitBeautifyOpenDirection"]) return;
-        BOOL allowed = !axs_open_shockwaveStyle();
+        // .210: identify the direction row WITHOUT relying on a specifier
+        // property (SCMenuSelectionCell is not part of the PS cell family, so
+        // valueForKey:@"specifier" may throw). Primary signal = the row's
+        // displayed localized title; fallback = the spec key.
+        BOOL isDirRow = NO;
+        NSString *dirTitle = nil;
+        @try {
+            NSBundle *pb = [NSBundle bundleForClass:NSClassFromString(@"SCMenuSelectionCell")];
+            if (pb != nil) dirTitle = [pb localizedStringForKey:@"BEAUTIFY_OPEN_DIRECTION" value:nil table:@"SplitSettings"];
+        } @catch (NSException *ignored) { }
+        if ([dirTitle isKindOfClass:[NSString class]] && dirTitle.length > 0) {
+            NSString *rowText = [(UITableViewCell *)self textLabel].text;
+            if (![rowText isKindOfClass:[NSString class]] || rowText.length == 0) {
+                rowText = axs_pref_firstLabel((UIView *)self, 0);
+            }
+            if ([rowText isEqualToString:dirTitle]) isDirRow = YES;
+        }
+        if (!isDirRow) {
+            id spec = nil;
+            @try { spec = [(id)self valueForKey:@"specifier"]; } @catch (NSException *ignored) { }
+            if (spec != nil) {
+                id key = nil;
+                @try { key = [spec valueForKey:@"key"]; } @catch (NSException *ignored) { }
+                if ([key isKindOfClass:[NSString class]] && [key isEqualToString:@"splitBeautifyOpenDirection"]) isDirRow = YES;
+            }
+        }
+        if (!isDirRow) return;
+        // .210: read the panel's OWN defaults domain directly -- the value is
+        // fresh at layout time, unlike the runtime config bridge (which syncs
+        // asynchronously and read stale values on the saved notification).
+        NSInteger sv = 0;
+        @try {
+            NSUserDefaults *pd = [[NSUserDefaults alloc] initWithSuiteName:@"com.susudear.screencoreprefs"];
+            sv = [pd integerForKey:@"splitBeautifyOpenStyle"];
+        } @catch (NSException *ignored) { }
+        BOOL allowed = !(sv == 1 || sv == 4);
+        static NSInteger lastLogged = -999;
+        NSInteger nowLogged = allowed ? 1 : 0;
+        if (nowLogged != lastLogged) {
+            lastLogged = nowLogged;
+            axs_dm_log(@"PREFS direction row gate: panelStyle=%ld allowed=%d", (long)sv, allowed ? 1 : 0);
+        }
         [(id)self setUserInteractionEnabled:allowed];
-        UIView *cv = [(id)self valueForKey:@"contentView"];
+        UIView *cv = [(UIView *)self valueForKey:@"contentView"];
         if (cv != nil) cv.alpha = allowed ? 1.0 : 0.35;
+        UILabel *tl = [(UITableViewCell *)self textLabel];
+        if (tl != nil) tl.alpha = allowed ? 1.0 : 0.35;
+        [(UIView *)self setAlpha:allowed ? 1.0 : 0.35];
         axs_pref_dirCell = (UITableViewCell *)self;
     } @catch (NSException *ignored) { }
 }
