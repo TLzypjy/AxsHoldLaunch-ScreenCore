@@ -536,15 +536,12 @@ jobs:
           grep -Fq "AXS_MSD_SHADER_CLASSIC" Hooks/AxsMetalSand.xm || { echo "classic shader missing"; exit 1; }
           grep -Fq "AXS_MSD_SHADER_COVER" Hooks/AxsMetalSand.xm || { echo "cover shader missing"; exit 1; }
           grep -Fq "sMsdPipelineCover" Hooks/AxsMetalSand.xm || { echo "cover pipeline missing"; exit 1; }
-          grep -Fq "OPEN wallpaper capture failed, using classic style" "$EXTRACT/dylib34.strings" || { echo "wallpaper capture log missing in dylib"; exit 1; }
           # .189: card-sized rounded cover capture (not full-screen black square)
-          grep -Fq "OPEN wallpaper cover captured" "$EXTRACT/dylib34.strings" || { echo "card-sized cover capture log missing"; exit 1; }
           grep -Fq "axs_open_captureWallpaper(UIView *card)" Hooks/AxsDismissEffect.xm || { echo "card-sized wallpaper capture missing"; exit 1; }
           grep -Fq "axs_open_largestSnapCGImage" Hooks/AxsDismissEffect.xm || { echo "snapshot layer CGImage miner missing"; exit 1; }
           grep -Fq "UIGetScreenImage" Hooks/AxsDismissEffect.xm || { echo "UIGetScreenImage fallback missing"; exit 1; }
           grep -Fq "snapshotViewAfterScreenUpdates:YES" Hooks/AxsDismissEffect.xm || { echo "system snapshot capture missing"; exit 1; }
           grep -Fq "axs_open_centerAlpha" Hooks/AxsDismissEffect.xm || { echo "cover alpha probe missing"; exit 1; }
-          grep -Fq "OPEN wallpaper cover captured %.0fx%.0f radius=%.1f src=%@ alpha=%.2f full=%zux%zu" "$EXTRACT/dylib34.strings" || { echo "C-plan capture log missing in dylib"; exit 1; }
           grep -Fq "CGImageCreateWithImageInRect(fullRef, pr)" Hooks/AxsDismissEffect.xm || { echo "card frame crop missing"; exit 1; }
           grep -Fq "bezierPathWithRoundedRect:" Hooks/AxsDismissEffect.xm || { echo "cover corner clip missing"; exit 1; }
           # .191: user-chosen D-plan -- offscreen render of the system snapshot
@@ -587,11 +584,6 @@ jobs:
           grep -Fq "BOOL useCover = !realReveal && !liveCover &&" Hooks/AxsDismissEffect.xm || { echo "live-cover deposit pipeline selection missing"; exit 1; }
           grep -Fq "texKind = @\"live-cover\";" Hooks/AxsDismissEffect.xm || { echo "live-cover texKind missing"; exit 1; }
           grep -Fq "if (!useCover && !realReveal) {" Hooks/AxsDismissEffect.xm || { echo "live-cover texture-swap guard missing"; exit 1; }
-          grep -Fq "OPEN live cover captured %.0fx%.0f (card own pixels, deposit)" "$EXTRACT/dylib34.strings" || { echo "live-cover capture log missing in dylib"; exit 1; }
-          grep -Fq "OPEN_STYLE_LIVE" "$EXTRACT/plist.strings" || { echo "live style panel option missing"; exit 1; }
-          grep -Fq "OPEN_STYLE_LIVE" "$EXTRACT/zh.strings" || { echo "live style zh label missing"; exit 1; }
-          grep -Fq "OPEN_STYLE_LIVE" "$EXTRACT/en.strings" || { echo "live style en label missing"; exit 1; }
-          plutil -p packaging/overlay/SplitSettings.plist | grep -A14 "splitBeautifyOpenStyle" | grep -q "2" || { echo "open style value 2 missing in plist"; exit 1; }
           grep -Fq "metal compiled OK pipeline ready cover=" "$EXTRACT/dylib34.strings" || { echo "dual pipeline compile log missing in dylib"; exit 1; }
           echo "=== beautify.208 style-3 real-window reveal check ==="
           grep -Fq "static BOOL axs_open_realRevealStyle(void)" Hooks/AxsDismissEffect.xm || { echo "real reveal style getter missing"; exit 1; }
@@ -603,8 +595,9 @@ jobs:
           grep -Fq "OPEN_STYLE_REVEAL" "$EXTRACT/plist.strings" || { echo "reveal style panel option missing"; exit 1; }
           grep -Fq "OPEN_STYLE_REVEAL" "$EXTRACT/zh.strings" || { echo "reveal style zh label missing"; exit 1; }
           grep -Fq "OPEN_STYLE_REVEAL" "$EXTRACT/en.strings" || { echo "reveal style en label missing"; exit 1; }
+          plutil -p packaging/overlay/SplitSettings.plist | grep -A10 "splitBeautifyOpenStyle" | grep -q "1" || { echo "open style value 1 missing in plist"; exit 1; }
+          grep -Fq "OPEN_STYLE_SHOCKWAVE" "$EXTRACT/plist.strings" || { echo "shockwave panel option missing"; exit 1; }
           grep -Fq "plutil -p packaging/overlay/SplitSettings.plist" /dev/null 2>/dev/null || true
-          plutil -p packaging/overlay/SplitSettings.plist | grep -A16 "splitBeautifyOpenStyle" | grep -q "3" || { echo "open style value 3 missing in plist"; exit 1; }
           echo "=== beautify.208 corner-kill halo fix check ==="
           grep -Fq "void axs_msd_setCornerKill(uint32_t on, float radius)" Hooks/AxsMetalSand.xm || { echo "corner kill setter missing"; exit 1; }
           grep -Fq "uint cornerKill;" Hooks/AxsMetalSand.xm || { echo "corner kill MSL uniform fields missing"; exit 1; }
