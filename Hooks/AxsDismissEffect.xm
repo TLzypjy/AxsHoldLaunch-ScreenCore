@@ -29,6 +29,7 @@ void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat dura
                                CGFloat density, CGPoint sourcePoint);
 // .188: choose which compiled shader pipeline the open pass uses.
 void axs_msd_setCoverMode(BOOL on);
+void axs_msd_setCornerKill(uint32_t on, float radius);
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
 // .155: exact shared clock of the running open renderer.
 CFTimeInterval axs_metalAssembleStartTime(void *renderer);
@@ -1627,6 +1628,16 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // .188: arm the chosen shader pipeline BEFORE the first draw (the
         // Metal pipeline is compiled lazily on first render).
         axs_msd_setCoverMode(useCover);   // .196: realReveal -> NO (dust only)
+        // .197: style 3 also kills grains landing outside the rounded corners
+        // (square-corner halo). Other styles pass 0 => shader unchanged.
+        if (realReveal) {
+            CGFloat rr = axs_dm_cornerRadiusForView(card);
+            if (rr < 1.0) rr = 40.0;
+            axs_msd_setCornerKill(1u, (float)rr);
+            axs_dm_log(@"OPEN real reveal corner kill armed radius=%.1f", rr);
+        } else {
+            axs_msd_setCornerKill(0u, 0.0f);
+        }
         void *renderer = axs_metalAssemblePlayRet(tex, frame, duration, density, sourcePoint);
         if (renderer == NULL) {
             axs_open_assembleInFlight = NO;

@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.196"
+VERSION="2.0.5+beautify.197"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -99,12 +99,12 @@ check "dylib has no sc_sessionDidBeginHosting selector" sh -c "test \$(strings -
 # beautify.97+: the dismiss-particle module hooks sc_closeSession: via
 # NSSelectorFromString (original behaviour untouched), so the old reverse
 # "no sc_closeSession selector" assertion is intentionally replaced.
-check "dylib has dismiss module load log (beautify.196)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
+check "dylib has dismiss module load log (beautify.197)" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DME module loaded in SpringBoard'"
 check "dylib has dismiss log path" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'Documents/sc-dismiss-effect.log'"
 check "dylib has dismiss switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissAnimEnabled'"
 check "dylib has dismiss emit gpu log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'emit: gpu engine active'"
 check "dylib has dismiss style key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissStyle'"
-# beautify.196: unified GPU engine for all styles (no CPU layer path anymore)
+# beautify.197: unified GPU engine for all styles (no CPU layer path anymore)
 check "dylib has dismiss density key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissDensity'"
 check "dylib has no UIView CPU emit path" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'CGImageCreateWithImageInRect') -eq 0"
 # beautify.106/.107: Metal command queue fix (buffer comes from the queue)
@@ -112,14 +112,14 @@ check "dylib has Metal cleanup log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.
 # beautify.104: GPU Metal fine-sand engine markers
 check "dylib has Metal shader compile log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal compiled OK pipeline ready'"
 check "dylib has Metal unified start log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal started open='"
-# beautify.196: ARC-open assemble animation markers
+# beautify.197: ARC-open assemble animation markers
 check "dylib has open assemble entry" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'OPEN assemble started'"
 check "dylib has open switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyOpenAnimEnabled'"
 check "dylib has finger-source assemble" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'OPEN assemble started duration'"
 check "dylib has sendEvent tracking" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'OPEN INSTALL sendEvent'"
 check "dylib has native animation replaced log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'OPEN native animation replaced'"
 check "dylib has open hook install log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'OPEN INSTALL'"
-# beautify.196: reference-plugin selector that actually exists on the device
+# beautify.197: reference-plugin selector that actually exists on the device
 check "dylib has Metal commandBuffer selector" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'commandBuffer'"
 # beautify.95: sc_* selectors are now probed for EXISTENCE only (NSSelectorFromString
 # + class_getInstanceMethod in axs_ring_probeNativeChainOnce), never hooked. Assert the

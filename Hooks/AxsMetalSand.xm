@@ -86,6 +86,8 @@ struct DustUniforms {\n\
     uint openMode;\n\
     float sourceX;\n\
     float sourceY;\n\
+    uint cornerKill;\n\
+    float cornerRadius;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -133,6 +135,14 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
         float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
         float2 landing = (cell + 0.5 + jitter)/grid;\n\
+        float kill = 1.0;\n\
+        if (u.cornerKill != 0u) {\n\
+            float2 pl = landing*u.cardSize;\n\
+            float2 hcs = u.cardSize*0.5;\n\
+            float2 q = abs(pl-hcs)-(hcs-float2(u.cornerRadius,u.cornerRadius));\n\
+            float dOut = length(max(q,float2(0.0)))+min(max(q.x,q.y),0.0);\n\
+            kill = 1.0 - smoothstep(-2.0,2.0,dOut);\n\
+        }\n\
         float2 finger = float2(u.sourceX, u.sourceY);\n\
         float ang = r*6.2831853;\n\
         float2 start = finger + float2(cos(ang), sin(ang))*(9.0 + 48.0*r4);\n\
@@ -153,7 +163,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
         outO.uv=unit;\n\
         outO.local=corner;\n\
-        outO.fade=born*gone;\n\
+        outO.fade=born*gone*kill;\n\
         outO.breakage=0.0;\n\
         outO.dock=t;\n\
         outO.tint=axsPalette(r + hf*0.15);\n\
@@ -330,6 +340,8 @@ struct DustUniforms {\n\
     uint openMode;\n\
     float sourceX;\n\
     float sourceY;\n\
+    uint cornerKill;\n\
+    float cornerRadius;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -377,6 +389,14 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
         float2 jitter = (float2(float((h>>16)&255u), float((h>>24)&255u))/255.0 - 0.5)*0.36;\n\
         float2 landing = (cell + 0.5 + jitter)/grid;\n\
+        float kill = 1.0;\n\
+        if (u.cornerKill != 0u) {\n\
+            float2 pl = landing*u.cardSize;\n\
+            float2 hcs = u.cardSize*0.5;\n\
+            float2 q = abs(pl-hcs)-(hcs-float2(u.cornerRadius,u.cornerRadius));\n\
+            float dOut = length(max(q,float2(0.0)))+min(max(q.x,q.y),0.0);\n\
+            kill = 1.0 - smoothstep(-2.0,2.0,dOut);\n\
+        }\n\
         float2 tile = u.cardSize/grid;\n\
         float dock = smoothstep(arrival - 0.03, arrival - 0.004, u.time);\n\
         float2 finger = float2(u.sourceX, u.sourceY);\n\
@@ -398,7 +418,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outO.position=float4(2.0*pos.x/u.viewport.x-1.0,1.0-2.0*pos.y/u.viewport.y,0,1);\n\
         outO.uv=landing;\n\
         outO.local=corner;\n\
-        outO.fade=born*(1.0-dock);\n\
+        outO.fade=born*(1.0-dock)*kill;\n\
         outO.breakage=0.0;\n\
         outO.dock=dock;\n\
         outO.tint=axsPalette(r + hf*0.15);\n\
@@ -569,6 +589,8 @@ typedef struct {
     uint32_t style;
     uint32_t openMode;
     float sourcePoint[2];
+    uint32_t cornerKill;
+    float cornerRadius;
 } AXSMetalDustUniforms;
 
 // ---- cached device + queue + pipeline (compiled once, reused) --------------
@@ -592,6 +614,13 @@ static id<MTLRenderPipelineState> sMsdPipelineCover = nil;
 static BOOL sMsdCoverMode = NO;   // 1 = wallpaper-cover style, 0 = classic .168
 void axs_msd_setCoverMode(BOOL on);   // called from AxsDismissEffect before assemble
 void axs_msd_setCoverMode(BOOL on) { sMsdCoverMode = on; }
+// .197: kill dust grains whose landing cell falls OUTSIDE the card's rounded
+// corners (square-corner halo). 0 = off (styles 0/1/2 unchanged); style 3
+// arms it with the live card's real corner radius.
+static uint32_t sMsdCornerKill = 0;
+static float sMsdCornerKillRadius = 0.0f;
+void axs_msd_setCornerKill(uint32_t on, float radius);
+void axs_msd_setCornerKill(uint32_t on, float radius) { sMsdCornerKill = on; sMsdCornerKillRadius = radius; }
 static BOOL sMsdTried = NO;
 
 static NSString *sMsdFailReason = nil;   // .114: survives log rotation
@@ -754,6 +783,8 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     u.openMode = openMode;
     u.sourcePoint[0] = (float)sourcePoint.x;
     u.sourcePoint[1] = (float)sourcePoint.y;
+    u.cornerKill = sMsdCornerKill;
+    u.cornerRadius = sMsdCornerKillRadius;
     // Grid = per-style base resolution scaled by the density slider.
     // Style 8 (sand) and open mode use the reference plugin's particle-count
     // model (14000 * density distributed by card aspect); the 8 grid styles

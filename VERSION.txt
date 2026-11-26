@@ -1,3 +1,12 @@
+beautify.197 变更（样式3圆角光晕修复：圆角外粒子杀灭）：
+- log77+视频确认样式3效果完美、无旧缓存；唯一残留：显现时浮窗四角有直角光晕。
+- 根因：金属粒子落点覆盖浮窗整个方形包围盒，圆角外的 4 个方角格子照常聚尘发光，
+  形成直角光晕；而浮窗本体是圆角的。
+- 修复：DustUniforms 新增 cornerKill/cornerRadius；openMode=1 顶点着色器对落点做
+  圆角 SDF 判定，圆角外的粒子 fade=0（整粒不出现）。默认关闭，样式 0/1/2 行为不变。
+- 样式3 呼出时用浮窗真实 layer 圆角半径（axs_dm_cornerRadiusForView）启用，
+  日志标记 OPEN real reveal corner kill armed radius=。
+
 beautify.196 变更（修复样式2黑块：沉积方向还原真实浮窗逐格显现）：
 - 样式2（splitBeautifyOpenStyle=2）不再把浮窗快照压暗成黑色剪影；黑块彻底移除。
 - 样式2 从 cover 擦除管线切回经典 deposit 管线：真浮窗全程隐藏、背景可见，粒子飞到的格子才画出真实浮窗像素，与参考插件一致。
