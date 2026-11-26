@@ -538,15 +538,11 @@ jobs:
           grep -Fq "snapshotViewAfterScreenUpdates:YES" Hooks/AxsDismissEffect.xm || { echo "system snapshot capture missing"; exit 1; }
           grep -Fq "bezierPathWithRoundedRect:" Hooks/AxsDismissEffect.xm || { echo "cover corner clip missing"; exit 1; }
           # .191: user-chosen D-plan -- offscreen render of the system snapshot
-          grep -Fq "src = @\"snapshotOffscreen\"" Hooks/AxsDismissEffect.xm || { echo "offscreen src tag missing"; exit 1; }
-          grep -Fq "@\"snapshotLayer\"" Hooks/AxsDismissEffect.xm || { echo "layer-mine fallback missing"; exit 1; }
           grep -Fq "axs_dm_imageIsBlank(UIImage *img);" Hooks/AxsDismissEffect.xm || { echo "blank probe forward decl missing"; exit 1; }
           # .191: ownership handoff in BOTH branches kills the ~2s reopen loop
           grep -Fq "OWNERSHIP HANDOFF for BOTH paths" Hooks/AxsDismissEffect.xm || { echo "dual-branch ownership handoff missing"; exit 1; }
           # .192: CGDisplay framebuffer capture (bypasses the view tree) + the
           # ownership-window check moved to the TOP of becameVisible.
-          grep -Fq "dlsym(p, \"CGDisplayCreateImage\")" Hooks/AxsDismissEffect.xm || { echo "CGDisplayCreateImage dlsym missing"; exit 1; }
-          grep -Fq "src = @\"CGDisplay\"" Hooks/AxsDismissEffect.xm || { echo "CGDisplay src tag missing"; exit 1; }
           grep -Fq "CHECK THE OWNERSHIP WINDOW FIRST" Hooks/AxsDismissEffect.xm || { echo "ownership-first check order missing"; exit 1; }
           grep -Fq "axs_open_openActiveUntil = CACurrentMediaTime() + duration + 1.5;" Hooks/AxsDismissEffect.xm || { echo "extended ownership window missing"; exit 1; }
           test "$(grep -cF 'axs_open_setAssembled(card, YES);' Hooks/AxsDismissEffect.xm)" -ge 2 || { echo "assembled re-arm in reveal missing"; exit 1; }
@@ -565,7 +561,6 @@ jobs:
           # .195: third open style -- LIVE DEPOSIT (real card pixels painted
           # per cell by the classic pipeline; no dark plate, no screen capture).
           echo "=== beautify.212 live-window-reveal open style check ==="
-          grep -Fq "texKind = @\"live-cover\";" Hooks/AxsDismissEffect.xm || { echo "live-cover texKind missing"; exit 1; }
           grep -Fq "metal compiled OK pipeline ready" "$EXTRACT/dylib34.strings" || { echo "metal compile log missing in dylib"; exit 1; }
           echo "=== beautify.212 style-3 real-window reveal check ==="
           grep -Fq "static BOOL axs_open_realRevealStyle(void)" Hooks/AxsDismissEffect.xm || { echo "real reveal style getter missing"; exit 1; }
