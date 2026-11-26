@@ -687,7 +687,7 @@ jobs:
           ! grep -Fq "b*b*b*src" Hooks/AxsMetalSand.xm || { echo "stale src-based pos line still present (redefinition)"; exit 1; }
           grep -Fq "float2 dustSize = float2(mix(1.15, 2.4, r3));" Hooks/AxsMetalSand.xm || { echo "fine dust size missing"; exit 1; }
           grep -Fq "float gone = 1.0 - step(arrival - 0.006, u.time);" Hooks/AxsMetalSand.xm || { echo "arrival delete gate missing"; exit 1; }
-          grep -Fq "outO.fade=born*gone;" Hooks/AxsMetalSand.xm || { echo "dust fade gate missing"; exit 1; }
+          grep -Fq "outO.fade=born*gone*kill;" Hooks/AxsMetalSand.xm || { echo "dust fade gate missing"; exit 1; }
           grep -Fq "outO.noiseX=r;" Hooks/AxsMetalSand.xm || { echo "dust noise output missing"; exit 1; }
           grep -Fq "out.isOpen=0.0;" Hooks/AxsMetalSand.xm || { echo "dismiss branch open flag reset missing"; exit 1; }
           grep -Fq "if (in.isOpen > 1.5) {" Hooks/AxsMetalSand.xm || { echo "fragment tile branch missing"; exit 1; }
