@@ -880,13 +880,34 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
             axs_ring_page_applyUnifiedFontDeep(cell);
         }
 
-        // .213: menu-selection cells (SCMenuSelectionCell) do not render the
-        // standard info accessory for specifiers carrying infoTitle/infoMessage
-        // (switch cells do). Give the reveal-direction row the blue detail-
-        // disclosure accessory; tapping it fires the list controller's own
-        // info popup with the spec's localized infoTitle/infoMessage.
+        // .214: menu-selection cells do not render info accessories, and the
+        // far-right system accessory slot reads as "after the value". Inject a
+        // blue (i) UIButton INTO the row, placed just before the selected-value
+        // label (mirroring the switch rows), with a controller-level action
+        // (axs_showDirectionInfo:) so the tap always responds.
         if ([key isEqualToString:@"splitBeautifyOpenDirection"] && cell != nil) {
-            cell.accessoryType = UITableViewCellAccessoryDetailDisclosureButton;
+            UIView *rowContent = [cell contentView] ?: cell;
+            UIButton *infoBtn = (UIButton *)[rowContent viewWithTag:0x213];
+            if (![infoBtn isKindOfClass:[UIButton class]]) {
+                infoBtn = [UIButton buttonWithType:UIButtonTypeInfoDark];
+                infoBtn.tag = 0x213;
+                infoBtn.frame = CGRectMake(0, 0, 30, 30);
+                [infoBtn addTarget:self
+                            action:@selector(axs_showDirectionInfo:)
+                  forControlEvents:UIControlEventTouchUpInside];
+                [rowContent addSubview:infoBtn];
+            }
+            // park the (i) just left of the rightmost label (the selected value)
+            CGFloat vx = rowContent.bounds.size.width - 150.0;
+            for (UIView *sv in rowContent.subviews) {
+                if ([sv isKindOfClass:[UILabel class]] && sv.tag != 0x213) {
+                    CGFloat right = sv.frame.origin.x + sv.frame.size.width;
+                    if (right > vx && right <= rowContent.bounds.size.width) vx = right;
+                }
+            }
+            CGFloat bx = vx + 6.0;
+            CGFloat by = (rowContent.bounds.size.height - 30.0) / 2.0;
+            infoBtn.frame = CGRectMake(bx, by, 30, 30);
         }
 
         if ([key isEqualToString:AxsHoldLaunchKeyExclude]) {
@@ -969,10 +990,36 @@ static void axs_ringPage_colorTapped_imp(id self, SEL _cmd, UIButton *sender) {
 // SCSplitSettingsController: threshold quantize + ring row rendering hooks.
 // The ring rows sit flat in SplitSettings.plist; every other row is
 // declarative and passes through untouched.
+// .214: tapping the direction-row (i) presents the localized explanation.
+static void axs_showDirectionInfo_imp(id self, SEL _cmd, id sender) {
+    @try {
+        NSBundle *pb = [NSBundle bundleForClass:NSClassFromString(@"SCSplitSettingsController")];
+        NSString *title = [pb localizedStringForKey:@"BEAUTIFY_OPEN_DIRECTION" value:nil table:@"SplitSettings"];
+        if (![title isKindOfClass:[NSString class]] || title.length == 0) title = @"\u547c\u51fa\u663e\u73b0\u65b9\u5411";
+        NSString *msg = [pb localizedStringForKey:@"INFO_BEAUTIFY_OPEN_DIRECTION" value:nil table:@"SplitSettings"];
+        if (![msg isKindOfClass:[NSString class]] || msg.length == 0) {
+            msg = @"\u65b9\u5411\u4ec5\u300c\u7c92\u5b50\u805a\u5408\u300d\u6837\u5f0f\u751f\u6548\uff1b\u51b2\u51fb\u6ce2\u53ec\u5524\u56fa\u5b9a\u4ece\u7206\u70b9\u5f84\u5411\u3002";
+        }
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                       message:msg
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedString(@"OK", nil)
+                                                  style:UIAlertActionStyleDefault
+                                                handler:nil]];
+        [(UIViewController *)self presentViewController:alert animated:YES completion:nil];
+    } @catch (NSException *ignored) { }
+}
+
 static void axs_holdlaunch_installSettingsHooks(void) {
     if (axs_settingsInstalled) return;
     Class cls = objc_getClass("SCSplitSettingsController");
     if (!cls) return;
+    // .214: action target for the direction-row (i) button -- presents the
+    // localized explanation popup on the panel controller itself.
+    if (!class_getInstanceMethod(cls, @selector(axs_showDirectionInfo:))) {
+        class_addMethod(cls, @selector(axs_showDirectionInfo:),
+                        (IMP)axs_showDirectionInfo_imp, "v@:@");
+    }
 
     SEL selRead = @selector(readPreferenceValue:);
     Method readMethod = class_getInstanceMethod(cls, selRead);
