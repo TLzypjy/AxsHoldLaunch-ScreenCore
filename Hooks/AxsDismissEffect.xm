@@ -860,7 +860,8 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
                 CGFloat dyo = qy > 0 ? qy : 0;
                 CGFloat innerMax = qx > qy ? qx : qy;   // MAX(qx,qy)
                 CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo)
-                             + (innerMax < 0 ? innerMax : 0);   // rounded-rect SDF
+                             + (innerMax < 0 ? innerMax : 0)
+                             - self.cornerRadius;   // .199: rounded-rect SDF needs -r
                 CGFloat kill = 1.0f - axs_open_smoothstep196(-1.5f, 1.5f, dOut);
                 aF *= kill;
             }

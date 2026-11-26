@@ -140,7 +140,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
             float2 pl = landing*u.cardSize;\n\
             float2 hcs = u.cardSize*0.5;\n\
             float2 q = abs(pl-hcs)-(hcs-float2(u.cornerRadius,u.cornerRadius));\n\
-            float dOut = length(max(q,float2(0.0)))+min(max(q.x,q.y),0.0);\n\
+            float dOut = length(max(q,float2(0.0)))+min(max(q.x,q.y),0.0)-u.cornerRadius;\n\
             kill = 1.0 - smoothstep(-2.0,2.0,dOut);\n\
         }\n\
         float2 finger = float2(u.sourceX, u.sourceY);\n\
@@ -394,7 +394,7 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
             float2 pl = landing*u.cardSize;\n\
             float2 hcs = u.cardSize*0.5;\n\
             float2 q = abs(pl-hcs)-(hcs-float2(u.cornerRadius,u.cornerRadius));\n\
-            float dOut = length(max(q,float2(0.0)))+min(max(q.x,q.y),0.0);\n\
+            float dOut = length(max(q,float2(0.0)))+min(max(q.x,q.y),0.0)-u.cornerRadius;\n\
             kill = 1.0 - smoothstep(-2.0,2.0,dOut);\n\
         }\n\
         float2 tile = u.cardSize/grid;\n\
