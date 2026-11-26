@@ -759,7 +759,7 @@ static uint32_t axs_open_directionMode(void) {
             id value = imp(cfg, sel, @"splitBeautifyOpenDirection", @0);
             if ([value isKindOfClass:[NSNumber class]]) mode = (uint32_t)[value integerValue];
         }
-        if (mode > 1) mode = 1;
+        if (mode > 4) mode = 0;
     } @catch (NSException *ignored) {
         mode = 0;
     }
@@ -872,9 +872,13 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
             h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
             CGFloat hf = (CGFloat)(h & 0xffffu) / 65535.0f;
             CGFloat ux = (cx + 0.5f) / (CGFloat)cols;
-            CGFloat order = (self.dirMode == 1u)
-                ? 0.96f * (ux + uy) * 0.5f + 0.04f * hf
-                : 0.96f * uy + 0.04f * hf;
+            CGFloat orderBase;
+            if (self.dirMode == 0u) orderBase = uy;
+            else if (self.dirMode == 1u) orderBase = (ux + uy) * 0.5f;
+            else if (self.dirMode == 2u) orderBase = ((1.0f - ux) + uy) * 0.5f;
+            else if (self.dirMode == 3u) orderBase = (ux + (1.0f - uy)) * 0.5f;
+            else orderBase = ((1.0f - ux) + (1.0f - uy)) * 0.5f;
+            CGFloat order = 0.96f * orderBase + 0.04f * hf;
             CGFloat arrival = 0.35f + 0.65f * order;
             CGFloat dock = axs_open_smoothstep196(arrival - 0.03f, arrival - 0.004f, t);
             // .198: cells outside the card's rounded corner arc NEVER open.

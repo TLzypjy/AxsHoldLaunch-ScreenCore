@@ -130,9 +130,13 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = (u.dirMode == 1u)\n\
-            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf\n\
-            : 0.96*unit.y + 0.04*hf;\n\
+        float orderBase;\n\
+        if (u.dirMode == 0u) orderBase = unit.y;\n\
+        else if (u.dirMode == 1u) orderBase = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 2u) orderBase = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase = (unit.x + (1.0-unit.y))*0.5;\n\
+        else orderBase = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
+        float order = 0.96*orderBase + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
@@ -179,9 +183,13 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = (u.dirMode == 1u)\n\
-            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf2\n\
-            : 0.96*unit.y + 0.04*hf2;\n\
+        float orderBase2;\n\
+        if (u.dirMode == 0u) orderBase2 = unit.y;\n\
+        else if (u.dirMode == 1u) orderBase2 = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 2u) orderBase2 = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase2 = (unit.x + (1.0-unit.y))*0.5;\n\
+        else orderBase2 = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
+        float order2 = 0.96*orderBase2 + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
         float open = step(arrival2 - 0.006, u.time);\n\
         float2 tile = u.cardSize/grid;\n\
@@ -389,9 +397,13 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
         float hf = (float)(h & 0xffffu)/65535.0;\n\
-        float order = (u.dirMode == 1u)\n\
-            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf\n\
-            : 0.96*unit.y + 0.04*hf;\n\
+        float orderBase;\n\
+        if (u.dirMode == 0u) orderBase = unit.y;\n\
+        else if (u.dirMode == 1u) orderBase = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 2u) orderBase = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase = (unit.x + (1.0-unit.y))*0.5;\n\
+        else orderBase = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
+        float order = 0.96*orderBase + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
         float departure = arrival - 0.35;\n\
         float t = clamp((u.time - departure)/0.35, 0.0, 1.0);\n\
@@ -439,9 +451,13 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         uint h2 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
         h2 ^= h2 >> 13u; h2 *= 1274126177u; h2 ^= h2 >> 16u;\n\
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
-        float order2 = (u.dirMode == 1u)\n\
-            ? 0.96*(unit.x + unit.y)*0.5 + 0.04*hf2\n\
-            : 0.96*unit.y + 0.04*hf2;\n\
+        float orderBase2;\n\
+        if (u.dirMode == 0u) orderBase2 = unit.y;\n\
+        else if (u.dirMode == 1u) orderBase2 = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 2u) orderBase2 = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase2 = (unit.x + (1.0-unit.y))*0.5;\n\
+        else orderBase2 = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
+        float order2 = 0.96*orderBase2 + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
         float dock = smoothstep(arrival2 - 0.03, arrival2 - 0.004, u.time);\n\
         float2 tile = u.cardSize/grid;\n\
