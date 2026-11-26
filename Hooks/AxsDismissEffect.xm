@@ -759,7 +759,7 @@ static uint32_t axs_open_directionMode(void) {
             id value = imp(cfg, sel, @"splitBeautifyOpenDirection", @0);
             if ([value isKindOfClass:[NSNumber class]]) mode = (uint32_t)[value integerValue];
         }
-        if (mode > 5) mode = 0;
+        if (mode > 6) mode = 0;
     } @catch (NSException *ignored) {
         mode = 0;
     }
@@ -800,10 +800,14 @@ static BOOL axs_open_realRevealStyle(void) {
 @property (nonatomic, assign) CGFloat frameH;
 @property (nonatomic, assign) CGFloat cornerRadius;
 @property (nonatomic, assign) uint32_t dirMode;
+@property (nonatomic, assign) CGFloat srcX;        // .206 radial-from-touch
+@property (nonatomic, assign) CGFloat srcY;
+@property (nonatomic, assign) CGFloat maxDist;     // farthest-corner distance
 - (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
            duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density
                 radius:(CGFloat)radius
-                 dirMode:(uint32_t)dirMode;
+                 dirMode:(uint32_t)dirMode
+                  source:(CGPoint)sourcePoint;
 - (void)stop;
 @end
 
@@ -818,7 +822,8 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
 - (void)startOnCard:(UIView *)card start:(CFTimeInterval)start
            duration:(NSTimeInterval)duration frame:(CGRect)frame density:(CGFloat)density
                 radius:(CGFloat)radius
-                 dirMode:(uint32_t)dirMode {
+                 dirMode:(uint32_t)dirMode
+                  source:(CGPoint)sourcePoint {
     self.card = card;
     self.dirMode = dirMode;   // .201: mask clock must match the metal clock
     self.start = start;
@@ -826,6 +831,12 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
     self.frameW = frame.size.width;
     self.frameH = frame.size.height;
     self.cornerRadius = radius;   // .198: reveal mask respects the rounded corners
+    // .206: radial-from-touch geometry (card-local source + farthest-corner dist)
+    self.srcX = sourcePoint.x - frame.origin.x;
+    self.srcY = sourcePoint.y - frame.origin.y;
+    CGFloat fx6 = MAX(fabs(self.srcX), fabs(self.srcX - frame.size.width));
+    CGFloat fy6 = MAX(fabs(self.srcY), fabs(self.srcY - frame.size.height));
+    self.maxDist = MAX(sqrtf(fx6 * fx6 + fy6 * fy6), 1.0f);
     // Mirror the metal open-mode grid (style 8 / openMode 1) so every mask
     // cell lines up with the dust grain landing on that exact cell.
     int particles = (int)lround(22000.0 * density);
@@ -872,12 +883,19 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
             h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
             CGFloat hf = (CGFloat)(h & 0xffffu) / 65535.0f;
             CGFloat ux = (cx + 0.5f) / (CGFloat)cols;
+            CGFloat px = ux * self.frameW;          // card-local cell center
+            CGFloat py = uy * self.frameH;          // .206: shared by radial + corner SDF
             CGFloat orderBase;
             if (self.dirMode == 0u) orderBase = uy;
             else if (self.dirMode == 1u) orderBase = 1.0f - uy;
             else if (self.dirMode == 2u) orderBase = (ux + uy) * 0.5f;
             else if (self.dirMode == 3u) orderBase = ((1.0f - ux) + uy) * 0.5f;
             else if (self.dirMode == 4u) orderBase = (ux + (1.0f - uy)) * 0.5f;
+            else if (self.dirMode == 6u) {
+                CGFloat dx6 = px - self.srcX;
+                CGFloat dy6 = py - self.srcY;
+                orderBase = fminf(sqrtf(dx6 * dx6 + dy6 * dy6) / self.maxDist, 1.0f);
+            }
             else orderBase = ((1.0f - ux) + (1.0f - uy)) * 0.5f;
             CGFloat order = 0.96f * orderBase + 0.04f * hf;
             CGFloat arrival = 0.35f + 0.65f * order;
@@ -887,8 +905,6 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
             // rounded content; opening those cells flashed a square halo.
             CGFloat aF = dock;
             if (self.cornerRadius > 0.5f && self.frameW > 1.0f && self.frameH > 1.0f) {
-                CGFloat px = (cx + 0.5f) / (CGFloat)cols * self.frameW;
-                CGFloat py = uy * self.frameH;
                 CGFloat qx = fabs(px - self.frameW * 0.5f) - (self.frameW * 0.5f - self.cornerRadius);
                 CGFloat qy = fabs(py - self.frameH * 0.5f) - (self.frameH * 0.5f - self.cornerRadius);
                 CGFloat dxo = qx > 0 ? qx : 0;
@@ -1778,7 +1794,8 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                        start:(metalStart > 0 ? metalStart : CACurrentMediaTime())
                     duration:duration frame:frame density:density
                      radius:revealRadius
-                    dirMode:axs_open_directionMode()];
+                    dirMode:axs_open_directionMode()
+                      source:sourcePoint];
             objc_setAssociatedObject(card, &axs_open_wipeDriverKey, drv,
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             axs_dm_log(@"OPEN real reveal mask armed %lux%lu duration=%.2f",
