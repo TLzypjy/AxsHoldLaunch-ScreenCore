@@ -28,7 +28,6 @@ BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration
 void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGFloat density, CGPoint sourcePoint);
 // .188: choose which compiled shader pipeline the open pass uses.
-void axs_msd_setCoverMode(BOOL on);
 void axs_msd_setCornerKill(uint32_t on, float radius);
 void axs_msd_setDirectionMode(uint32_t mode);
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
@@ -700,53 +699,6 @@ static BOOL axs_open_enabled(void) {
 
 // .194: open style -- 0 = classic .168 deposit (default), 1 = wallpaper cover,
 // 2 = live cover (real card visible, darkened own-snapshot erased by dust).
-static BOOL axs_open_coverStyle(void) {
-    BOOL cover = NO;
-    @try {
-        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
-        if (cfgClass == nil) return NO;
-        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
-        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
-        if (cfg != nil && [cfg respondsToSelector:sel]) {
-            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
-            id value = imp(cfg, sel, @"splitBeautifyOpenStyle", @0);
-            if ([value isKindOfClass:[NSNumber class]]) cover = [value integerValue] == 1;
-        }
-    } @catch (NSException *ignored) {
-        cover = NO;
-    }
-    return cover;
-}
-
-// .194: style 2 -- LIVE COVER. Real card stays visible under the overlay;
-// the cover is a darkened copy of the card's OWN fresh snapshot, erased
-// per-cell by the dust so the crisp live window is revealed underneath.
-// Completely independent of any screen-capture API.
-static BOOL axs_open_liveCoverStyle(void) {
-    BOOL on = NO;
-    @try {
-        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
-        if (cfgClass == nil) return NO;
-        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
-        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
-        if (cfg != nil && [cfg respondsToSelector:sel]) {
-            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
-            id value = imp(cfg, sel, @"splitBeautifyOpenStyle", @0);
-            if ([value isKindOfClass:[NSNumber class]]) on = [value integerValue] == 2;
-        }
-    } @catch (NSException *ignored) {
-        on = NO;
-    }
-    return on;
-}
-
-// .196: style 3 -- REAL-WINDOW REVEAL. The live card is never hidden and no
-// screen/card snapshot is used at all. A per-cell CALayer mask opens on the
-// exact hash clock shared with the metal dust, so the flying grains appear to
-// carry the real window into place. Content is always the LIVE view tree.
-// .201: reveal direction. 0 = top->down (original), 1 = top-left->bottom-right.
-// Applies to the shared open clock, so styles 0-3 all follow it; 0 keeps the
-// pre-.201 behavior.
 static uint32_t axs_open_directionMode(void) {
     uint32_t mode = 0;
     @try {
@@ -1017,7 +969,6 @@ static void axs_open_playShockwave(UIWindow *win, CGPoint point) {
 
 // .188: wallpaper-cover state, declared before markGone which resets it.
 static BOOL axs_open_revealLive = NO;
-static UIImage *axs_open_wallpaperShot = nil;
 
 // .146: wipe driver association key (declared early so markGone can clear it)
 static char axs_open_wipeDriverKey;
@@ -1117,280 +1068,6 @@ static CGFloat axs_open_density(void) {
     return density;
 }
 
-// .188: wallpaper-cover style state (ported from .182 architecture only)
-
-// .188: capture the screen state while the card is hidden -- this becomes the
-// COVER texture: the overlay paints it back over the card region and fades it
-// out per cell as dust arrives, uncovering the REAL card beneath (fresh content).
-// .190 C-plan: mine the largest CGImage from a system snapshot view's layer
-// tree. snapshotViewAfterScreenUpdates: is rendered by the system compositor;
-// its backing CGImages are REAL composited pixels. Re-drawing that view via
-// drawViewHierarchyInRect (.188) rasterizes to black -- mining avoids it.
-// .191: blank probe is defined later in the file; declare it here so the
-// capture strategies below can reject a rendered-but-empty bitmap.
-static BOOL axs_dm_imageIsBlank(UIImage *img);
-
-// .191: USER-CHOOSEN "offscreen render" strategy. The system snapshot view
-// (snapshotViewAfterScreenUpdates:) is compositor-owned -- .188 proved that
-// re-drawing it with drawViewHierarchyInRect yields SOLID BLACK, and .190
-// proved its layer contents is a private CAImageRef (no CGImage to mine).
-// renderInContext: walks the layer tree through CoreGraphics directly, which
-// is a DIFFERENT path and can composite layers that drawViewHierarchyInRect
-// refuses to. We render the snapshot view (and, as a second shot, the key
-// window) into an offscreen bitmap and keep the first non-blank result.
-static UIImage *axs_open_offscreenRender(UIView *view, CGSize size, CGFloat scale) {
-    if (view == nil || size.width < 40.0 || size.height < 40.0) return nil;
-    UIImage *img = nil;
-    @try {
-        UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt.opaque = NO;   // keep the real alpha so empty areas stay detectable
-        fmt.scale = scale;
-        CGRect bounds = CGRectMake(0, 0, size.width, size.height);
-        UIGraphicsImageRenderer *r =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:bounds format:fmt];
-        img = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            [view.layer renderInContext:ctx.CGContext];
-        }];
-    } @catch (NSException *ignored) { img = nil; }
-    if (img == nil || img.CGImage == NULL) return nil;
-    if ((CGFloat)CGImageGetWidth(img.CGImage) < size.width * 0.8) return nil;
-    return img;
-}
-
-static CGImageRef axs_open_largestSnapCGImage(CALayer *layer, int depth, CGImageRef best) {
-    if (layer == nil || depth > 8) return best;
-    @try {
-        id contents = layer.contents;
-        if (contents != nil && CFGetTypeID((__bridge CFTypeRef)contents) == CGImageGetTypeID()) {
-            CGImageRef cg = (__bridge CGImageRef)contents;
-            size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
-            size_t bw = (best != NULL) ? CGImageGetWidth(best) * CGImageGetHeight(best) : 0;
-            if (w >= 128 && h >= 128 && w * h > bw) best = cg;
-        }
-        for (CALayer *sub in layer.sublayers) {
-            best = axs_open_largestSnapCGImage(sub, depth + 1, best);
-        }
-    } @catch (NSException *ignored) { }
-    return best;
-}
-
-// .190: UIGetScreenImage() is a private UIKit symbol on jailbroken iOS.
-// Resolve via dlsym so a missing symbol cannot fail linkage.
-static CGImageRef axs_open_screenImageViaUIGet(void) {
-    @try {
-        typedef CGImageRef (*AXSGetScreenImageFn)(void);
-        void *h = dlopen("/System/Library/Frameworks/UIKit.framework/UIKit", RTLD_LAZY);
-        if (h == NULL) h = RTLD_DEFAULT;
-        AXSGetScreenImageFn fn = (AXSGetScreenImageFn)dlsym(h, "UIGetScreenImage");
-        if (fn != NULL) return fn();
-    } @catch (NSException *ignored) { }
-    return NULL;
-}
-
-// .192: display-layer capture. CGDisplayCreateImage(CGMainDisplayID()) reads
-// the composited framebuffer straight from WindowServer/IOSurface -- unlike
-// all UIKit snapshot paths (.188-.191) it does NOT go through a view/layer
-// tree, so it can see cross-process content behind the floating card. The
-// symbols are Apple-private on iOS; resolve them dynamically across the
-// frameworks that may export them, and log each attempt so one run tells us
-// exactly which link failed.
-typedef CGImageRef (*AXSDisplayCreateImageFn)(uint32_t displayID);
-typedef uint32_t (*AXSMainDisplayIDFn)(void);
-static CGImageRef axs_open_screenImageViaCGDisplay(NSString **outWhy) {
-    AXSMainDisplayIDFn mainID = NULL;
-    AXSDisplayCreateImageFn createImg = NULL;
-    const char *paths[] = {
-        "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
-        "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices",
-        "/System/Library/Frameworks/UIKit.framework/UIKit",
-        "/System/Library/Frameworks/QuartzCore.framework/QuartzCore",
-    };
-    void *h = NULL;
-    for (int i = 0; i < 4; i++) {
-        void *p = dlopen(paths[i], RTLD_LAZY | RTLD_LOCAL);
-        if (p == NULL) p = RTLD_DEFAULT;
-        AXSMainDisplayIDFn m = (AXSMainDisplayIDFn)dlsym(p, "CGMainDisplayID");
-        AXSDisplayCreateImageFn c = (AXSDisplayCreateImageFn)dlsym(p, "CGDisplayCreateImage");
-        if (m != NULL && c != NULL) { mainID = m; createImg = c; h = p; break; }
-        if (m != NULL && mainID == NULL) mainID = m;
-        if (c != NULL && createImg == NULL) createImg = c;
-    }
-    if (mainID == NULL) {
-        mainID = (AXSMainDisplayIDFn)dlsym(RTLD_DEFAULT, "CGMainDisplayID");
-        createImg = (AXSDisplayCreateImageFn)dlsym(RTLD_DEFAULT, "CGDisplayCreateImage");
-    }
-    (void)h;
-    if (mainID == NULL || createImg == NULL) {
-        if (outWhy != NULL) *outWhy = [NSString stringWithFormat:@"symbols main=%d create=%d",
-                                       (int)(mainID != NULL), (int)(createImg != NULL)];
-        return NULL;
-    }
-    uint32_t did = mainID();
-    CGImageRef img = createImg(did);
-    if (img == NULL) {
-        if (outWhy != NULL) *outWhy = [NSString stringWithFormat:@"did=%u returned NULL", did];
-        return NULL;
-    }
-    return img;
-}
-
-// .190: alpha probe of the cover's center pixel -- logged so we can confirm
-// in one run whether the mask is opaque (1.0) or transparent (0.0).
-static CGFloat axs_open_centerAlpha(UIImage *img) {
-    CGImageRef cg = (img != nil) ? img.CGImage : NULL;
-    if (cg == NULL) return -1.0;
-    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
-    if (w == 0 || h == 0) return -1.0;
-    CGContextRef c = CGBitmapContextCreate(NULL, 1, 1, 8, 4,
-                                           CGColorSpaceCreateDeviceRGB(),
-                                           kCGImageAlphaPremultipliedLast);
-    if (c == NULL) return -1.0;
-    CGRect one = CGRectMake((CGFloat)(w / 2), (CGFloat)(h / 2), 1, 1);
-    CGImageRef px = CGImageCreateWithImageInRect(cg, one);
-    CGFloat a = -1.0;
-    if (px != NULL) {
-        CGContextDrawImage(c, CGRectMake(0, 0, 1, 1), px);
-        UInt8 *data = (UInt8 *)CGBitmapContextGetData(c);
-        if (data != NULL) a = (CGFloat)data[3] / 255.0;
-        CGImageRelease(px);
-    }
-    CGContextRelease(c);
-    return a;
-}
-
-// .195: the live style uses the card's REAL pixels as the DEPOSIT texture.
-// .194 darkened this into a near-black silhouette and erased it cell by cell,
-// which looked like a black floating-window image being wiped away. The
-// reference effect is the opposite: the real card stays hidden, the desktop
-// shows through, and each arriving grain paints that cell's real window
-// pixels (classic .168 deposit pipeline, openMode=2). No darkening, no cover
-// pipeline -- `src` is already corner-clipped by axs_dm_fixSnapshotCorners.
-static UIImage *axs_open_makeLiveCover(UIImage *src) {
-    if (src == nil || src.CGImage == NULL) return nil;
-    return src;
-}
-
-// .190: capture the screen state while the card is hidden -- this becomes the
-// COVER texture. C-plan: grab REAL composited pixels without any re-render.
-static UIImage *axs_open_captureWallpaper(UIView *card) {
-    @try {
-        UIWindow *win = card.window;
-        if (win == nil) return nil;
-        CGRect frame = [card convertRect:card.bounds toView:win];
-        if (frame.size.width < 40.0 || frame.size.height < 40.0) return nil;
-        CGFloat radius = axs_dm_cornerRadiusForView(card);
-        CGSize screenPt = [UIScreen mainScreen].bounds.size;
-
-        // .191: USER-CHOOSEN strategy -- offscreen-render the system snapshot
-        // view via renderInContext (NOT drawViewHierarchyInRect: .188 proved
-        // that path yields solid black, and NOT layer-mining: .190 proved the
-        // contents is a private CAImageRef with no CGImage). Try first.
-        CGImageRef fullRef = NULL;
-        NSString *src = @"none";
-        CGFloat scale = [UIScreen mainScreen].scale;
-        // .192: PRIMARY -- display-layer framebuffer capture. This is the only
-        // path that bypasses the view/layer tree entirely and can see the real
-        // composited screen behind the card. Tried first.
-        @try {
-            NSString *why = @"unknown";
-            CGImageRef disp = axs_open_screenImageViaCGDisplay(&why);
-            if (disp != NULL && (CGFloat)CGImageGetWidth(disp) >= screenPt.width * 0.8) {
-                fullRef = disp;
-                src = @"CGDisplay";
-                axs_dm_log(@"OPEN wallpaper: CGDisplay OK %zux%zu",
-                           (size_t)CGImageGetWidth(disp), (size_t)CGImageGetHeight(disp));
-            } else {
-                axs_dm_log(@"OPEN wallpaper: CGDisplay failed (%@)", why);
-                if (disp != NULL) CGImageRelease(disp);
-            }
-        } @catch (NSException *e) {
-            axs_dm_log(@"OPEN wallpaper: CGDisplay exception %@", [e reason]);
-        }
-        // .191 fallback A: offscreen-render the system snapshot view.
-        @try {
-            if (fullRef == NULL) {
-                UIView *forceSnap = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
-                UIImage *rendered = axs_open_offscreenRender(forceSnap, screenPt, scale);
-                if (rendered != nil && !axs_dm_imageIsBlank(rendered)) {
-                    fullRef = rendered.CGImage;
-                    src = @"snapshotOffscreen";
-                } else {
-                    axs_dm_log(@"OPEN wallpaper: snapshotOffscreen blank/nil");
-                }
-            }
-        } @catch (NSException *ignored) { }
-        // Fallback 1 (.190): mine a real CGImage out of the snapshot layer tree.
-        if (fullRef == NULL) {
-            @try {
-                UIView *forceSnap2 = [[UIScreen mainScreen] snapshotViewAfterScreenUpdates:YES];
-                CGImageRef mined = axs_open_largestSnapCGImage(forceSnap2.layer, 0, NULL);
-                if (mined != NULL && (CGFloat)CGImageGetWidth(mined) >= screenPt.width * 0.8) {
-                    fullRef = mined;
-                    src = @"snapshotLayer";
-                } else {
-                    axs_dm_log(@"OPEN wallpaper: snapshotLayer no CGImage");
-                }
-            } @catch (NSException *ignored) { }
-        }
-        // Fallback 2 (.190): UIGetScreenImage() via dlsym.
-        if (fullRef == NULL) {
-            CGImageRef screenImg = axs_open_screenImageViaUIGet();
-            if (screenImg != NULL && (CGFloat)CGImageGetWidth(screenImg) >= screenPt.width * 0.8) {
-                fullRef = screenImg;
-                src = @"UIGetScreenImage";
-            } else {
-                axs_dm_log(@"OPEN wallpaper: UIGetScreenImage nil");
-                if (screenImg != NULL) CGImageRelease(screenImg);
-            }
-        }
-        if (fullRef == NULL) {
-            axs_dm_log(@"OPEN wallpaper cover: no composited screen image");
-            return nil;
-        }
-
-        // Map the card frame (points) into the captured image's pixel space.
-        CGFloat imgW = (CGFloat)CGImageGetWidth(fullRef);
-        CGFloat imgH = (CGFloat)CGImageGetHeight(fullRef);
-        CGFloat sx = imgW / MAX(screenPt.width, 1.0);
-        CGFloat sy = imgH / MAX(screenPt.height, 1.0);
-        CGRect pr = CGRectMake(frame.origin.x * sx, frame.origin.y * sy,
-                               frame.size.width * sx, frame.size.height * sy);
-        if (pr.origin.x < 0) pr.origin.x = 0;
-        if (pr.origin.y < 0) pr.origin.y = 0;
-        if (pr.origin.x + pr.size.width > imgW) pr.size.width = imgW - pr.origin.x;
-        if (pr.origin.y + pr.size.height > imgH) pr.size.height = imgH - pr.origin.y;
-        if (pr.size.width < 8 || pr.size.height < 8) return nil;
-        CGImageRef sub = CGImageCreateWithImageInRect(fullRef, pr);
-        if (sub == NULL) return nil;
-        UIImage *area = [UIImage imageWithCGImage:sub scale:sx orientation:UIImageOrientationUp];
-        CGImageRelease(sub);
-
-        // Clip to the card's exact corner radius -> true alpha rounded corners.
-        UIGraphicsImageRendererFormat *fmt2 = [UIGraphicsImageRendererFormat defaultFormat];
-        fmt2.scale = sx;
-        fmt2.opaque = NO;
-        UIGraphicsImageRenderer *r2 =
-            [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, frame.size.width, frame.size.height) format:fmt2];
-        UIImage *cover = [r2 imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-            UIBezierPath *clip = [UIBezierPath bezierPathWithRoundedRect:
-                CGRectMake(0, 0, frame.size.width, frame.size.height)
-                                               cornerRadius:radius];
-            [clip addClip];
-            [area drawInRect:CGRectMake(0, 0, frame.size.width, frame.size.height)];
-        }];
-        CGFloat alpha = axs_open_centerAlpha(cover);
-        axs_dm_log(@"OPEN wallpaper cover captured %.0fx%.0f radius=%.1f src=%@ alpha=%.2f full=%zux%zu",
-                   frame.size.width, frame.size.height, radius, src, alpha,
-                   (size_t)CGImageGetWidth(fullRef), (size_t)CGImageGetHeight(fullRef));
-        return cover;
-    } @catch (NSException *ignored) {
-        return nil;
-    }
-}
-
-// .134: particle color = the card's background color (pure data read from
-// the layer -- no rendering involved). The calculator is dark -> dark
-// fragments, exactly like the reference video. Fallback: white.
 static UIImage *axs_open_bgTexture(UIView *card) {
     UIColor *col = nil;
     CGFloat r1=0, g1=0, b1=0, a1=0;
@@ -1470,104 +1147,6 @@ static UIImage *axs_open_sandTexture(void) {
 // the settled grains literally assemble the floating window -- no second mask
 // layer, hence no gap. Only the card itself is rasterized (never the full
 // screen), so the home-screen clock can never be cut into the grains (.144).
-static BOOL axs_dm_imageIsBlank(UIImage *img);   // defined later in this file
-static UIImage * __attribute__((unused)) axs_open_captureCardForAssembly(UIView *card) {
-    UIImage *shot = nil;
-    @try {
-        if (card.layer.mask != nil) card.layer.mask = nil;
-        // A hidden view still rasterizes its layer tree into an offscreen
-        // context via drawViewHierarchyInRect, so try that first (zero risk of
-        // leaking a native frame to screen).
-        shot = axs_dm_snapshot(card);
-    } @catch (NSException *ignored) { shot = nil; }
-    if (shot != nil && !axs_dm_imageIsBlank(shot)) return shot;
-    // Fallback: briefly unhide through the ORIGINAL setHidden IMP (bypassing
-    // our hook) inside the same runloop turn, capture, then re-hide before any
-    // screen commit -- no native frame can slip through.
-    @try {
-        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
-            card.alpha = 1.0;
-            shot = axs_dm_snapshot(card);
-            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
-        }
-    } @catch (NSException *ignored) { shot = nil; }
-    if (shot != nil && !axs_dm_imageIsBlank(shot)) return shot;
-    return nil;
-}
-
-// .157: ALL-GPU open reveal (reference architecture). The CPU mask driver is
-// GONE: no CAShapeLayer, no CADisplayLink, no per-frame CGPath rebuild. The
-// card stays hidden for the whole animation while the Metal overlay paints
-// (a) fine dust rising from the screen-bottom band into each cell and (b)
-// deposited REAL card texels gated by the SAME per-cell hash arrival clock --
-// both in one Metal encoder, zero CPU work per frame. Only the card snapshot
-// is fetched asynchronously below and swapped into the renderer mid-flight.
-
-// Cheap 1x-scale capture of the card. The brief unhide + capture + re-hide
-// happens INSIDE one runloop turn through the ORIGINAL setHidden IMP, so no
-// CA commit can ever slip a native frame to the screen.
-static UIImage *axs_open_captureCardCheap(UIView *card) {
-    UIImage *shot = nil;
-    @try {
-        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), NO);
-            card.alpha = 1.0;
-            UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-            fmt.opaque = NO;
-            fmt.scale = 1.0;
-            UIGraphicsImageRenderer *r =
-                [[UIGraphicsImageRenderer alloc] initWithBounds:card.bounds format:fmt];
-            shot = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-                [card drawViewHierarchyInRect:card.bounds afterScreenUpdates:NO];
-            }];
-            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
-        }
-    } @catch (NSException *ignored) {
-        @try {
-            if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);
-            }
-        } @catch (NSException *ignored2) { }
-        shot = nil;
-    }
-    if (shot != nil && axs_dm_imageIsBlank(shot)) return nil;
-    return axs_dm_fixSnapshotCorners(shot, card);
-}
-
-// Retry on a low cadence: the hidden card's remote content can take a few
-// frames to commit after the present starts. As soon as the capture is
-// non-blank it is swapped into the live renderer, which arms the GPU deposit
-// pass (cardReady). The renderer-pointer guard inside axs_metalReplaceTexture
-// makes late retries after cleanup harmless.
-static void axs_open_gpuTextureRetry(UIView *card, void *renderer, NSInteger triesLeft) {
-    @try {
-        if (renderer == NULL || card == nil || card.window == nil) return;
-        UIImage *shot = axs_open_captureCardCheap(card);
-        if (shot != nil) {
-            if (axs_metalReplaceTexture(renderer, shot)) {
-                axs_dm_log(@"OPEN gpu texture ready %zux%zu triesLeft=%ld",
-                           (size_t)CGImageGetWidth(shot.CGImage),
-                           (size_t)CGImageGetHeight(shot.CGImage), (long)triesLeft);
-            }
-            return;
-        }
-        if (triesLeft <= 1) {
-            axs_dm_log(@"OPEN gpu texture never captured, deposit stays off");
-            return;
-        }
-        __weak UIView *weakCard = card;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.033 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            UIView *c = weakCard;
-            if (c != nil) axs_open_gpuTextureRetry(c, renderer, triesLeft - 1);
-        });
-    } @catch (NSException *ignored) { }
-}
-
-// .157: final handoff -- the overlay has been showing the deposited real-card
-// image; unhiding the real card swaps identical pixels, then the overlay
-// fades out on its own. Idempotent and mask-free.
 static void axs_open_endWipeReveal(UIView *card) {
     @try {
         card.alpha = 1.0;
@@ -1627,81 +1206,6 @@ static BOOL axs_dm_imageIsBlank(UIImage *img) {
 // HOSTED from another process, but its layers attach locally under the app
 // scene's _UIScenePresentationView in SpringBoard. Capturing THAT view (not
 // the card, not the full screen) yields the live app content pixels.
-static void __attribute__((unused)) axs_open_collectSceneViews(UIView *root, NSMutableArray *outArr, int depth, int *budget) {
-    if (root == nil || depth > 6 || (*budget) <= 0) return;
-    (*budget)--;
-    const char *cn = object_getClassName(root);
-    if (strcmp(cn, "_UIScenePresentationView") == 0) [outArr addObject:root];
-    for (UIView *sv in root.subviews) axs_open_collectSceneViews(sv, outArr, depth + 1, budget);
-}
-
-static UIImage * __attribute__((unused)) axs_open_captureAppContent(void) {
-    NSMutableArray *cands = [NSMutableArray array];
-    int budget = 500;
-    @try {
-        #pragma clang diagnostic push
-        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        NSArray *wins = [UIApplication sharedApplication].windows;
-        #pragma clang diagnostic pop
-        for (UIWindow *w in wins) {
-            if (w == nil) continue;
-            axs_open_collectSceneViews(w, cands, 0, &budget);
-        }
-    } @catch (NSException *ignored) {
-        return nil;
-    }
-    if (cands.count == 0) return nil;
-    // largest first (app scenes are fullscreen-sized)
-    [cands sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
-        CGFloat aa = a.bounds.size.width * a.bounds.size.height;
-        CGFloat bb = b.bounds.size.width * b.bounds.size.height;
-        return aa > bb ? NSOrderedAscending : (aa < bb ? NSOrderedDescending : NSOrderedSame);
-    }];
-    // .141: render at HALF resolution -- the texture only feeds small
-    // grains, and the full-screen rasterization (430x932) was blocking the
-    // main thread ~0.4s (visible as animation stutter)
-    for (UIView *v in cands) {
-        CGSize small = CGSizeMake(MAX(v.bounds.size.width * 0.5, 120.0),
-                                  MAX(v.bounds.size.height * 0.5, 120.0));
-        UIImage *shot = nil;
-        @try {
-            UIGraphicsImageRendererFormat *fmt = [UIGraphicsImageRendererFormat defaultFormat];
-            fmt.opaque = NO;
-            fmt.scale = 1.0;
-            UIGraphicsImageRenderer *r =
-                [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, small.width, small.height) format:fmt];
-            shot = [r imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-                [v drawViewHierarchyInRect:CGRectMake(0, 0, v.bounds.size.width, v.bounds.size.height) afterScreenUpdates:NO];
-            }];
-        } @catch (NSException *ignored) {
-            shot = nil;
-        }
-        if (!axs_dm_imageIsBlank(shot)) {
-            axs_dm_log(@"OPEN scene capture ok class=%@ px=%zux%zu",
-                       NSStringFromClass([v class]),
-                       (size_t)small.width, (size_t)small.height);
-            return shot;
-        }
-        @try {
-            UIGraphicsImageRendererFormat *fmt2 = [UIGraphicsImageRendererFormat defaultFormat];
-            fmt2.opaque = NO;
-            fmt2.scale = 1.0;
-            UIGraphicsImageRenderer *r2 =
-                [[UIGraphicsImageRenderer alloc] initWithBounds:CGRectMake(0, 0, small.width, small.height) format:fmt2];
-            UIImage *shot2 = [r2 imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
-                [v.layer renderInContext:ctx.CGContext];
-            }];
-            if (!axs_dm_imageIsBlank(shot2)) {
-                axs_dm_log(@"OPEN scene capture ok (renderInContext) px=%zux%zu",
-                           (size_t)small.width, (size_t)small.height);
-                return shot2;
-            }
-        } @catch (NSException *ignored) { }
-    }
-    axs_dm_log(@"OPEN scene capture: %lu candidates all blank", (unsigned long)cands.count);
-    return nil;
-}
-
 static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                               CGFloat density, CGPoint sourcePoint, NSString *sourceKind) {
     @try {
@@ -1740,12 +1244,7 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         // only the last-resort placeholder (dust color stays palette-driven).
         UIImage *tex = nil;
         NSString *texKind = nil;
-        BOOL realReveal = axs_open_realRevealStyle();
-        BOOL liveCover = !realReveal && axs_open_liveCoverStyle() && axs_open_wallpaperShot != nil;
-        // .195: style 2 deposits real pixels (classic pipeline); only style 1
-        // uses the cover/erase pipeline. .196: style 3 uses NO screenshot at
-        // all -- metal draws dust only, the live card is revealed by a mask.
-        BOOL useCover = !realReveal && !liveCover && (axs_open_coverStyle() && axs_open_wallpaperShot != nil);
+        BOOL realReveal = YES;   // .208: only live-reveal styles remain
         if (realReveal) {
             axs_dm_log(@"OPEN real reveal: live window + per-cell mask, no snapshot");
         }
@@ -1759,14 +1258,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
             tex = axs_open_sandTexture();
             texKind = @"real-reveal";
         }
-        if (useCover) {
-            // .188: the WALLPAPER is the cover texture -- it fades out per cell
-            // as dust arrives, uncovering the REAL card beneath. Applied after
-            // the cached-card fallback so the classic path stays byte-identical.
-            tex = axs_open_wallpaperShot;
-            texKind = @"wallpaper";
-        }
-        if (liveCover && tex != nil) texKind = @"live-cover";
         if (tex == nil) { tex = axs_open_sandTexture(); texKind = @"reference-dust"; }
         if (tex == nil) { tex = axs_open_bgTexture(card); texKind = @"bg-color"; }
         if (tex == nil) {
@@ -1779,7 +1270,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
         }
         // .188: arm the chosen shader pipeline BEFORE the first draw (the
         // Metal pipeline is compiled lazily on first render).
-        axs_msd_setCoverMode(useCover);   // .196: realReveal -> NO (dust only)
         // .197: style 3 also kills grains landing outside the rounded corners
         // (square-corner halo). Other styles pass 0 => shader unchanged.
         CGFloat revealRadius = 0;   // .198 shared by corner-kill + reveal mask
@@ -1865,17 +1355,6 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                                      OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             axs_dm_log(@"OPEN real reveal mask armed %lux%lu duration=%.2f",
                        (unsigned long)drv.cols, (unsigned long)drv.rows, duration);
-        }
-        // .195: the live style DEPOSITS real pixels, so a mid-flight swap to a
-        // fresher capture improves content freshness (never kills the effect).
-        // Only the wallpaper-cover style must keep its cover texture intact.
-        if (!useCover && !realReveal) {
-            __weak UIView *weakCardTex = card;
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.016 * NSEC_PER_SEC)),
-                           dispatch_get_main_queue(), ^{
-                UIView *c = weakCardTex;
-                if (c != nil) axs_open_gpuTextureRetry(c, renderer, 30);
-            });
         }
         // .158: 0.35s after the open finished the card is visible again --
         // grab a fresh snapshot (cheap 1x) so the NEXT open deposits current
@@ -2033,31 +1512,10 @@ static void axs_open_becameVisible(UIView *v) {
         // the poll uses weak captures only (see axs_open_pollStep) -- no
         // block-copy of strong view captures anywhere.
         BOOL wantRealReveal = axs_open_realRevealStyle();
-        BOOL wantLiveCover = !wantRealReveal && axs_open_liveCoverStyle();
         // .194: hide at frame 0 for ALL styles (no real-card flash before the
         // cover overlay's first frame). .196: style 3 keeps the LIVE card
         // present (masked) from frame 0 -- it IS the revealed content.
-        if (!wantRealReveal) card.hidden = YES;
-        if (wantLiveCover) {
-            // .194: cover = darkened copy of the card's OWN pixels. The
-            // accept-time capture (preShot) is usually blank because remote
-            // content is not attached yet; the snapshot cached at dismiss (or
-            // loaded from disk) is the reliable source -- log73 proves it is
-            // always present (texture=cached-card). The plate is only a dark
-            // silhouette, so slight staleness is invisible; the REAL window
-            // revealed underneath is always live content.
-            UIImage *src = preShot;
-            if (src == nil || src.CGImage == NULL) src = axs_open_cachedCardSnapshotForView(card);
-            UIImage *plate = axs_open_makeLiveCover(src);
-            if (plate != nil) {
-                axs_open_wallpaperShot = plate;
-                axs_dm_log(@"OPEN live cover captured %.0fx%.0f (card own pixels, deposit)",
-                           plate.size.width, plate.size.height);
-            } else {
-                axs_dm_log(@"OPEN live cover failed, using classic style");
-                axs_open_wallpaperShot = nil;
-            }
-        } else if (wantRealReveal) {
+        if (wantRealReveal) {
             // .196: no capture at all. The live window is shown through the
             // per-cell mask; there is no stale image to capture or deposit.
             // .198: hide the LIVE card behind a static full mask from the
@@ -2087,16 +1545,6 @@ static void axs_open_becameVisible(UIView *v) {
             } @catch (NSException *ignored) { }
             if (axs_open_shockwaveStyle()) {
                 axs_open_playShockwave(card.window, sourcePoint);   // .207 style 4 opening
-            }
-        } else if (axs_open_coverStyle()) {
-            // .188: capture the screen WITHOUT the card; failure falls back to
-            // the classic cached-card deposit for this open.
-            UIImage *wall = axs_open_captureWallpaper(card);
-            if (wall == nil) {
-                axs_dm_log(@"OPEN wallpaper capture failed, using classic style");
-                axs_open_wallpaperShot = nil;
-            } else {
-                axs_open_wallpaperShot = wall;
             }
         }
         // .196: style 3 holds the LIVE card visible (behind the mask) from

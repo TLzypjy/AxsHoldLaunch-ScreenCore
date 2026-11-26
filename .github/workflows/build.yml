@@ -534,20 +534,10 @@ jobs:
           grep -Fq "BEAUTIFY_OPEN_STYLE" "$EXTRACT/en.strings" || { echo "open style en label missing"; exit 1; }
           grep -Fq "splitBeautifyOpenStyle" "$EXTRACT/dylib34.strings" || { echo "open style key not compiled into dylib"; exit 1; }
           grep -Fq "AXS_MSD_SHADER_CLASSIC" Hooks/AxsMetalSand.xm || { echo "classic shader missing"; exit 1; }
-          grep -Fq "AXS_MSD_SHADER_COVER" Hooks/AxsMetalSand.xm || { echo "cover shader missing"; exit 1; }
-          grep -Fq "sMsdPipelineCover" Hooks/AxsMetalSand.xm || { echo "cover pipeline missing"; exit 1; }
           # .189: card-sized rounded cover capture (not full-screen black square)
-          grep -Fq "axs_open_captureWallpaper(UIView *card)" Hooks/AxsDismissEffect.xm || { echo "card-sized wallpaper capture missing"; exit 1; }
-          grep -Fq "axs_open_largestSnapCGImage" Hooks/AxsDismissEffect.xm || { echo "snapshot layer CGImage miner missing"; exit 1; }
-          grep -Fq "UIGetScreenImage" Hooks/AxsDismissEffect.xm || { echo "UIGetScreenImage fallback missing"; exit 1; }
           grep -Fq "snapshotViewAfterScreenUpdates:YES" Hooks/AxsDismissEffect.xm || { echo "system snapshot capture missing"; exit 1; }
-          grep -Fq "axs_open_centerAlpha" Hooks/AxsDismissEffect.xm || { echo "cover alpha probe missing"; exit 1; }
-          grep -Fq "CGImageCreateWithImageInRect(fullRef, pr)" Hooks/AxsDismissEffect.xm || { echo "card frame crop missing"; exit 1; }
           grep -Fq "bezierPathWithRoundedRect:" Hooks/AxsDismissEffect.xm || { echo "cover corner clip missing"; exit 1; }
           # .191: user-chosen D-plan -- offscreen render of the system snapshot
-          grep -Fq "static UIImage *axs_open_offscreenRender(UIView *view, CGSize size, CGFloat scale)" Hooks/AxsDismissEffect.xm || { echo "offscreen render helper missing"; exit 1; }
-          grep -Fq "[view.layer renderInContext:ctx.CGContext]" Hooks/AxsDismissEffect.xm || { echo "renderInContext offscreen path missing"; exit 1; }
-          grep -Fq "axs_open_offscreenRender(forceSnap, screenPt, scale)" Hooks/AxsDismissEffect.xm || { echo "offscreen snapshot strategy missing"; exit 1; }
           grep -Fq "src = @\"snapshotOffscreen\"" Hooks/AxsDismissEffect.xm || { echo "offscreen src tag missing"; exit 1; }
           grep -Fq "@\"snapshotLayer\"" Hooks/AxsDismissEffect.xm || { echo "layer-mine fallback missing"; exit 1; }
           grep -Fq "axs_dm_imageIsBlank(UIImage *img);" Hooks/AxsDismissEffect.xm || { echo "blank probe forward decl missing"; exit 1; }
@@ -555,7 +545,6 @@ jobs:
           grep -Fq "OWNERSHIP HANDOFF for BOTH paths" Hooks/AxsDismissEffect.xm || { echo "dual-branch ownership handoff missing"; exit 1; }
           # .192: CGDisplay framebuffer capture (bypasses the view tree) + the
           # ownership-window check moved to the TOP of becameVisible.
-          grep -Fq "static CGImageRef axs_open_screenImageViaCGDisplay(NSString **outWhy)" Hooks/AxsDismissEffect.xm || { echo "CGDisplay capture helper missing"; exit 1; }
           grep -Fq "dlsym(p, \"CGDisplayCreateImage\")" Hooks/AxsDismissEffect.xm || { echo "CGDisplayCreateImage dlsym missing"; exit 1; }
           grep -Fq "src = @\"CGDisplay\"" Hooks/AxsDismissEffect.xm || { echo "CGDisplay src tag missing"; exit 1; }
           grep -Fq "CHECK THE OWNERSHIP WINDOW FIRST" Hooks/AxsDismissEffect.xm || { echo "ownership-first check order missing"; exit 1; }
@@ -573,17 +562,10 @@ jobs:
           grep -Fq "PROBE mini-capture %@ class=%@ frame=%@ hierarchy=%d image=%d pixels=%zux%zu layerContents=%@" "$EXTRACT/dylib34.strings" || { echo "mini-capture probe log missing in dylib"; exit 1; }
           grep -Fq "axs_probe_dumpTOJBClasses();" Hooks/AxsDismissEffect.xm || { echo "TOJB probe not invoked"; exit 1; }
           grep -Fq "axs_probe_dumpTouchChain(touchView);" Hooks/AxsDismissEffect.xm || { echo "touch chain probe not invoked"; exit 1; }
-          grep -Fq "float2 uvS = (cell+corner)/grid;" Hooks/AxsMetalSand.xm || { echo "1:1 cover uv missing"; exit 1; }
           # .195: third open style -- LIVE DEPOSIT (real card pixels painted
           # per cell by the classic pipeline; no dark plate, no screen capture).
           echo "=== beautify.211 live-window-reveal open style check ==="
-          grep -Fq "static BOOL axs_open_liveCoverStyle(void)" Hooks/AxsDismissEffect.xm || { echo "live-cover style reader missing"; exit 1; }
-          grep -Fq "static UIImage *axs_open_makeLiveCover(UIImage *src)" Hooks/AxsDismissEffect.xm || { echo "live-cover plate builder missing"; exit 1; }
-          grep -Fq "return src;" Hooks/AxsDismissEffect.xm || { echo "live-cover no-darken pass-through missing"; exit 1; }
-          grep -Fq "BOOL liveCover = !realReveal && axs_open_liveCoverStyle()" Hooks/AxsDismissEffect.xm || { echo "live-cover poll branch missing"; exit 1; }
-          grep -Fq "BOOL useCover = !realReveal && !liveCover &&" Hooks/AxsDismissEffect.xm || { echo "live-cover deposit pipeline selection missing"; exit 1; }
           grep -Fq "texKind = @\"live-cover\";" Hooks/AxsDismissEffect.xm || { echo "live-cover texKind missing"; exit 1; }
-          grep -Fq "if (!useCover && !realReveal) {" Hooks/AxsDismissEffect.xm || { echo "live-cover texture-swap guard missing"; exit 1; }
           grep -Fq "metal compiled OK pipeline ready cover=" "$EXTRACT/dylib34.strings" || { echo "dual pipeline compile log missing in dylib"; exit 1; }
           echo "=== beautify.211 style-3 real-window reveal check ==="
           grep -Fq "static BOOL axs_open_realRevealStyle(void)" Hooks/AxsDismissEffect.xm || { echo "real reveal style getter missing"; exit 1; }
@@ -603,7 +585,6 @@ jobs:
           grep -Fq "uint cornerKill;" Hooks/AxsMetalSand.xm || { echo "corner kill MSL uniform fields missing"; exit 1; }
           grep -Fq "u.cornerKill = sMsdCornerKill;" Hooks/AxsMetalSand.xm || { echo "corner kill uniform fill missing"; exit 1; }
           grep -Fq "outO.fade=born*gone*kill;" Hooks/AxsMetalSand.xm || { echo "classic corner kill fade missing"; exit 1; }
-          grep -Fq "outO.fade=born*(1.0-dock)*kill;" Hooks/AxsMetalSand.xm || { echo "cover corner kill fade missing"; exit 1; }
           grep -Fq "axs_msd_setCornerKill(1u, (float)rr)" Hooks/AxsDismissEffect.xm || { echo "real reveal corner kill arm missing"; exit 1; }
           grep -Fq "OPEN real reveal corner kill armed radius" Hooks/AxsDismissEffect.xm || { echo "corner kill log missing"; exit 1; }
           echo "=== beautify.211 corner-aware mask + no-flash check ==="
@@ -765,7 +746,6 @@ jobs:
           # mask driver (CADisplayLink + per-frame CGPath rebuild, the laggy
           # "CPU engine") is fully removed; the card stays hidden and the
           # snapshot is fetched by an async retry, then swapped mid-flight.
-          grep -Fq "static UIImage *axs_open_captureCardCheap(UIView *card)" Hooks/AxsDismissEffect.xm || { echo "cheap card capture missing"; exit 1; }
           # .166: snapshots are clipped to the card rounded radius -- the square
           # container background painted right-angle corner glows otherwise.
           grep -Fq "static UIImage *axs_dm_roundSnapshot(UIImage *img, UIView *refView)" Hooks/AxsDismissEffect.xm || { echo "rounded snapshot clip missing"; exit 1; }
@@ -775,8 +755,6 @@ jobs:
           grep -Fq "return axs_dm_fixSnapshotCorners(shot, card);" Hooks/AxsDismissEffect.xm || { echo "open capture not corner-fixed"; exit 1; }
           grep -Fq "axs_dm_fixSnapshotCorners(shot, sourceView)" Hooks/AxsDismissEffect.xm || { echo "dismiss capture not corner-fixed"; exit 1; }
           grep -Fq "preShot = axs_open_captureVisibleCardCheap(card);" Hooks/AxsDismissEffect.xm || { echo "first-open pre-hide capture missing"; exit 1; }
-          grep -Fq "static void axs_open_gpuTextureRetry(UIView *card, void *renderer, NSInteger triesLeft)" Hooks/AxsDismissEffect.xm || { echo "async texture retry missing"; exit 1; }
-          grep -Fq "axs_open_gpuTextureRetry(c, renderer, 30);" Hooks/AxsDismissEffect.xm || { echo "retry not scheduled"; exit 1; }
           # .158: hidden-card capture is impossible (cross-process content);
           # the deposit texture comes from the cached visible-card snapshot
           # refreshed at every dismiss and 0.35s after every open.
@@ -789,7 +767,6 @@ jobs:
           grep -Fq "UIImage *cachedCard = axs_open_cachedCardSnapshotForView(card);" Hooks/AxsDismissEffect.xm || { echo "per-window cached texture seed missing"; exit 1; }
           grep -Fq "texKind = @\"cached-card\";" Hooks/AxsDismissEffect.xm || { echo "cached-card texture tag missing"; exit 1; }
           grep -Fq "axs_open_captureVisibleCardCheap(c)" Hooks/AxsDismissEffect.xm || { echo "post-open cache refresh missing"; exit 1; }
-          grep -Fq "if (axs_metalReplaceTexture(renderer, shot))" Hooks/AxsDismissEffect.xm || { echo "mid-flight texture swap missing"; exit 1; }
           # .168: the refresh capture uses the DEVICE scale (1x stretched across
           # the 3x screen read as a corner morph), and the cache persists to disk.
           grep -Fq "/var/mobile/Library/Caches/sc-open-cache" Hooks/AxsDismissEffect.xm || { echo "persistent snapshot cache missing"; exit 1; }
