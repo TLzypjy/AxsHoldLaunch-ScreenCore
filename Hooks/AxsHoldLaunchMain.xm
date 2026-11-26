@@ -897,18 +897,31 @@ static id axs_ringPage_cellForRow_imp(id self, SEL _cmd, id tableView, id indexP
                   forControlEvents:UIControlEventTouchUpInside];
                 [rowContent addSubview:infoBtn];
             }
-            // .215: park the (i) SNUG against the left edge of the selected-
-            // value label (the label with the largest minX -- the title sits
-            // at the left and often stretches full-width, so its right edge
-            // was useless for positioning). 4pt gap to the value text.
+            // .218: anchor to the VALUE TEXT's right edge, not the label frame
+            // (the private value label stretches wide, so its frame edge sits
+            // far from the rendered text). Measure the text with the label's
+            // own font and park the (i) 6pt after it.
             CGFloat valueMinX = -1.0;
+            UILabel *valueLabel = nil;
             for (UIView *sv in rowContent.subviews) {
                 if ([sv isKindOfClass:[UILabel class]] && sv.tag != 0x213) {
-                    if (sv.frame.origin.x > valueMinX) valueMinX = sv.frame.origin.x;
+                    if (sv.frame.origin.x > valueMinX) {
+                        valueMinX = sv.frame.origin.x;
+                        valueLabel = (UILabel *)sv;
+                    }
                 }
             }
-            CGFloat bx = (valueMinX > 0) ? (valueMinX - 34.0)
-                                         : (rowContent.bounds.size.width - 150.0);
+            CGFloat bx = rowContent.bounds.size.width - 150.0;
+            if ([valueLabel isKindOfClass:[UILabel class]]) {
+                NSString *vt = valueLabel.text ?: @"";
+                CGFloat tw = [vt sizeWithAttributes:@{@"NSFontAttributeName": valueLabel.font}].width;
+                CGFloat textRight = valueLabel.frame.origin.x + tw;
+                if (textRight > 40.0 && textRight < rowContent.bounds.size.width - 40.0) {
+                    bx = textRight + 6.0;
+                }
+            }
+            CGFloat maxBx = rowContent.bounds.size.width - 60.0;
+            if (bx > maxBx) bx = maxBx;
             if (bx < 40.0) bx = 40.0;
             CGFloat by = (rowContent.bounds.size.height - 30.0) / 2.0;
             infoBtn.frame = CGRectMake(bx, by, 30, 30);
