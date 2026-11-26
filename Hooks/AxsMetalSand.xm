@@ -132,10 +132,10 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float hf = (float)(h & 0xffffu)/65535.0;\n\
         float orderBase;\n\
         if (u.dirMode == 0u) orderBase = unit.y;\n\
-        else if (u.dirMode == 1u) orderBase = (unit.x + unit.y)*0.5;\n\
-        else if (u.dirMode == 2u) orderBase = ((1.0-unit.x) + unit.y)*0.5;\n\
-        else if (u.dirMode == 3u) orderBase = (unit.x + (1.0-unit.y))*0.5;\n\
-        else if (u.dirMode == 5u) orderBase = (1.0-unit.y);\n\
+        else if (u.dirMode == 1u) orderBase = (1.0-unit.y);\n\
+        else if (u.dirMode == 2u) orderBase = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 4u) orderBase = (unit.x + (1.0-unit.y))*0.5;\n\
         else orderBase = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
         float order = 0.96*orderBase + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
@@ -186,10 +186,10 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
         float orderBase2;\n\
         if (u.dirMode == 0u) orderBase2 = unit.y;\n\
-        else if (u.dirMode == 1u) orderBase2 = (unit.x + unit.y)*0.5;\n\
-        else if (u.dirMode == 2u) orderBase2 = ((1.0-unit.x) + unit.y)*0.5;\n\
-        else if (u.dirMode == 3u) orderBase2 = (unit.x + (1.0-unit.y))*0.5;\n\
-        else if (u.dirMode == 5u) orderBase2 = (1.0-unit.y);\n\
+        else if (u.dirMode == 1u) orderBase2 = (1.0-unit.y);\n\
+        else if (u.dirMode == 2u) orderBase2 = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase2 = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 4u) orderBase2 = (unit.x + (1.0-unit.y))*0.5;\n\
         else orderBase2 = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
         float order2 = 0.96*orderBase2 + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\
@@ -401,10 +401,10 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float hf = (float)(h & 0xffffu)/65535.0;\n\
         float orderBase;\n\
         if (u.dirMode == 0u) orderBase = unit.y;\n\
-        else if (u.dirMode == 1u) orderBase = (unit.x + unit.y)*0.5;\n\
-        else if (u.dirMode == 2u) orderBase = ((1.0-unit.x) + unit.y)*0.5;\n\
-        else if (u.dirMode == 3u) orderBase = (unit.x + (1.0-unit.y))*0.5;\n\
-        else if (u.dirMode == 5u) orderBase = (1.0-unit.y);\n\
+        else if (u.dirMode == 1u) orderBase = (1.0-unit.y);\n\
+        else if (u.dirMode == 2u) orderBase = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 4u) orderBase = (unit.x + (1.0-unit.y))*0.5;\n\
         else orderBase = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
         float order = 0.96*orderBase + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
@@ -456,10 +456,10 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         float hf2 = (float)(h2 & 0xffffu)/65535.0;\n\
         float orderBase2;\n\
         if (u.dirMode == 0u) orderBase2 = unit.y;\n\
-        else if (u.dirMode == 1u) orderBase2 = (unit.x + unit.y)*0.5;\n\
-        else if (u.dirMode == 2u) orderBase2 = ((1.0-unit.x) + unit.y)*0.5;\n\
-        else if (u.dirMode == 3u) orderBase2 = (unit.x + (1.0-unit.y))*0.5;\n\
-        else if (u.dirMode == 5u) orderBase2 = (1.0-unit.y);\n\
+        else if (u.dirMode == 1u) orderBase2 = (1.0-unit.y);\n\
+        else if (u.dirMode == 2u) orderBase2 = (unit.x + unit.y)*0.5;\n\
+        else if (u.dirMode == 3u) orderBase2 = ((1.0-unit.x) + unit.y)*0.5;\n\
+        else if (u.dirMode == 4u) orderBase2 = (unit.x + (1.0-unit.y))*0.5;\n\
         else orderBase2 = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
         float order2 = 0.96*orderBase2 + 0.04*hf2;\n\
         float arrival2 = 0.35 + 0.65*order2;\n\

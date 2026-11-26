@@ -874,10 +874,10 @@ static inline CGFloat axs_open_smoothstep196(CGFloat a, CGFloat b, CGFloat x) {
             CGFloat ux = (cx + 0.5f) / (CGFloat)cols;
             CGFloat orderBase;
             if (self.dirMode == 0u) orderBase = uy;
-            else if (self.dirMode == 1u) orderBase = (ux + uy) * 0.5f;
-            else if (self.dirMode == 2u) orderBase = ((1.0f - ux) + uy) * 0.5f;
-            else if (self.dirMode == 3u) orderBase = (ux + (1.0f - uy)) * 0.5f;
-            else if (self.dirMode == 5u) orderBase = 1.0f - uy;
+            else if (self.dirMode == 1u) orderBase = 1.0f - uy;
+            else if (self.dirMode == 2u) orderBase = (ux + uy) * 0.5f;
+            else if (self.dirMode == 3u) orderBase = ((1.0f - ux) + uy) * 0.5f;
+            else if (self.dirMode == 4u) orderBase = (ux + (1.0f - uy)) * 0.5f;
             else orderBase = ((1.0f - ux) + (1.0f - uy)) * 0.5f;
             CGFloat order = 0.96f * orderBase + 0.04f * hf;
             CGFloat arrival = 0.35f + 0.65f * order;
