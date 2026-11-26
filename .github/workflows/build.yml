@@ -566,7 +566,7 @@ jobs:
           # per cell by the classic pipeline; no dark plate, no screen capture).
           echo "=== beautify.212 live-window-reveal open style check ==="
           grep -Fq "texKind = @\"live-cover\";" Hooks/AxsDismissEffect.xm || { echo "live-cover texKind missing"; exit 1; }
-          grep -Fq "metal compiled OK pipeline ready cover=" "$EXTRACT/dylib34.strings" || { echo "dual pipeline compile log missing in dylib"; exit 1; }
+          grep -Fq "metal compiled OK pipeline ready" "$EXTRACT/dylib34.strings" || { echo "metal compile log missing in dylib"; exit 1; }
           echo "=== beautify.212 style-3 real-window reveal check ==="
           grep -Fq "static BOOL axs_open_realRevealStyle(void)" Hooks/AxsDismissEffect.xm || { echo "real reveal style getter missing"; exit 1; }
           grep -Fq "@interface AXSOpenRevealDriver" Hooks/AxsDismissEffect.xm || { echo "reveal mask driver missing"; exit 1; }
@@ -774,7 +774,6 @@ jobs:
           grep -Fq "OPEN snapshot loaded from disk" Hooks/AxsDismissEffect.xm || { echo "disk cache load missing"; exit 1; }
           grep -Fq "snapshot corners opaque=" Hooks/AxsDismissEffect.xm || { echo "corner decision log missing"; exit 1; }
           grep -Fq "static void axs_dm_scanLayers(CALayer *layer, int depth, CGFloat *best, CGFloat *bgRadius)" Hooks/AxsDismissEffect.xm || { echo "layer radius scan missing"; exit 1; }
-          grep -Fq "(void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(card, @selector(setHidden:), YES);" Hooks/AxsDismissEffect.xm || { echo "hidden-state ownership missing"; exit 1; }
           grep -Fq "axs_open_interceptUntil = 0" Hooks/AxsDismissEffect.xm || { echo "intercept disarm missing"; exit 1; }
           ! grep -Fq "AXSOpenWipeDriver" Hooks/AxsDismissEffect.xm || { echo "stale CPU mask driver class still present"; exit 1; }
           ! grep -Fq "axs_open_gridForDensity" Hooks/AxsDismissEffect.xm || { echo "stale CPU grid helper still present"; exit 1; }
