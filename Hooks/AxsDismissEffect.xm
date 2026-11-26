@@ -711,7 +711,7 @@ static uint32_t axs_open_directionMode(void) {
             id value = imp(cfg, sel, @"splitBeautifyOpenDirection", @0);
             if ([value isKindOfClass:[NSNumber class]]) mode = (uint32_t)[value integerValue];
         }
-        if (mode > 6) mode = 0;
+        if (mode > 7) mode = 0;
     } @catch (NSException *ignored) {
         mode = 0;
     }
@@ -906,6 +906,12 @@ static void axs_open_playShockwave(UIWindow *win, CGPoint point) {
                 CGFloat dx6 = px - self.srcX;
                 CGFloat dy6 = py - self.srcY;
                 orderBase = fminf(sqrtf(dx6 * dx6 + dy6 * dy6) / self.maxDist, 1.0f);
+            }
+            else if (self.dirMode == 7u) {
+                CGFloat dx7 = px - self.frameW * 0.5f;
+                CGFloat dy7 = py - self.frameH * 0.5f;
+                CGFloat md7 = sqrtf(self.frameW * self.frameW + self.frameH * self.frameH) * 0.5f;
+                orderBase = 1.0f - fminf(sqrtf(dx7 * dx7 + dy7 * dy7) / md7, 1.0f);
             }
             else orderBase = ((1.0f - ux) + (1.0f - uy)) * 0.5f;
             CGFloat order = 0.96f * orderBase + 0.04f * hf;

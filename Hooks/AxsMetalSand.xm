@@ -143,6 +143,10 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
             float fy6 = max(abs(sp.y - u.origin.y), abs(sp.y - (u.origin.y + u.cardSize.y)));\n\
             orderBase = min(distance(cp, sp) / max(length(float2(fx6, fy6)), 1.0), 1.0);\n\
         }\n\
+        else if (u.dirMode == 7u) {\n\
+            float d7 = length((unit - 0.5) * u.cardSize);\n\
+            orderBase = 1.0 - min(d7 / max(length(u.cardSize) * 0.5, 1.0), 1.0);\n\
+        }\n\
         else orderBase = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
         float order = 0.96*orderBase + 0.04*hf;\n\
         float arrival = 0.35 + 0.65*order;\n\
@@ -203,6 +207,10 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
             float fx6 = max(abs(sp2.x - u.origin.x), abs(sp2.x - (u.origin.x + u.cardSize.x)));\n\
             float fy6 = max(abs(sp2.y - u.origin.y), abs(sp2.y - (u.origin.y + u.cardSize.y)));\n\
             orderBase2 = min(distance(cp2, sp2) / max(length(float2(fx6, fy6)), 1.0), 1.0);\n\
+        }\n\
+        else if (u.dirMode == 7u) {\n\
+            float d7 = length((unit - 0.5) * u.cardSize);\n\
+            orderBase2 = 1.0 - min(d7 / max(length(u.cardSize) * 0.5, 1.0), 1.0);\n\
         }\n\
         else orderBase2 = ((1.0-unit.x) + (1.0-unit.y))*0.5;\n\
         float order2 = 0.96*orderBase2 + 0.04*hf2;\n\
