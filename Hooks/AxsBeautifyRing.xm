@@ -2565,6 +2565,8 @@ static void axs_ring_tiltFillSiblingHosts(UIView *container, NSMutableArray *hos
 //   tiltRotation = CATransform3DRotate(identity, rad, 0,1,0); tiltRotation.m34 = -1/600
 //   want         = CATransform3DConcat(nativeBase, tiltRotation)  // 保留原生缩放/平移
 // 手势 overlay 留在 identity 平面，命中区按投影后四角更新 frame（不改 transform/alpha/mask）。
+static BOOL axs_ring_tiltSuppress = NO;   // .256: 快照捕获期抑制宿主 tilt
+
 static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
     @try {
         UIView *container = driver.container;
@@ -2733,7 +2735,11 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         int side = 0;
         double rad = 0.0;
         // 居中大窗 / 关闭 / 角度 0 → shouldTilt=NO，所有宿主回 nativeBase（清零透视）。
-        BOOL shouldTilt = tiltOn && docked && angle > 0.0 && container.window != nil;
+        // .256: 截图烤 tilt 用——飞行转场在捕获快照前临时抑制宿主 tilt
+        //（axs_ring_forceTiltOff / forceTiltSync 成对调用），保证烤进图片的
+        // 观感确定可控。
+        BOOL shouldTilt = tiltOn && docked && angle > 0.0 && container.window != nil
+            && !axs_ring_tiltSuppress;
         if (shouldTilt) {
             side = axs_ring_containerDockSide(container);
             rad = AXS_TILT_SIDE_SIGN * side * angle * M_PI / 180.0;
@@ -3207,6 +3213,29 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
 }
 
 // detach/离层：恢复原生 base3D（不是 identity），绝不残留透视；overlay 回平面初始。
+// .256: 快照烤 tilt 的两个强制接口（供 AxsDismissEffect 的 dock 转场调用）。
+// forceTiltOff：立即把所有宿主 tilt 复位（捕获「正面/当前基础观感」用）；
+// forceTiltSync：立即按当前状态施加/恢复（捕获「侧倾观感」用，或恢复正常运转）。
+// 两者都同步执行 applyTilt，写 transform 无需等下一个 ring tick。
+void axs_ring_forceTiltOff(void) {
+    axs_ring_tiltSuppress = YES;
+    for (NSString *k in [axs_ring_drivers allKeys]) {
+        @try {
+            AXSRingLinkDriver *d = axs_ring_drivers[k];
+            if (d != nil && d.container != nil) axs_ring_applyTilt(d);
+        } @catch (NSException *ignored) { }
+    }
+}
+void axs_ring_forceTiltSync(void) {
+    axs_ring_tiltSuppress = NO;
+    for (NSString *k in [axs_ring_drivers allKeys]) {
+        @try {
+            AXSRingLinkDriver *d = axs_ring_drivers[k];
+            if (d != nil && d.container != nil) axs_ring_applyTilt(d);
+        } @catch (NSException *ignored) { }
+    }
+}
+
 static void axs_ring_resetTilt(AXSRingLinkDriver *driver) {
     @try {
         UIView *ov = driver.tiltOverlayView;

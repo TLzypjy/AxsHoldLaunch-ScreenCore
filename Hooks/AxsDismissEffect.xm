@@ -2129,8 +2129,12 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 // 就位 -> 用户看到浮窗「直接弹到侧窗位置」）。stop 时揭示。
 @property (nonatomic, weak) UIView *flightCard;
 @property (nonatomic, assign) BOOL hidCard;
+// .256: 目标侧快照——侧倾观感直接烤进图片（fwd=宿主 tilt 后的 docked 观感，
+// rev=宿主复位后的浮窗观感），飞行层不再自带 transform，交接零跳变。
+@property (nonatomic, strong) UIImage *dstShot;
 - (void)startWithWindow:(UIWindow *)window
                 srcShot:(UIImage *)srcShot
+                dstShot:(UIImage *)dstShot
                srcFrame:(CGRect)srcFrame
                dstFrame:(CGRect)dstFrame
                duration:(NSTimeInterval)duration
@@ -2201,9 +2205,9 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     return bmp;
 }
 
-- (CALayer *)makeCardLayerWithFrame:(CGRect)frame corner:(CGFloat)corner {
+- (CALayer *)makeCardLayerWithFrame:(CGRect)frame corner:(CGFloat)corner image:(UIImage *)img {
     CALayer *card = [CALayer layer];
-    card.contents = (__bridge id)self.srcShot.CGImage;
+    card.contents = (__bridge id)img.CGImage;
     card.contentsGravity = kCAGravityResizeAspectFill;
     card.frame = frame;
     card.masksToBounds = YES;
@@ -2218,7 +2222,7 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     self.dstW = dstFrame.size.width;
     self.dstH = dstFrame.size.height;
 
-    self.srcLayer = [self makeCardLayerWithFrame:srcFrame corner:self.srcCorner];
+    self.srcLayer = [self makeCardLayerWithFrame:srcFrame corner:self.srcCorner image:self.srcShot];
     self.srcMaskLayer = [CALayer layer];
     self.srcMaskLayer.frame = self.srcLayer.bounds;
     self.srcMaskLayer.contentsGravity = kCAGravityResize;
@@ -2226,7 +2230,8 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     if (self.srcTiltRad != 0.0f) self.srcLayer.transform = axs_dock_tiltMatrix(self.srcTiltRad);
     @try { [self.win.layer insertSublayer:self.srcLayer atIndex:0]; } @catch (NSException *ignored) { }
 
-    self.dstLayer = [self makeCardLayerWithFrame:dstFrame corner:self.dstCorner];
+    UIImage *dImg = self.dstShot ?: self.srcShot;
+    self.dstLayer = [self makeCardLayerWithFrame:dstFrame corner:self.dstCorner image:dImg];
     self.dstMaskLayer = [CALayer layer];
     self.dstMaskLayer.frame = self.dstLayer.bounds;
     self.dstMaskLayer.contentsGravity = kCAGravityResize;
@@ -2237,6 +2242,7 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
 
 - (void)startWithWindow:(UIWindow *)window
                 srcShot:(UIImage *)srcShot
+                dstShot:(UIImage *)dstShot
                srcFrame:(CGRect)srcFrame
                dstFrame:(CGRect)dstFrame
                duration:(NSTimeInterval)duration
@@ -2249,6 +2255,7 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
               arriveDir:(uint32_t)arriveDir {
     self.win = window;
     self.srcShot = srcShot;
+    self.dstShot = dstShot;
     self.duration = duration;
     self.srcCorner = srcCorner;
     self.dstCorner = dstCorner;
@@ -2401,6 +2408,10 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
 @end
 
 static char axs_dock_flightDriverKey;
+
+// .256: ring 宿主 tilt 强制接口（快照烤 tilt 用），实现在 AxsBeautifyRing.xm
+extern void axs_ring_forceTiltOff(void);
+extern void axs_ring_forceTiltSync(void);
 
 // ===== beautify.228: 浮窗→侧窗 粒子聚合 ====================================
 // 由 AxsBeautifyRing.xm 的 dock 翻转检测调用（浮窗变侧窗的那一帧）。
@@ -2605,22 +2616,21 @@ void axs_dock_enforceDockedItemTilt(void) {
         // Dock 通道触摸映射所致（.251 去掉 item tilt 后点击恢复，winHid=0
         // 证明宿主窗口可见、hitView=nil 是桥接正常现象）。纯旋转矩阵可逆，
         // hit-test 可存活。
-        CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
-        tiltRotation.m14 = 0.0;
-        tiltRotation.m34 = 0.0;
         static CFTimeInterval axs_dock_enforceLogAt = 0;
         BOOL logNow = (CACurrentMediaTime() - axs_dock_enforceLogAt > 1.0);
         for (UIView *item in items) {
             if (item == nil || item.layer == nil) continue;
             if (item.hidden) item.hidden = NO;   // 侧窗本体应可见
-            item.layer.transform = tiltRotation;
+            // .256: item 本体不再 tilt——可见侧倾由 ring 宿主透视 tilt 独立承担
+            //（镜像=宿主观感），item flat tilt 只叠加 ~4% 挤压造成交接微差。
+            item.layer.transform = CATransform3DIdentity;
             if (logNow) {
                 NSMutableString *kids = [NSMutableString string];
                 for (UIView *sub in item.subviews) {
                     [kids appendFormat:@"%@(hidden=%d) ", NSStringFromClass(sub.class), sub.hidden ? 1 : 0];
                 }
                 NSUInteger sceneN = (NSUInteger)axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect).count;
-                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=flat itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
+                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=off itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
                            (unsigned long)items.count, rad * 180.0 / M_PI,
                            item.hidden ? 1 : 0,
                            axs_dock_lastWindow.hidden ? 1 : 0,
@@ -2741,25 +2751,9 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         if (srcCorner < 1.0f) srcCorner = 12.0f;
         if (dstCorner < 1.0f) dstCorner = 12.0f;
 
-        // 侧倾：正向 dst=侧窗侧倾（右贴朝中心）；反向 dst=浮窗侧倾；
-        // 反向 src=侧窗侧倾（消散的是已侧倾的侧窗）。
-        CGFloat screenW = win.bounds.size.width;
-        CGFloat tiltAngle = 3.0;
-        id ta = axs_dock_pref(@"splitBeautifyTiltAngle", @3.0);
-        if ([ta isKindOfClass:[NSNumber class]]) {
-            tiltAngle = [ta doubleValue];
-            if (tiltAngle < 0.0) tiltAngle = 0.0;
-            if (tiltAngle > 30.0) tiltAngle = 30.0;
-        }
-        if (tiltAngle != tiltAngle) tiltAngle = 3.0;
-        CGFloat dockTilt = 0.0;
-        {
-            BOOL dockRight = (toFrame.origin.x + toFrame.size.width * 0.5f) > screenW * 0.5f;
-            dockTilt = (dockRight ? -1.0 : 1.0) * tiltAngle * 2.6 * M_PI / 180.0;
-        }
-        CGFloat srcTiltRad = toDock ? 0.0 : dockTilt;
-        // .253: 反向聚合终点=正面浮窗（浮窗态没有侧倾，终点倾斜会先斜后回正）。
-        CGFloat dstTiltRad = toDock ? dockTilt : 0.0;
+        // .256: tilt 已烤进快照图片（宿主透视 tilt 的真实观感），飞行层一律 identity。
+        CGFloat srcTiltRad = 0.0;
+        CGFloat dstTiltRad = 0.0;
 
         // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)。
         // .254: 反向聚合目标改为右上→左下(3)（=粒子行程方向：靠侧窗近的格子
@@ -2768,20 +2762,39 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         uint32_t departDir = 3u;
         uint32_t arriveDir = 3u;
 
-        // 边界细沙粒子（shader openMode=3），纹理=src 快照。
-        // .250: fresh capture 优先——容器刚被清理成完整态，现拍现用；
-        // 缓存快照可能是被 mask/隐藏态污染的半白图，只作兜底。
+        // .256: 双快照烤 tilt。宿主 tilt（ring 透视）施加在 App 尺寸空间再被
+        // dock 缩放呈现，与飞行层自带的 transform 矩阵观感不一致（跳变/半张
+        // 斜卡的根源）——改为把 tilt 直接烤进图片，所有飞行层 transform 归零：
+        //   fwd：先捕浮窗正面图（宿主此刻尚未 tilt）→ forceTiltSync 施加宿主
+        //        tilt → 捕 docked 侧倾图（=聚合完成后的最终观感，逐像素一致）；
+        //   rev：先捕 docked 当前真实观感（可能已被原生 pop 转正，烤进去就是
+        //        用户看到的）→ forceTiltSync 复位宿主 → 捕浮窗正面图。
+        axs_ring_forceTiltOff();   // 确定化起点：宿主 tilt 一律先复位
         UIImage *srcShot = axs_open_captureVisibleCardCheap(container);
         if (srcShot == nil) srcShot = axs_open_cachedCardSnapshotForView(container);
         if (srcShot == nil) srcShot = axs_dm_snapshot(container);
         if (srcShot == nil) {
             axs_dm_log(@"DOCK FLIGHT skipped (no src snapshot)");
+            axs_ring_forceTiltSync();
             return;
         }
+        UIImage *dstShot = nil;
+        if (toDock) {
+            axs_ring_forceTiltSync();          // 施加宿主 tilt（docked 态）
+            dstShot = axs_open_captureVisibleCardCheap(container);
+        } else {
+            // .256 映射：src 层/粒子=docked 当前真实观感（srcShot 不动）；
+            // dst 层=宿主复位后的浮窗正面图（不把宿主 tilt 烤进聚合终点）。
+            axs_ring_forceTiltSync();          // dockNow=NO -> 宿主 tilt 复位
+            UIImage *fresh = axs_open_captureVisibleCardCheap(container);
+            dstShot = (fresh != nil) ? fresh : srcShot;
+        }
+        if (dstShot == nil) dstShot = srcShot;
         void *renderer = axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame,
                                                       duration, density, departDir, arriveDir);
         if (renderer == nil) {
             axs_dm_log(@"DOCK FLIGHT metal unavailable -> native restore");
+            axs_ring_forceTiltSync();   // .256: 恢复宿主 tilt，绝不留在 suppress 态
             return;
         }
 
@@ -2797,6 +2810,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         AXSDockFlightDriver *driver = [AXSDockFlightDriver new];
         [driver startWithWindow:win
                         srcShot:srcShot
+                        dstShot:dstShot
                        srcFrame:fromFrame
                        dstFrame:toFrame
                        duration:duration

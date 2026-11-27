@@ -1,3 +1,19 @@
+beautify.256 变更（tilt 烤进快照：交接观感逐像素一致）：
+- 用户反馈 .255：a) 侧窗聚合时有侧倾但不是真实侧倾角度，聚合完成后跳变一下；
+  b) 侧窗转浮窗仍有一半侧倾——用户点破：点击侧窗转浮窗时侧窗会先转正一下再消散，
+  截图实锤此刻侧窗本体=「左半透视倾斜+右半正面」的复合态（ring 宿主 tilt 与
+  原生 pop 中间态叠加），这个中间态被反向快照原样捕获并聚合进浮窗。
+- 根源：宿主 tilt 施加在 App 尺寸空间再被 dock 缩放呈现，与飞行层自带 transform
+  （小尺寸空间直接转）观感不同；且揭示/捕获时刻的宿主 tilt 状态有竞争。
+- 修复（架构级）：彻底放弃「层自带 transform」——tilt 烤进快照图片：
+  a) ring 新增 axs_ring_forceTiltOff/forceTiltSync（同步施加/复位宿主 tilt，
+     不等 tick）；b) 飞行前确定化：forceTiltOff → 捕基础图 → 按方向
+     forceTiltSync（fwd 施加 tilt 捕 docked 侧倾图=聚合终点最终观感；rev 复位
+     捕浮窗正面图）→ 全部飞行层 transform=identity；c) ENFORCE item 本体 tilt
+     移除（镜像观感=宿主 tilt，item flat 只叠加 4% 挤压造成微差）；
+  d) 失败路径一律 forceTiltSync 兜底，绝不残留 suppress 态。
+- 保持：.255 等比圆角/到达顺序/吞窗限界/probeBoost、.252 飞行隐藏揭示。
+
 beautify.255 变更（聚合观感与最终侧倾统一 + ring 恢复提速 + 点击响应放行）：
 - 用户反馈 .254：a) 侧窗先聚合成正面、然后再转成侧倾；b) 侧窗转浮窗仍有一半
   侧倾状态然后回正。
