@@ -563,13 +563,13 @@ jobs:
           grep -Fq "objc_getClassList(classes, count)" Hooks/AxsDismissEffect.xm || { echo "TOJB class enumeration missing"; exit 1; }
           grep -Fq "class_copyMethodList(cls, &mcount)" Hooks/AxsDismissEffect.xm || { echo "TOJB method enumeration missing"; exit 1; }
           grep -Fq "PROBE TOJB CLASS %s methods=%u" "$EXTRACT/dylib34.strings" || { echo "TOJB class log missing in dylib"; exit 1; }
-          grep -Fq "static void axs_probe_dumpTouchChain(UIView *touchView)" Hooks/AxsDismissEffect.xm || { echo "touch chain probe missing"; exit 1; }
+          grep -Fq "static void axs_probe_dumpTouchChain(UIView *touchView, CGPoint touchLoc)" Hooks/AxsDismissEffect.xm || { echo "touch chain probe missing"; exit 1; }
           grep -Fq "static void axs_probe_captureView(UIView *v, NSString *label)" Hooks/AxsDismissEffect.xm || { echo "icon capture probe missing"; exit 1; }
           grep -Fq "[v snapshotViewAfterScreenUpdates:YES]" Hooks/AxsDismissEffect.xm || { echo "probe hierarchy snapshot missing"; exit 1; }
           grep -Fq "[v drawViewHierarchyInRect:bounds afterScreenUpdates:YES]" Hooks/AxsDismissEffect.xm || { echo "probe offscreen render missing"; exit 1; }
           grep -Fq "PROBE mini-capture %@ class=%@ frame=%@ hierarchy=%d image=%d pixels=%zux%zu layerContents=%@" "$EXTRACT/dylib34.strings" || { echo "mini-capture probe log missing in dylib"; exit 1; }
           grep -Fq "axs_probe_dumpTOJBClasses();" Hooks/AxsDismissEffect.xm || { echo "TOJB probe not invoked"; exit 1; }
-          grep -Fq "axs_probe_dumpTouchChain(touchView);" Hooks/AxsDismissEffect.xm || { echo "touch chain probe not invoked"; exit 1; }
+          grep -Fq "axs_probe_dumpTouchChain(touchView, loc);" Hooks/AxsDismissEffect.xm || { echo "touch chain probe not invoked"; exit 1; }
           # .195: third open style -- LIVE DEPOSIT (real card pixels painted
           # per cell by the classic pipeline; no dark plate, no screen capture).
           echo "=== beautify.251 live-window-reveal open style check ==="
