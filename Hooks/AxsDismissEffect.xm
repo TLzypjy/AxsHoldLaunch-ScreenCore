@@ -2130,10 +2130,21 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
 
 @implementation AXSDockFlightDriver
 
-- (CGContextRef)makeBmpWithBits:(NSMutableData **)bitsOut {
+- (CGContextRef)makeSrcBmp {
     NSUInteger bpr = self.cols * 4;
     NSMutableData *bits = [NSMutableData dataWithLength:bpr * self.rows];
-    *bitsOut = bits;
+    self.srcBits = bits;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef bmp = CGBitmapContextCreate([bits mutableBytes], self.cols, self.rows,
+                                             8, bpr, cs,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    return bmp;
+}
+- (CGContextRef)makeDstBmp {
+    NSUInteger bpr = self.cols * 4;
+    NSMutableData *bits = [NSMutableData dataWithLength:bpr * self.rows];
+    self.dstBits = bits;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef bmp = CGBitmapContextCreate([bits mutableBytes], self.cols, self.rows,
                                              8, bpr, cs,
@@ -2209,8 +2220,8 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     self.cols = c; self.rows = r;
 
     [self installLayersWithSrcFrame:srcFrame dstFrame:dstFrame];
-    self.srcBmp = [self makeBmpWithBits:&_srcBits];
-    self.dstBmp = [self makeBmpWithBits:&_dstBits];
+    self.srcBmp = [self makeSrcBmp];
+    self.dstBmp = [self makeDstBmp];
     [self paintSrc:0.0];
     [self paintDst:0.0];
     self.start = CACurrentMediaTime();
@@ -2688,6 +2699,11 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         CGFloat srcTiltRad = toDock ? 0.0 : dockTilt;
         CGFloat dstTiltRad = toDock ? dockTilt : floatTilt;
 
+        // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)，
+        // 侧窗→浮窗目标左下→右上(4)。
+        uint32_t departDir = 3u;
+        uint32_t arriveDir = toDock ? 3u : 4u;
+
         // 边界细沙粒子（shader openMode=3），纹理=src 快照。
         UIImage *srcShot = axs_open_cachedCardSnapshotForView(container);
         if (srcShot == nil) srcShot = axs_open_captureVisibleCardCheap(container);
@@ -2711,8 +2727,6 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         AXSDockFlightDriver *oldDrv = objc_getAssociatedObject(container, &axs_dock_flightDriverKey);
         if (oldDrv != nil) [oldDrv stop];
 
-        uint32_t departDir = 3u;
-        uint32_t arriveDir = toDock ? 3u : 4u;
         AXSDockFlightDriver *driver = [AXSDockFlightDriver new];
         [driver startWithWindow:win
                         srcShot:srcShot
