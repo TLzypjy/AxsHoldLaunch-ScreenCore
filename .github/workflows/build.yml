@@ -719,7 +719,7 @@ jobs:
           # (item tilt fully removed in .256)
           # .252: 场景栈 tilt 移除（镜像不可见且污染桥接手势映射）
           ! grep -Fq "rootView.layer.transform = tiltRotation;" Hooks/AxsDismissEffect.xm || { echo "stale scene-stack tilt still present (gesture mapping)"; exit 1; }
-          grep -Fq "itemTilt=flat itemHid=%d winHid=%d" Hooks/AxsDismissEffect.xm || { echo "enforce diag fields missing"; exit 1; }
+          # (itemTilt=off since .256)
           grep -Fq "PROBE TOUCH#%ld hitView=%@ at %.0f,%.0f" Hooks/AxsDismissEffect.xm || { echo "probe touch location missing"; exit 1; }
           echo "=== beautify.256 flight card hide/reveal check ==="
           grep -Fq "@property (nonatomic, weak) UIView *flightCard;" Hooks/AxsDismissEffect.xm || { echo "flight card property missing"; exit 1; }
