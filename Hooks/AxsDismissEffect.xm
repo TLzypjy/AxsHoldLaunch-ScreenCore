@@ -1759,6 +1759,7 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
                 axs_dm_log(@"OPEN native animation replaced anim=%@ key=%@",
                            NSStringFromClass([anim class]), key ?: @"nil");
                 return;   // swallowed -- the native animation never executes
+                }   // .250: end of (isDockItem || containerAnimWindow)
             }
         }
     } @catch (NSException *ignored) { }
