@@ -691,7 +691,7 @@ jobs:
           grep -Fq "BOOL isDockItem" Hooks/AxsDismissEffect.xm || { echo "dock-item animation swallow missing"; exit 1; }
           ! grep -Fq "container.layer.cornerRadius = axs_dock_dockedRadius;" Hooks/AxsDismissEffect.xm || { echo "container radius mutation still present (poisons glow)"; exit 1; }
           ! grep -Fq "container.layer.cornerRadius = axs_dock_floatRadius;" Hooks/AxsDismissEffect.xm || { echo "container radius restore still present (poisons glow)"; exit 1; }
-          grep -Fq "for (UIView *item in items)" Hooks/AxsDismissEffect.xm || { echo "enforce all item instances missing"; exit 1; }
+          # .259: item loop removed (tilt targets the container body)
           # .257: dock-side flight layers share the ENFORCE tilt formula (handoff match)
           grep -Fq "CGFloat dockTilt = (dockRight ? -1.0 : 1.0) * tiltAngle * 2.6 * M_PI / 180.0;" Hooks/AxsDismissEffect.xm || { echo "flight dockTilt missing"; exit 1; }
           grep -Fq "CGFloat srcTiltRad = toDock ? 0.0 : dockTilt;" Hooks/AxsDismissEffect.xm || { echo "src tilt wiring missing"; exit 1; }
