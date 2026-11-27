@@ -5,6 +5,10 @@
 #import "AxsHoldLaunchConfig.h"
 #import "AxsHoldLaunchPreferences.h"
 
+// beautify.228: 浮窗→侧窗粒子聚合（实现在 AxsDismissEffect.xm，同一 dylib）
+// fromFrame = 翻转前浮窗 frame(window坐标)，toFrame = 翻转瞬间容器 frame(window坐标)
+extern void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame);
+
 // ---------------------------------------------------------------------------
 // 美化 · 光圈外框 (ring frame, beautify.19) — 稳定圆角矩形描边 + 整框 mask 半径
 //
@@ -996,6 +1000,7 @@ static void axs_ring_detachDriver(NSString *key);   // beautify.95：前置声�
 @property (nonatomic, assign) NSTimeInterval tiltVisualProbeTime;    // 视觉宿主重探节流
 @property (nonatomic, assign) BOOL loggedZOrder;                     // beautify.59：ZORDER 日志只写一次
 @property (nonatomic, assign) BOOL lastDockSnap;                     // beautify.59：上帧贴边态（翻转时抓拍快照）
+@property (nonatomic, assign) CGRect lastUndockedFrame;              // beautify.228：翻转前浮窗 frame(window坐标)，供 dock 粒子起飞点
 @property (nonatomic, assign) BOOL tiltShadowWasActive;              // beautify.95：本 driver 是否处于倾斜态（全局计数对账用）
 @property (nonatomic, assign) int scanMissCount;                     // beautify.95：连续缺席扫描次数（宽限期防抖）
 @property (nonatomic, assign) BOOL tiltShadowProbed;                 // beautify.95：SHADOW_PROBE 每次倾斜会话只输出一次
@@ -1348,6 +1353,12 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
     // 状态变化视为 changed 项（visChanged 参与下方 changed 判断），但绝不以
     // lastBounds/lastRadius/lastLineWidth 未变跳过 hidden/alpha 提交。
     BOOL docked = axs_ring_containerIsDocked(container);
+    // beautify.228：非贴边态每帧记录浮窗 frame(window 坐标)，作为浮窗→侧窗
+    // 翻转瞬间的粒子起飞中心；只在展开态采样，避免侧窗小 frame 污染。
+    if (!docked && container.window != nil) {
+        CGRect f = [container convertRect:container.bounds toView:nil];
+        if (f.size.width > 40.0 && f.size.height > 40.0) driver.lastUndockedFrame = f;
+    }
     BOOL ringAllowed = axs_ring_ringAllowedFor(docked, container);
     BOOL glowAllowed = axs_ring_glowAllowedFor(docked, container);
     BOOL visChanged = (docked != driver.lastIsDocked)
@@ -2553,6 +2564,37 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         BOOL dockFlipped = (dockNow != driver.lastDockSnap);
         if (dockFlipped) {
             driver.lastDockSnap = dockNow;
+            // beautify.228：浮窗→侧窗（dockNow=YES）时触发粒子聚合，取代原生变形。
+            // toFrame 先按容器展开态尺寸兜底；贴边瞬间原生已把 frame 缩成侧窗，
+            // 若尺寸过小则用屏幕边缘 + 侧窗宽度百分比推一个目标矩形。
+            if (dockNow) {
+                @try {
+                    CGRect toF = [container convertRect:container.bounds toView:nil];
+                    UIWindow *win = container.window;
+                    CGFloat sw = (win != nil) ? win.bounds.size.width : [UIScreen mainScreen].bounds.size.width;
+                    CGFloat sh = (win != nil) ? win.bounds.size.height : [UIScreen mainScreen].bounds.size.height;
+                    if (toF.size.width < 40.0 || toF.size.height < 40.0) {
+                        // 侧贴小窗：宽 = 屏宽 * dockWindowPercent，高按视频里约 2.4:1 竖长比例
+                        CGFloat dockPct = 20.0 / 100.0;   // 面板默认 splitDockWindowSizePercent=20
+                        @try {
+                            id pv = [[AxsHoldLaunchConfig axs_holdlaunch_shared]
+                                     axs_holdlaunch_theirValueForKey:@"splitDockWindowSizePercent"
+                                     defaultValue:@20.0];
+                            if ([pv isKindOfClass:[NSNumber class]]) {
+                                dockPct = axs_ring_clamp([pv doubleValue], 5.0, 90.0) / 100.0;
+                            }
+                        } @catch (NSException *ignored) { }
+                        CGFloat w = fmaxf(60.0, sw * dockPct);
+                        CGFloat h = fminf(sh - 40.0, w * 2.4);
+                        NSInteger side = axs_ring_containerDockSide(container);
+                        CGFloat x = (side >= 0) ? (sw - w) : 0.0;
+                        toF = CGRectMake(x, (sh - h) * 0.5, w, h);
+                    }
+                    axs_dockAssemblePlay(container, driver.lastUndockedFrame, toF);
+                    axs_ring_log(@"ring DOCK ASSEMBLE trigger from=%@ to=%@",
+                                 NSStringFromCGRect(driver.lastUndockedFrame), NSStringFromCGRect(toF));
+                } @catch (NSException *ignored) { }
+            }
             // beautify.59（.27 日志结论）：贴边稳态时 SCFloatingHostWindow 被原生隐藏、
             // 可见贴边小窗由原生 Dock 通道渲染，而 docked item 只在贴边瞬间存在于树上
             // （.24 证实），首探 gate 从未抓到过。翻转瞬间强制重探 + 全窗口抓拍。

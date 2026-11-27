@@ -1993,6 +1993,118 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
     axs_dm_log(@"INSTALL %@ HOOKED", tag);
 }
 
+// ===== beautify.228: 浮窗→侧窗 粒子聚合 ====================================
+// 由 AxsBeautifyRing.xm 的 dock 翻转检测调用（浮窗变侧窗的那一帧）。
+// 视觉：浮窗内容碎成粒子 → 从浮窗原位置飞向侧边 → 聚合成侧窗矩形 →
+//       真侧窗显现，侧倾由现有 tilt 功能独立接管（终点保持矩形）。
+// 完全 additive + 幂等：开关默认关；任何一步失败静默 no-op，绝不卡住原生 dock。
+static char axs_dock_assembleMaskKey;
+static BOOL axs_dock_assembleInFlight = NO;
+
+static id axs_dock_pref(NSString *key, id def) {
+    @try {
+        Class cfgClass = objc_getClass("AxsHoldLaunchConfig");
+        if (cfgClass == nil) return def;
+        id cfg = [cfgClass performSelector:@selector(axs_holdlaunch_shared)];
+        SEL sel = @selector(axs_holdlaunch_theirValueForKey:defaultValue:);
+        if (cfg != nil && [cfg respondsToSelector:sel]) {
+            id (*imp)(id, SEL, id, id) = (id (*)(id, SEL, id, id))[cfg methodForSelector:sel];
+            id v = imp(cfg, sel, key, def);
+            return v != nil ? v : def;
+        }
+    } @catch (NSException *ignored) { }
+    return def;
+}
+
+// container : SCFloatingContainerView（浮窗容器）
+// fromFrame : 翻转前记录的浮窗 frame（window 坐标）→ 粒子起飞中心
+// toFrame   : 翻转瞬间容器 frame（window 坐标）→ 粒子聚合终点（侧窗矩形）
+void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame) {
+    @try {
+        if (container == nil || container.window == nil) return;
+        id sw = axs_dock_pref(@"splitBeautifyDockAnimEnabled", @NO);
+        if (![sw isKindOfClass:[NSNumber class]] || ![sw boolValue]) {
+            axs_dm_log(@"DOCK ASSEMBLE skipped (switch off)");
+            return;
+        }
+        if (axs_dock_assembleInFlight) return;
+        CGFloat speed = 1.0;
+        id sp = axs_dock_pref(@"splitBeautifyDockSpeed", @1.0);
+        if ([sp isKindOfClass:[NSNumber class]]) {
+            speed = [sp floatValue];
+            if (speed < 0.3) speed = 0.3;
+            if (speed > 3.0) speed = 3.0;
+        }
+        if (speed != speed || speed <= 0.0) speed = 1.0;
+        CGFloat density = 1.0;
+        id de = axs_dock_pref(@"splitBeautifyDockDensity", @1.0);
+        if ([de isKindOfClass:[NSNumber class]]) {
+            density = [de floatValue];
+            if (density < 0.5) density = 0.5;
+            if (density > 3.0) density = 3.0;
+        }
+        if (density != density || density <= 0.0) density = 1.0;
+        CGFloat duration = 1.0 / speed;
+        if (toFrame.size.width < 8.0 || toFrame.size.height < 8.0) {
+            axs_dm_log(@"DOCK ASSEMBLE skipped (bad toFrame %@)", NSStringFromCGRect(toFrame));
+            return;
+        }
+        CGPoint source = CGRectIsEmpty(fromFrame)
+            ? CGPointMake(CGRectGetMidX(toFrame), CGRectGetMidY(toFrame))
+            : CGPointMake(CGRectGetMidX(fromFrame), CGRectGetMidY(fromFrame));
+
+        // 纹理：优先浮窗态缓存快照（真正的浮窗内容），现场抓拍兜底
+        UIImage *shot = axs_open_cachedCardSnapshotForView(container);
+        if (shot == nil) shot = axs_open_captureVisibleCardCheap(container);
+        if (shot == nil) shot = axs_dm_snapshot(container);
+        if (shot == nil) {
+            axs_dm_log(@"DOCK ASSEMBLE skipped (no snapshot)");
+            return;
+        }
+        shot = axs_dm_fixSnapshotCorners(shot, container);
+        if (shot == nil) return;
+
+        // frame 0 起隐藏真容器（静态 clear mask），粒子聚合完成后移除
+        CALayer *hideAll = [CALayer layer];
+        hideAll.frame = container.bounds;
+        hideAll.backgroundColor = [UIColor clearColor].CGColor;
+        container.layer.mask = hideAll;
+        objc_setAssociatedObject(container, &axs_dock_assembleMaskKey, hideAll,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        // 吞掉原生 dock 变形动画（复用现有 addAnimation hook 的 intercept 窗口）
+        axs_open_interceptUntil = CACurrentMediaTime() + duration + 1.5;
+        // 终点是矩形侧窗；侧倾交给现有 tilt，故不开 cornerKill、方向用默认
+        axs_msd_setCornerKill(0u, 0.0f);
+        axs_msd_setDirectionMode(0u);
+
+        axs_dock_assembleInFlight = YES;
+        axs_dm_log(@"DOCK ASSEMBLE play from=%@ to=%@ src=%@ dur=%.2f dens=%.2f",
+                   NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
+                   NSStringFromCGPoint(source), duration, density);
+        void *renderer = axs_metalAssemblePlayRet(shot, toFrame, duration, density, source);
+        if (renderer == nil) {
+            axs_dm_log(@"DOCK ASSEMBLE metal failed -> restore card");
+            @try { container.layer.mask = nil; } @catch (NSException *ignored) { }
+            axs_dock_assembleInFlight = NO;
+            return;
+        }
+        __weak UIView *wcard = container;
+        __weak CALayer *wmask = hideAll;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            @try {
+                UIView *c = wcard;
+                CALayer *m = wmask;
+                if (c != nil && m != nil && c.layer.mask == m) c.layer.mask = nil;
+            } @catch (NSException *ignored) { }
+            axs_dock_assembleInFlight = NO;
+        });
+    } @catch (NSException *ignored) {
+        axs_dock_assembleInFlight = NO;
+    }
+}
+
 static void axs_dm_installAll(void) {
     if (axs_dm_hooked == nil) axs_dm_hooked = [NSMutableSet set];
     axs_dm_install(@"sc_closeSession:", "@", 1,

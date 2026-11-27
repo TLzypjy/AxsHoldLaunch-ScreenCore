@@ -1,3 +1,16 @@
+beautify.228 变更（浮窗转侧窗粒子聚合动画）：
+- 新增「浮窗转侧窗动画」开关行（默认关）+ 粒子聚合速度/密度两个滑条。
+  面板显示仍是原生风格，plist 加 4 项（1 分组 + 1 开关 + 2 滑条），
+  zh-Hans/en strings 补 BEAUTIFY_DOCK(_ANIM)/INFO/DOCK_ASSEMBLE_SPEED/DENSITY。
+- 触发：AxsBeautifyRing.xm 的 axs_ring_applyTilt 里 dockFlipped && dockNow
+  （浮窗→侧窗那一帧）。每帧展开态记录浮窗 frame 到 lastUndockedFrame 作粒子起飞中心；
+  toFrame 取翻转瞬间容器 frame，过小则用屏幕边缘+splitDockWindowSizePercent 推算侧窗矩形。
+- 实现：AxsDismissEffect.xm 暴露 axs_dockAssemblePlay(container, fromFrame, toFrame)：
+  复用浮窗缓存快照→Metal 聚合引擎(axs_metalAssemblePlayRet)从浮窗中心飞向侧窗矩形，
+  frame0 起 clear mask 隐藏真容器 + 吞掉原生 dock 变形动画，聚合完成后移除 mask。
+  终点是矩形侧窗，侧倾交给现有 tilt 功能独立接管（用户确认方案）。
+- 开关默认关 + inFlight 防重 + 截图/ Metal 失败静默 no-op，绝不卡住原生 dock。
+
 beautify.227 变更（亮度上限 200%，面板仍 0–100）：
 - 用户要求：面板显示保持 0–100，但内部亮度上限加到 200。
 - 实现：axs_ring_glowBrightnessFactor 从 brightness/100 改为 brightness/100*2.0。

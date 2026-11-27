@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-VERSION="2.0.5+beautify.227"
+VERSION="2.0.5+beautify.228"
 BASE_DEB="base/com.susudear.screencore_2.0.5+holdpress.1.deb"
 OUT="out"
 PKG="$OUT/pkg"
@@ -107,6 +107,12 @@ check "dylib has dismiss style key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.
 # beautify.224: unified GPU engine for all styles (no CPU layer path anymore)
 check "dylib has dismiss density key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDismissDensity'"
 check "dylib has no UIView CPU emit path" sh -c "test \$(strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -c 'CGImageCreateWithImageInRect') -eq 0"
+# beautify.228: float-to-dock particle assemble
+check "plist has dock anim switch" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyDockAnimEnabled'"
+check "plist has dock assemble speed" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyDockSpeed'"
+check "plist has dock assemble density" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyDockDensity'"
+check "dylib has dock anim switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDockAnimEnabled'"
+check "dylib has dock assemble log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DOCK ASSEMBLE play'"
 # beautify.106/.107: Metal command queue fix (buffer comes from the queue)
 check "dylib has Metal cleanup log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal sand cleaned grains='"
 # beautify.104: GPU Metal fine-sand engine markers
