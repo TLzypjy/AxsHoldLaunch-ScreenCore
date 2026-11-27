@@ -642,7 +642,7 @@ jobs:
           ! grep -Fq "axs_dock_sceneSuppressed" Hooks/AxsDismissEffect.xm || { echo "scene suppress machinery still present"; exit 1; }
           ! grep -Fq "sub.hidden = YES;" Hooks/AxsDismissEffect.xm || { echo "item children hide still present (tap regression)"; exit 1; }
           ! grep -Fq "axs_dock_inContainerSubtree" Hooks/AxsDismissEffect.xm || { echo "container subtree guard still present (blocks scene stack)"; exit 1; }
-          grep -Fq "rootView.layer.transform = tiltRotation;" Hooks/AxsDismissEffect.xm || { echo "scene tilt missing"; exit 1; }
+          # .252: scene-stack tilt removed (invisible in dock-channel mirror, poisons gesture mapping)
           grep -Fq "sceneRoots=%lu" Hooks/AxsDismissEffect.xm || { echo "scene diag missing"; exit 1; }
           ! grep -Fq "if (excluded) continue;" Hooks/AxsDismissEffect.xm || { echo "stale traversal-level exclusion still present"; exit 1; }
           grep -Fq "static CGFloat axs_dock_sceneCornerRadiusAt" Hooks/AxsDismissEffect.xm || { echo "scene corner radius reader missing"; exit 1; }
