@@ -2061,6 +2061,8 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 static UIView *axs_dock_findDockedItem(UIWindow *win, CGRect targetFrame);
 // .238: docked item 每帧 tilt 同步（定义在 dock 入口段，driver tick 与 ring 共用）。
 void axs_dock_enforceDockedItemTilt(void);
+// .247: 场景内容栈链根收集（定义在 dock 入口段，driver 场景 dst 每 tick 重找用）。
+static NSArray *axs_dock_sceneRootsAt(UIWindow *win, CGRect dockFrame);
 // .234 实测结论（视频 86 + 日志 86 对齐）：
 //   - 浮→侧：触发瞬间原生已把容器 frame 缩成侧窗（原生 dock spring 被
 //     interceptUntil 吞掉→跳变），容器上的消散 mask 无效 → 浮窗整块瞬间消失；
