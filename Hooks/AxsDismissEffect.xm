@@ -2060,15 +2060,26 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
 
 @implementation AXSDockFlightDriver
 
-- (CGContextRef)makeBmpFor:(NSMutableData **)bitsOut {
+- (CGContextRef)makeSrcBmp {
     NSUInteger bpr = self.cols * 4;
     NSMutableData *bits = [NSMutableData dataWithLength:bpr * self.rows];
+    self.srcBits = bits;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGContextRef bmp = CGBitmapContextCreate([bits mutableBytes], self.cols, self.rows,
                                              8, bpr, cs,
                                              kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     CGColorSpaceRelease(cs);
-    *bitsOut = bits;
+    return bmp;
+}
+- (CGContextRef)makeDstBmp {
+    NSUInteger bpr = self.cols * 4;
+    NSMutableData *bits = [NSMutableData dataWithLength:bpr * self.rows];
+    self.dstBits = bits;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef bmp = CGBitmapContextCreate([bits mutableBytes], self.cols, self.rows,
+                                             8, bpr, cs,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
     return bmp;
 }
 
@@ -2127,8 +2138,8 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     [win.layer addSublayer:self.dstLayer];   // dst 在下，src 在上
     [win.layer addSublayer:self.srcLayer];
 
-    self.srcBmp = [self makeBmpFor:&_srcBits];
-    self.dstBmp = [self makeBmpFor:&_dstBits];
+    self.srcBmp = [self makeSrcBmp];
+    self.dstBmp = [self makeDstBmp];
 
     // 起始：src 全显，dst 全隐。
     [self paintSrc:0.0];
@@ -2342,8 +2353,8 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
 
         // 侧倾方向：右贴 sideSign=-1（朝中心左倾），左贴 +1；有效角度 = 配置 * 2.6，
         // 与现有 tilt 视觉一致（约 15°）。飞行途中从 0 渐变到该角。
-        CGFloat sw = win.bounds.size.width;
-        BOOL rightSide = ((toDock ? toFrame : fromFrame).origin.x + (toDock ? toFrame : fromFrame).size.width * 0.5f) > sw * 0.5f;
+        CGFloat screenW = win.bounds.size.width;
+        BOOL rightSide = ((toDock ? toFrame : fromFrame).origin.x + (toDock ? toFrame : fromFrame).size.width * 0.5f) > screenW * 0.5f;
         CGFloat tiltRad = (rightSide ? -1.0 : 1.0) * (3.0 * 2.6) * M_PI / 180.0;
 
         // 隐藏真容器：两端由飞行快照图层 + 原生侧窗项接管，避免重影。
