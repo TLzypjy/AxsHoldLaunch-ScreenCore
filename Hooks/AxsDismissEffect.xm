@@ -1687,7 +1687,7 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
             // 会以动画把 item 拉回正面，presentation 覆盖 model，我们的每帧
             // tilt 同步就失效了。completion 手动补发（与容器同款）。
             BOOL isDockItem = (delegate != nil && axs_dock_dockedState
-                && [NSStringFromClass(delegate.class)
+                && [NSStringFromClass(object_getClassName(delegate))
                     rangeOfString:@"DockedFloatingItem"].location != NSNotFound);
             if (delegate != nil
                 && (strcmp(object_getClassName(delegate), "SCFloatingContainerView") == 0
