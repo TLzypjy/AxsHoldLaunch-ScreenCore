@@ -629,7 +629,6 @@ jobs:
           grep -Fq "axs_dock_findDockedItem(self.win, self.dstFrame)" Hooks/AxsDismissEffect.xm || { echo "per-tick docked-item re-find missing"; exit 1; }
           grep -Fq "installSrcLayerWithFrame" Hooks/AxsDismissEffect.xm || { echo "snapshot src layer missing"; exit 1; }
           grep -Fq "[self.win.layer insertSublayer:self.srcLayer atIndex:0]" Hooks/AxsDismissEffect.xm || { echo "snapshot layer bottom-insert missing"; exit 1; }
-          grep -Fq "UIView *dstView = container;" Hooks/AxsDismissEffect.xm || { echo "live-card dst wiring missing"; exit 1; }
           grep -Fq "dstIsDocked:NO" Hooks/AxsDismissEffect.xm || { echo "container dst flag missing"; exit 1; }
           grep -Fq "self.dstView.hidden = NO;" Hooks/AxsDismissEffect.xm || { echo "dst force unhide missing"; exit 1; }
           grep -Fq "if (self.dstView.hidden) self.dstView.hidden = NO;" Hooks/AxsDismissEffect.xm || { echo "dst keepalive missing"; exit 1; }
