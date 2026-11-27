@@ -1,3 +1,26 @@
+beautify.239 变更（吞 docked item 动画保 tilt + 移除圆角 mutation 救光晕）：
+- 用户反馈 .238「贴边缘的那半边还是正面，过两三秒才侧倾；侧窗转浮窗时浮窗四角
+  直角光晕，完整光晕 3~4s 后才出现」。视频 c73ae1ba：侧窗 2.6~3.8s 侧倾、
+  4.1~5.3s 渐进变正面；浮窗 6.7s 聚合完成、光晕 9.1s 才出现（晚 2.4s+）。
+- 根因 1（正面）：.238 的每帧 model tilt 写了，但原生在 item 内容弹出时以
+  CAAnimation（渐进 3.8→4.7s）把 item 拉回正面——动画 presentation 覆盖 model，
+  写 transform 无效。且 enforce 只 tilt「最近匹配」实例，原生重建实例后
+  transform 会落在被替换的旧实例上。
+- 根因 2（直角光晕）：.238 把容器圆角临时 36.8→12（item 真实圆角），ring 光晕的
+  路径半径探测读到 12，给浮窗尺寸的 glow mask 用了 12 → 四角近乎直角；几何缓存
+  3~4s 才刷新恢复。
+- 修复：
+  1) 扩展 CALayer addAnimation 吞拦截（axs_open_addAnimation）：dock 态下
+     delegate 类名含 DockedFloatingItem 的层动画一并吞掉（completion 手动补发，
+     与容器同款），我们的每帧 model tilt 成为唯一真值。dock 全局状态前移到
+     hook 之前供其读取。
+  2) enforce 改为对窗口树内【全部】DockedFloatingItem 实例施加 tilt（防重建
+     实例后 transform 落在旧实例上）。
+  3) 彻底移除容器 layer.cornerRadius mutation；圆角统一只走 mask SDF：
+     src 正向=容器圆角/反向=dockedRadius(12)，dst 正向=dockedRadius/反向=容器圆角。
+     光晕探测永远读到稳定的浮窗圆角。
+- floatRadius 兼容保留（不再使用）。
+
 beautify.238 变更（docked item 每帧侧倾同步 + 圆角三方统一）：
 - 用户反馈 .237「侧窗聚合成功时右半边正面左半边侧倾，右半边 2~3 秒后才侧倾；
   侧窗转浮窗时侧窗四个角变更圆」。视频 aeeea7c5：聚合完成 ~3.3s 后整个侧窗
