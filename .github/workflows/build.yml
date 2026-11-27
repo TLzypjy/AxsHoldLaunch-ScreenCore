@@ -646,7 +646,7 @@ jobs:
           grep -Fq "axs_dockAssemblePlay(container, driver.lastUndockedFrame, toF, YES);" Hooks/AxsBeautifyRing.xm || { echo "float->dock trigger missing"; exit 1; }
           grep -Fq "axs_dockAssemblePlay(container, driver.lastDockedFrame, toF, NO);" Hooks/AxsBeautifyRing.xm || { echo "dock->float trigger missing"; exit 1; }
           grep -Fq "void *axs_metalDockTransferPlayRet(UIImage *shot, CGRect fromFrame, CGRect toFrame," Hooks/AxsMetalSand.xm || { echo "metal transfer entry missing"; exit 1; }
-          grep -Fq "axs_metalDockTransferPlayRet(shot, fromFrame, toFrame," Hooks/AxsDismissEffect.xm || { echo "dock transfer metal play missing"; exit 1; }
+          grep -Fq "axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame," Hooks/AxsDismissEffect.xm || { echo "dock transfer metal play missing"; exit 1; }
           grep -Fq "if (u.openMode == 3u) {" Hooks/AxsMetalSand.xm || { echo "shader transfer branch missing"; exit 1; }
           grep -Fq "float axsTransferOrder(float2 unit, uint mode)" Hooks/AxsMetalSand.xm || { echo "shader transfer order fn missing"; exit 1; }
           echo "=== beautify.235 quick close-reopen gate clear check ==="
