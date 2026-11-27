@@ -1862,11 +1862,12 @@ static void axs_probe_captureView(UIView *v, NSString *label) {
 }
 
 // Dump the touch view's superview chain; snapshot each candidate up to 6 deep.
-static void axs_probe_dumpTouchChain(UIView *touchView) {
+static void axs_probe_dumpTouchChain(UIView *touchView, CGPoint touchLoc) {
     axs_probe_touchSeq++;
     if (axs_probe_touchSeq % 5 != 1) return;   // throttle: only 1 in 5 taps
-    axs_dm_log(@"PROBE TOUCH#%ld hitView=%@", (long)axs_probe_touchSeq,
-               touchView != nil ? NSStringFromClass([touchView class]) : @"nil");
+    axs_dm_log(@"PROBE TOUCH#%ld hitView=%@ at %.0f,%.0f", (long)axs_probe_touchSeq,
+               touchView != nil ? NSStringFromClass([touchView class]) : @"nil",
+               touchLoc.x, touchLoc.y);
     UIView *cur = touchView;
     int depth = 0;
     while (cur != nil && depth < 6) {
@@ -1902,7 +1903,7 @@ static void axs_open_sendEvent(id self, SEL _cmd, UIEvent *event) {
             axs_open_touchBeganAt = CACurrentMediaTime();
             // .193: read-only probe -- dump hit view chain + capture icon pixels
             axs_probe_dumpTOJBClasses();
-            axs_probe_dumpTouchChain(touchView);
+            axs_probe_dumpTouchChain(touchView, loc);
         } else if ([t phase] == UITouchPhaseEnded) {
             axs_open_lastTouchUp = loc;
             axs_open_lastTouchUpAt = CACurrentMediaTime();
@@ -2570,18 +2571,22 @@ void axs_dock_enforceDockedItemTilt(void) {
         for (UIView *item in items) {
             if (item == nil || item.layer == nil) continue;
             if (item.hidden) item.hidden = NO;   // 侧窗本体应可见
-            // .249: 不再隐藏 item 子视图——隐藏挡了触摸（「点不了」回归），
-            // 正面内容已由场景栈侧倾接管解决。
-            item.layer.transform = tiltRotation;
+            // .251: 不再对 item 本体施加 tilt——场景栈（真实本体，sceneRoots>0
+            // 已生效）的 tilt 承担全部视觉；贴边稳态下可见小窗由原生 Dock 通道
+            // 渲染、宿主窗口隐藏（.59），对隐藏源 item 施 3D 透视变换会破坏
+            // Dock 通道的触摸映射 ->「侧窗点不了」（log102：docked 态点击
+            // hitView=nil）。且 item 与场景栈是祖孙关系，双重 tilt 本就叠加。
             if (logNow) {
                 NSMutableString *kids = [NSMutableString string];
                 for (UIView *sub in item.subviews) {
                     [kids appendFormat:@"%@(hidden=%d) ", NSStringFromClass(sub.class), sub.hidden ? 1 : 0];
                 }
                 NSUInteger sceneN = (NSUInteger)axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect).count;
-                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f contents=%@ kids=[%@] sceneRoots=%lu",
+                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=skip itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
                            (unsigned long)items.count, rad * 180.0 / M_PI,
-                           item.layer.contents != NULL ? @"YES" : @"NO", kids,
+                           item.hidden ? 1 : 0,
+                           axs_dock_lastWindow.hidden ? 1 : 0,
+                           kids,
                            (unsigned long)sceneN);
             }
         }
@@ -2614,6 +2619,11 @@ void axs_dock_enforceDockedItemTilt(void) {
 void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock) {
     @try {
         if (container == nil || container.window == nil) return;
+        // .251: 容器处于隐藏/近透明态时绝不触发射线飞行。从后台滑掉已挂起的
+        // 会话时，App 会先消散（我们把容器隐藏）再把容器短暂复原到浮窗位销毁，
+        // ring 翻转检测据此误发「侧窗→浮窗」反向飞行，随后留下无内容的白卡
+        // （log102 实锤：close 3195.86 -> 误发反向飞行 3196.00）。
+        if (container.hidden || container.alpha < 0.05) return;
         id sw = axs_dock_pref(@"splitBeautifyDockAnimEnabled", @NO);
         if (![sw isKindOfClass:[NSNumber class]] || ![sw boolValue]) {
             axs_dm_log(@"DOCK FLIGHT skipped (switch off)");
