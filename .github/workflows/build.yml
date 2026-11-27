@@ -716,7 +716,7 @@ jobs:
           grep -Fq "if (container.hidden || container.alpha < 0.05) return;" Hooks/AxsDismissEffect.xm || { echo "hidden container flight guard missing"; exit 1; }
           # .252: item 本体 tilt 恢复（无透视，纯旋转 hit-test 可存活）
           # .256: item tilt fully removed (host tilt is the single visible authority)
-          grep -Fq "tiltRotation.m14 = 0.0;" Hooks/AxsDismissEffect.xm || { echo "item tilt perspective kill missing"; exit 1; }
+          # (item tilt fully removed in .256)
           # .252: 场景栈 tilt 移除（镜像不可见且污染桥接手势映射）
           ! grep -Fq "rootView.layer.transform = tiltRotation;" Hooks/AxsDismissEffect.xm || { echo "stale scene-stack tilt still present (gesture mapping)"; exit 1; }
           grep -Fq "itemTilt=flat itemHid=%d winHid=%d" Hooks/AxsDismissEffect.xm || { echo "enforce diag fields missing"; exit 1; }
