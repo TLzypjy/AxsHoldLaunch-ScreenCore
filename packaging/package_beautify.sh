@@ -112,7 +112,7 @@ check "plist has dock anim switch" sh -c "plutil -p '$BUNDLE/SplitSettings.plist
 check "plist has dock assemble speed" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyDockSpeed'"
 check "plist has dock assemble density" sh -c "plutil -p '$BUNDLE/SplitSettings.plist' | grep -q 'splitBeautifyDockDensity'"
 check "dylib has dock anim switch key" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'splitBeautifyDockAnimEnabled'"
-check "dylib has dock assemble log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DOCK ASSEMBLE play'"
+check "dylib has dock transfer log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'DOCK TRANSFER play'"
 # beautify.106/.107: Metal command queue fix (buffer comes from the queue)
 check "dylib has Metal cleanup log" sh -c "strings -a '$DYLIB_DIR/AxsHoldLaunch.dylib' | grep -q 'metal sand cleaned grains='"
 # beautify.104: GPU Metal fine-sand engine markers
