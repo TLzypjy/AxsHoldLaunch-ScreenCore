@@ -1,3 +1,21 @@
+beautify.234 变更（浮窗↔侧窗改为真窗口 per-cell mask，圆角/侧倾全原生）：
+- 用户反馈 .233「侧窗聚合成的圆角很圆不是真实圆角、不是直接聚成侧倾状态」。
+- 根因铁证：日志显示 dock 转场时真侧窗 SCDockedFloatingItemView（88x190.7,
+  alpha=1）一直由系统渲染。但 driver 往 win.layer 叠了一张「浮窗截图拉伸的
+  假侧窗层」：dstR=44 是我猜的胶囊圆角（真侧窗不是），手写 m14/m34 矩阵对
+  88pt 窄窗只有 2% 透视差（视觉=正面）。假层盖住真侧窗，结束移除假层才
+  露出系统侧倾 → 用户看到「假圆角 + 正面 + 完成才闪侧倾」。
+- 修复：改为呼出动画同款「真窗口 per-cell mask」——
+  a) 新增 axs_dock_findDockedItem() 遍历 window 树找真侧窗本体；
+  b) driver 给真容器 / 真侧窗本体各自挂 bitmap mask（startOnSrc:dst:），
+     逐格消隐(右上→左下)/显现(浮→侧 右上→左下、侧→浮 左下→右上)；
+  c) 圆角取真 view 的 axs_dm_cornerRadiusForView 探测值（mask 内 SDF），
+     不再猜胶囊；
+  d) 完全删除假 CALayer 层与手动 rotationY 矩阵，侧倾交给 AxsBeautifyRing
+     原生 tilt，从第一帧在线、落地不闪。本体/圆角/侧倾全由系统渲染。
+- Metal(openMode=3) 仍只画边界点对点细沙；速度/密度滑条不变。
+- 日志字段 live-window-mask 取代 full-tilt real-card，便于核验走的是真窗口。
+
 beautify.233 变更（浮窗↔侧窗：侧窗圆角精确贴合 + 侧倾全程在线，落地不闪）：
 - 用户反馈 .232「侧窗显现的圆角对不上」「侧窗聚合成正面，聚合完成才闪成侧倾」。
 - 根因 1（圆角）：driver 的 src/dst 都用 axs_dm_cornerRadiusForView(container) 的
