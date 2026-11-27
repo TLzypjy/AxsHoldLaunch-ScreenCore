@@ -1,3 +1,21 @@
+beautify.241 变更（dock 态探测加速 + 一次性视图转储定位）：
+- 日志 92 诊断结论：DOCK ENFORCE items=1 tilt=-15.6 contents=NO kids=[UIView(hidden=1)]
+  ——item 已 tilt、本体无内容、子视图已隐藏，但正面内容仍在 → 正面内容不在
+  docked item 里。SWALLOW 显示原生在 item 上加的是 opacity/position/bounds 弹簧
+  （已全吞，子树回溯生效）。
+- 高概率来源：dock 后原生为侧窗态在容器内新建/重建的内容子视图，ring tilt
+  宿主探测 1s 节流导致新内容 1~2s 后才被拾取侧倾（与「正面 2~3s 后变侧倾」
+  完全吻合；mask 移除后即见）。
+- 修复/诊断：
+  1) dock 态前 5s 把 ring 宿主探测节流 1s→0.1s（axs_dock_probeBoost，ring
+     extern 调用）——原生新建内容即刻进入 tilt 宿主集并侧倾。
+  2) 一次性 DOCK DUMP：正向 flight+1.5s 扫侧窗矩形、反向 flight+0.6s 扫浮窗
+     矩形，列出所有窗口中相交且 dock 尺寸的可见视图（类名/frame/圆角/clips/
+     alpha/contents）——无论本轮是否修好，下一轮日志都能直接定位正面内容
+     与直角光晕的真正来源。
+- 用户反馈 .240「直角光晕还在，只是存在时间变短」→ 证实与 mask 窗口相关，
+  但直角另有来源，等 DOCK DUMP 定位。
+
 beautify.240 变更（子层树吞动画 + 内容子视图隐藏 + tail 缩短救光晕）：
 - 用户反馈 .239「还是一样的问题」：视频 86b1128d 与 .238 现象一致（侧窗边缘
   半边正面、浮窗完成后光晕晚 2~3s）。日志 91：光晕出现的时刻与 driver 停止

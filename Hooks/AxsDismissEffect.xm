@@ -2519,6 +2519,51 @@ static CGFloat axs_dock_tiltAngleCfg(void) {
     return a;
 }
 
+static CFAbsoluteTime axs_dock_dockedStateAt = 0;   // .241: 进入 dock 态的时刻
+
+// .241: dock 态前 5s 内请求 ring 加速宿主探测（1s→0.1s）——原生为侧窗态
+// 新建/重建的内容子视图会被即刻 tilt，杜绝「正面 2~3s 后才侧倾」。
+BOOL axs_dock_probeBoost(void) {
+    return (axs_dock_dockedState
+            && axs_dock_lastWindow != nil
+            && (CACurrentMediaTime() - axs_dock_dockedStateAt) < 5.0);
+}
+
+// .241: 一次性诊断转储——列出所有窗口中与目标矩形相交的可见视图
+// （类名/frame/圆角/clips/hidden/alpha），定位正面内容与直角光晕来源。
+static void axs_dock_dumpViewsAtFrame(CGRect frame, NSString *tag) {
+    @try {
+        axs_dm_log(@"DOCK DUMP [%@] begin frame=%@", tag, NSStringFromCGRect(frame));
+        NSArray<UIScene *> *scenes = [UIApplication sharedApplication].connectedScenes.allObjects;
+        for (UIScene *sc in scenes) {
+            if (![sc isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *w in ((UIWindowScene *)sc).windows) {
+                if (w == nil || w.hidden) continue;
+                NSMutableArray *stack = [NSMutableArray arrayWithObject:w];
+                int guardN = 0;
+                while (stack.count > 0 && guardN++ < 900) {
+                    UIView *v = [stack lastObject];
+                    [stack removeLastObject];
+                    if (v == nil) continue;
+                    CGRect f = [v convertRect:v.bounds toView:nil];
+                    BOOL intersects = CGRectIntersectsRect(f, frame);
+                    BOOL dockSized = f.size.width > 30.0 && f.size.width < 200.0
+                                     && f.size.height > 60.0;
+                    if (intersects && dockSized && !v.hidden && v.alpha > 0.05) {
+                        axs_dm_log(@"DOCK DUMP [%@] %@ win=%@ frame=%@ corner=%.1f clips=%d alpha=%.2f contents=%@",
+                                   tag, NSStringFromClass(v.class), NSStringFromClass(w.class),
+                                   NSStringFromCGRect(f), v.layer.cornerRadius,
+                                   v.layer.masksToBounds ? 1 : 0, v.alpha,
+                                   v.layer.contents != NULL ? @"YES" : @"NO");
+                    }
+                    [stack addObjectsFromArray:v.subviews];
+                }
+            }
+        }
+        axs_dm_log(@"DOCK DUMP [%@] end", tag);
+    } @catch (NSException *ignored) { }
+}
+
 // 由 ring applyTilt 每帧 + driver tick 调用；自门控（非 dock 态直接返回）。
 void axs_dock_enforceDockedItemTilt(void) {
     @try {
@@ -2626,6 +2671,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         }
         if (toDock) {
             axs_dock_dockedState = YES;
+            axs_dock_dockedStateAt = CACurrentMediaTime();
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;   // enforce 从 identity 起施加
         } else {
             axs_dock_dockedState = NO;
@@ -2713,6 +2759,19 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                    NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
                    toDock ? 1 : 0, departDir, arriveDir, duration, density,
                    srcCorner, dstCorner, driver.dstContentReady ? 1 : 0);
+
+        // .241: 一次性诊断转储——正向在内容弹出时刻(+1.5s)扫侧窗矩形，
+        // 反向在浮窗揭示中(+0.6s)扫浮窗矩形，定位正面内容与直角光晕来源。
+        {
+            CGRect dumpFrame = toFrame;   // 正向扫侧窗矩形，反向扫浮窗矩形
+            NSString *dumpTag = toDock ? @"fwd+1.5s" : @"rev+0.6s";
+            NSTimeInterval dumpDelay = toDock ? 1.5 : 0.6;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                         (int64_t)(dumpDelay * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                axs_dock_dumpViewsAtFrame(dumpFrame, dumpTag);
+            });
+        }
 
         __weak UIView *wcard = container;
         // .240: driver 停止回归 duration+0.15——tail(duration+2.0) 期间容器

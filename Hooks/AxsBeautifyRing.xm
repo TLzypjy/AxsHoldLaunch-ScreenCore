@@ -12,6 +12,8 @@ extern void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toF
 // item 不在容器树内，ring tilt 管不到；其内容由原生延迟 2~6s 填充且为正面，
 // 每帧同步成与容器一致的侧倾后，内容弹出即刻就是侧倾形态（消灭正面闪现）。
 extern void axs_dock_enforceDockedItemTilt(void);
+// .241: dock 态前 5s 请求加速宿主探测（实现于 AxsDismissEffect.xm，同一 dylib）。
+extern BOOL axs_dock_probeBoost(void);
 
 // ---------------------------------------------------------------------------
 // 美化 · 光圈外框 (ring frame, beautify.19) — 稳定圆角矩形描边 + 整框 mask 半径
@@ -2649,8 +2651,11 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
         }
         // .238: 每帧同步 docked item 的 tilt（自门控，非 dock 态为 no-op）。
         axs_dock_enforceDockedItemTilt();
+        // .241: dock 态前 5s 探测节流 1s→0.1s——原生为侧窗态新建的内容子视图
+        // 即刻进入 tilt 宿主集，杜绝「正面 2~3s 后才侧倾」。
+        NSTimeInterval probeInterval = axs_dock_probeBoost() ? 0.1 : 1.0;
         BOOL needProbe = !driver.tiltVisualProbed
-                         || (now - driver.tiltVisualProbeTime >= 1.0);
+                         || (now - driver.tiltVisualProbeTime >= probeInterval);
         if (needProbe) {
             NSMutableString *probeLog = [NSMutableString string];
             NSMutableArray *hosts = [NSMutableArray arrayWithArray:axs_ring_collectVisualHosts(container, probeLog)];
