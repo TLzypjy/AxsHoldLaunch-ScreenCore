@@ -2616,21 +2616,32 @@ void axs_dock_enforceDockedItemTilt(void) {
         // Dock 通道触摸映射所致（.251 去掉 item tilt 后点击恢复，winHid=0
         // 证明宿主窗口可见、hitView=nil 是桥接正常现象）。纯旋转矩阵可逆，
         // hit-test 可存活。
+        // .257: item tilt 恢复透视（与 .249 时代同款）——纯旋转在视觉上近似
+        // 正面（仅 4% 宽度挤压），梯形观感必须靠 m14/m34。
+        CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
+        {
+            CGFloat sinRad = (CGFloat)sin(rad);
+            CGFloat cosRad = (CGFloat)cos(rad);
+            tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
+            tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
+        }
         static CFTimeInterval axs_dock_enforceLogAt = 0;
         BOOL logNow = (CACurrentMediaTime() - axs_dock_enforceLogAt > 1.0);
         for (UIView *item in items) {
             if (item == nil || item.layer == nil) continue;
             if (item.hidden) item.hidden = NO;   // 侧窗本体应可见
-            // .256: item 本体不再 tilt——可见侧倾由 ring 宿主透视 tilt 独立承担
-            //（镜像=宿主观感），item flat tilt 只叠加 ~4% 挤压造成交接微差。
-            item.layer.transform = CATransform3DIdentity;
+            // .257: item 本体透视 tilt 恢复——可见侧倾的真实来源（.256 实证：
+            // item=identity 时聚合是正面、揭示后才「闪成侧倾」，tilt 源在 dock
+            // 通道/原生延迟呈现，容器截图捕获不到）。tap 安全的真正前提是
+            // .255 的吞窗 4s 限界（log106 弹簧吞食实锤），不是 item 无透视。
+            item.layer.transform = tiltRotation;
             if (logNow) {
                 NSMutableString *kids = [NSMutableString string];
                 for (UIView *sub in item.subviews) {
                     [kids appendFormat:@"%@(hidden=%d) ", NSStringFromClass(sub.class), sub.hidden ? 1 : 0];
                 }
                 NSUInteger sceneN = (NSUInteger)axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect).count;
-                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=off itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
+                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=persp itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
                            (unsigned long)items.count, rad * 180.0 / M_PI,
                            item.hidden ? 1 : 0,
                            axs_dock_lastWindow.hidden ? 1 : 0,
@@ -2751,9 +2762,23 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         if (srcCorner < 1.0f) srcCorner = 12.0f;
         if (dstCorner < 1.0f) dstCorner = 12.0f;
 
-        // .256: tilt 已烤进快照图片（宿主透视 tilt 的真实观感），飞行层一律 identity。
-        CGFloat srcTiltRad = 0.0;
-        CGFloat dstTiltRad = 0.0;
+        // .257: dock 侧层恢复侧倾矩阵（与 ENFORCE item tilt 同公式同角度）——
+        // 可见侧倾源=item 透视 tilt，容器截图捕获不到它，必须由层矩阵呈现。
+        CGFloat screenW = win.bounds.size.width;
+        CGFloat tiltAngle = 3.0;
+        id ta = axs_dock_pref(@"splitBeautifyTiltAngle", @3.0);
+        if ([ta isKindOfClass:[NSNumber class]]) {
+            tiltAngle = [ta doubleValue];
+            if (tiltAngle < 0.0) tiltAngle = 0.0;
+            if (tiltAngle > 30.0) tiltAngle = 30.0;
+        }
+        if (tiltAngle != tiltAngle) tiltAngle = 3.0;
+        BOOL dockRight = (toDock ? toFrame.origin.x : fromFrame.origin.x)
+                         + (toDock ? toFrame.size.width : fromFrame.size.width) * 0.5f
+                         > screenW * 0.5f;
+        CGFloat dockTilt = (dockRight ? -1.0 : 1.0) * tiltAngle * 2.6 * M_PI / 180.0;
+        CGFloat srcTiltRad = toDock ? 0.0 : dockTilt;   // 消散的 docked 卡=侧倾
+        CGFloat dstTiltRad = toDock ? dockTilt : 0.0;   // 聚合的 docked 卡=侧倾
 
         // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)。
         // .254: 反向聚合目标改为右上→左下(3)（=粒子行程方向：靠侧窗近的格子
@@ -2780,14 +2805,16 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         }
         UIImage *dstShot = nil;
         if (toDock) {
-            axs_ring_forceTiltSync();          // 施加宿主 tilt（docked 态）
+            axs_open_cacheCardSnapshot(container, srcShot);   // .257: 浮窗正面图入缓存，供反向终点复用
             dstShot = axs_open_captureVisibleCardCheap(container);
         } else {
-            // .256 映射：src 层/粒子=docked 当前真实观感（srcShot 不动）；
-            // dst 层=宿主复位后的浮窗正面图（不把宿主 tilt 烤进聚合终点）。
-            axs_ring_forceTiltSync();          // dockNow=NO -> 宿主 tilt 复位
+            // .257: 浮窗聚合终点图改用【缓存的浮窗快照】优先——.256 实证 flip
+            // 时刻的现拍常为半透明（log108 opaque=0×2，原生 pop 中间态），
+            // 缓存是上次浮窗态刷新的干净正面图；无缓存才回退现拍。
+            axs_ring_forceTiltSync();          // 恢复 ring 正常运转
+            UIImage *cached = axs_open_cachedCardSnapshotForView(container);
             UIImage *fresh = axs_open_captureVisibleCardCheap(container);
-            dstShot = (fresh != nil) ? fresh : srcShot;
+            dstShot = (cached != nil) ? cached : ((fresh != nil) ? fresh : srcShot);
         }
         if (dstShot == nil) dstShot = srcShot;
         void *renderer = axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame,
