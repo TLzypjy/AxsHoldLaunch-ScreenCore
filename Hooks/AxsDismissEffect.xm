@@ -2146,7 +2146,7 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     [self paintDst:0.0];
 
     self.start = CACurrentMediaTime();
-    self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
+    self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(dockFlightTick:)];
     [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 }
 
@@ -2231,7 +2231,7 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     }
 }
 
-- (void)tick:(CADisplayLink *)link {
+- (void)dockFlightTick:(CADisplayLink *)link {
     @try {
         CFTimeInterval elapsed = CACurrentMediaTime() - self.start;
         CGFloat t = self.duration > 0 ? (CGFloat)(elapsed / self.duration) : 1.0f;
