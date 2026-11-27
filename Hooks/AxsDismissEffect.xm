@@ -2604,7 +2604,7 @@ static NSArray *axs_dock_sceneRootsAt(UIWindow *win, CGRect dockFrame) {
                         || fabs(pf.size.height - dockFrame.size.height) > 16.0) break;
                     root = p;
                 }
-                if (root != nil && ![seen objectForKey:root]) {
+                if (root != nil && ![seen containsObject:root]) {
                     [seen addObject:root];
                     [roots addObject:root];
                 }
