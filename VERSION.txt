@@ -1,3 +1,19 @@
+beautify.233 变更（浮窗↔侧窗：侧窗圆角精确贴合 + 侧倾全程在线，落地不闪）：
+- 用户反馈 .232「侧窗显现的圆角对不上」「侧窗聚合成正面，聚合完成才闪成侧倾」。
+- 根因 1（圆角）：driver 的 src/dst 都用 axs_dm_cornerRadiusForView(container) 的
+  浮窗圆角 36.8；但侧窗是 88pt 窄条、真身胶囊（MIN(w,h)/2=44），显现时圆角偏小，
+  结束移除图层跳成真侧窗圆角 → 对不上。
+  修复：driver 拆出 srcCorner/dstCorner，浮窗用探测圆角、侧窗用 MIN(w,h)/2，
+  makeCardLayer 与 paintSrc/paintDst 的 SDF 各自用自己的圆角。
+- 根因 2（正面→闪侧倾）：driver 用 CATransform3DConcat(persp,rot)+persp.m34，
+  正是 AxsBeautifyRing .65/.95 注释记录的失效写法——对 z=0 平面 m14=0、透视退化，
+  只剩 cos 水平缩放，看到的是正面；driver 移除后原生 tilt 接管才突然侧倾。
+  修复：照抄原生 axs_ring_applyTilt 的显式 m14/m34（M=R·P），rad 全程恒定
+  （不再从 0 渐变），侧窗从聚合第一帧就是侧倾形态，落地与原生 tilt 无跳变。
+- 侧倾角度改为读取 splitBeautifyTiltAngle（默认 3.0、上限 30），与原生同配置同
+  GAIN(2.6)，保证 driver 与落地后的原生侧窗角度完全一致。
+- 日志加 srcR/dstR/full-tilt 字段便于核验。
+
 beautify.232 变更（浮窗↔侧窗改为真实窗口飞行 + 侧倾 + 边界细沙）：
 - 用户反馈 .231「像拼图一样飞过去、飞成侧窗还是正面、要真实浮窗飞过去像呼出动画」。
 - 根因：.231 的 shader pass4/pass5 把源窗/目标窗按 149x320 网格 quad 整面铺图

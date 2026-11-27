@@ -2022,7 +2022,8 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 @property (nonatomic, assign) CGFloat srcH;
 @property (nonatomic, assign) CGFloat dstW;
 @property (nonatomic, assign) CGFloat dstH;
-@property (nonatomic, assign) CGFloat corner;
+@property (nonatomic, assign) CGFloat srcCorner;
+@property (nonatomic, assign) CGFloat dstCorner;
 @property (nonatomic, assign) uint32_t departDir;
 @property (nonatomic, assign) uint32_t arriveDir;
 @property (nonatomic, assign) CGFloat tiltRad;   // 目标侧倾角（带符号）
@@ -2033,7 +2034,8 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
               toFrame:(CGRect)toFrame
              duration:(NSTimeInterval)duration
               density:(CGFloat)density
-               radius:(CGFloat)radius
+            srcCorner:(CGFloat)srcCorner
+            dstCorner:(CGFloat)dstCorner
            departDir:(uint32_t)departDir
             arriveDir:(uint32_t)arriveDir
              tiltRad:(CGFloat)tiltRad
@@ -2100,7 +2102,8 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
               toFrame:(CGRect)toFrame
              duration:(NSTimeInterval)duration
               density:(CGFloat)density
-               radius:(CGFloat)radius
+            srcCorner:(CGFloat)srcCorner
+            dstCorner:(CGFloat)dstCorner
            departDir:(uint32_t)departDir
             arriveDir:(uint32_t)arriveDir
              tiltRad:(CGFloat)tiltRad
@@ -2113,7 +2116,8 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     self.tiltDst = tiltDst;
     self.srcW = fromFrame.size.width;  self.srcH = fromFrame.size.height;
     self.dstW = toFrame.size.width;    self.dstH = toFrame.size.height;
-    self.corner = radius;
+    self.srcCorner = srcCorner;
+    self.dstCorner = dstCorner;
     // 网格只作 mask 时钟；与 Metal openMode=3 的 22000*density / aspect 一致。
     int particles = (int)lround(22000.0 * density);
     if (particles < 200) particles = 200;
@@ -2125,8 +2129,8 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     if (r < 2) r = 2; if (r > 320) r = 320;
     self.cols = c; self.rows = r;
 
-    self.srcLayer = [self makeCardLayer:shot frame:fromFrame radius:radius];
-    self.dstLayer = [self makeCardLayer:shot frame:toFrame radius:radius];
+    self.srcLayer = [self makeCardLayer:shot frame:fromFrame radius:srcCorner];
+    self.dstLayer = [self makeCardLayer:shot frame:toFrame radius:dstCorner];
     CALayer *srcMask = [CALayer layer];
     srcMask.frame = self.srcLayer.bounds;
     srcMask.contentsGravity = kCAGravityResize;
@@ -2171,12 +2175,12 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
             CGFloat a = 1.0f - axs_dock_smooth(depart - 0.006f, depart + 0.006f, t);
             // 圆角：角落外的格子永不显示
             CGFloat px = ux * self.srcW, py = uy * self.srcH;
-            if (self.corner > 0.5f && self.srcW > 1.0f && self.srcH > 1.0f) {
-                CGFloat qx = fabs(px - self.srcW * 0.5f) - (self.srcW * 0.5f - self.corner);
-                CGFloat qy = fabs(py - self.srcH * 0.5f) - (self.srcH * 0.5f - self.corner);
+            if (self.srcCorner > 0.5f && self.srcW > 1.0f && self.srcH > 1.0f) {
+                CGFloat qx = fabs(px - self.srcW * 0.5f) - (self.srcW * 0.5f - self.srcCorner);
+                CGFloat qy = fabs(py - self.srcH * 0.5f) - (self.srcH * 0.5f - self.srcCorner);
                 CGFloat dxo = qx > 0 ? qx : 0, dyo = qy > 0 ? qy : 0;
                 CGFloat inner = qx > qy ? qx : qy;
-                CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo) + (inner < 0 ? inner : 0) - self.corner;
+                CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo) + (inner < 0 ? inner : 0) - self.srcCorner;
                 a *= 1.0f - axs_dock_smooth(-1.5f, 1.5f, dOut);
             }
             UInt8 av = (UInt8)(a * 255.0f);
@@ -2211,12 +2215,12 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
             CGFloat arrive = 0.38f + 0.56f * order;
             CGFloat a = axs_dock_smooth(arrive - 0.006f, arrive + 0.006f, t);
             CGFloat px = ux * self.dstW, py = uy * self.dstH;
-            if (self.corner > 0.5f && self.dstW > 1.0f && self.dstH > 1.0f) {
-                CGFloat qx = fabs(px - self.dstW * 0.5f) - (self.dstW * 0.5f - self.corner);
-                CGFloat qy = fabs(py - self.dstH * 0.5f) - (self.dstH * 0.5f - self.corner);
+            if (self.dstCorner > 0.5f && self.dstW > 1.0f && self.dstH > 1.0f) {
+                CGFloat qx = fabs(px - self.dstW * 0.5f) - (self.dstW * 0.5f - self.dstCorner);
+                CGFloat qy = fabs(py - self.dstH * 0.5f) - (self.dstH * 0.5f - self.dstCorner);
                 CGFloat dxo = qx > 0 ? qx : 0, dyo = qy > 0 ? qy : 0;
                 CGFloat inner = qx > qy ? qx : qy;
-                CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo) + (inner < 0 ? inner : 0) - self.corner;
+                CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo) + (inner < 0 ? inner : 0) - self.dstCorner;
                 a *= 1.0f - axs_dock_smooth(-1.5f, 1.5f, dOut);
             }
             UInt8 av = (UInt8)(a * 255.0f);
@@ -2238,14 +2242,20 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
         if (t < 0) t = 0; if (t > 1) t = 1;
         [self paintSrc:t];
         [self paintDst:t];
-        // 飞行途中侧倾：dst(浮→侧) 从 0 渐变到侧窗角；src(侧→浮) 从侧窗角回到 0。
-        CGFloat ease = t * t * (3.0f - 2.0f * t);
-        CGFloat rad = self.tiltDst ? (ease * self.tiltRad) : ((1.0f - ease) * self.tiltRad);
-        CATransform3D persp = CATransform3DIdentity; persp.m34 = -1.0 / 600.0;
-        CATransform3D rot = CATransform3DRotate(CATransform3DIdentity, rad, 0, 1, 0);
-        CATransform3D comb = CATransform3DConcat(persp, rot);
-        if (self.tiltDst) self.dstLayer.transform = comb;
-        else              self.srcLayer.transform = comb;
+        // .233: 侧窗全程带侧倾——从聚合第一帧就是侧倾形态，结束不再"闪"。
+        // 关键：透视必须显式写 m14/m34（M=R·P 展开后的两个分量）。旧写法
+        // 旧的 R·P 复合 + persp.m34 对 z=0 平面 w≡1，
+        // m34 失效只剩 cos 水平缩放 → 侧窗看起来是正面；driver 移除后
+        // 原生 tilt 接管才突然侧倾（用户说的"完成才闪"）。
+        // 写法与 AxsBeautifyRing.axs_ring_applyTilt 逐字一致，角度同配置。
+        CGFloat rad = self.tiltRad;
+        CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
+        CGFloat sinRad = (CGFloat)sin(rad);
+        CGFloat cosRad = (CGFloat)cos(rad);
+        tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
+        tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
+        if (self.tiltDst) self.dstLayer.transform = tiltRotation;
+        else              self.srcLayer.transform = tiltRotation;
         if (t >= 1.0) {
             [self paintSrc:1.0];
             [self paintDst:1.0];
@@ -2351,11 +2361,26 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         UIWindow *win = container.window;
         CGFloat radius = axs_dm_cornerRadiusForView(container);
 
+        // .233: src/dst 各自圆角——浮窗用从 layer 树探测到的圆角（日志 radius=36.8），
+        // 侧窗是 88pt 窄条、真身是胶囊，用 MIN(w,h)/2 精确贴合，杜绝显现圆角对不上。
+        CGFloat srcCorner = toDock ? radius : MIN(fromFrame.size.width, fromFrame.size.height) * 0.5f;
+        CGFloat dstCorner = toDock ? MIN(toFrame.size.width, toFrame.size.height) * 0.5f : radius;
+        if (srcCorner < 1.0f) srcCorner = radius;
+        if (dstCorner < 1.0f) dstCorner = radius;
+
         // 侧倾方向：右贴 sideSign=-1（朝中心左倾），左贴 +1；有效角度 = 配置 * 2.6，
-        // 与现有 tilt 视觉一致（约 15°）。飞行途中从 0 渐变到该角。
+        // 与 AxsBeautifyRing 原生 tilt 逐字一致（同一配置、同一 GAIN），落地不闪。
         CGFloat screenW = win.bounds.size.width;
         BOOL rightSide = ((toDock ? toFrame : fromFrame).origin.x + (toDock ? toFrame : fromFrame).size.width * 0.5f) > screenW * 0.5f;
-        CGFloat tiltRad = (rightSide ? -1.0 : 1.0) * (3.0 * 2.6) * M_PI / 180.0;
+        CGFloat tiltAngle = 3.0;
+        id ta = axs_dock_pref(@"splitBeautifyTiltAngle", @3.0);
+        if ([ta isKindOfClass:[NSNumber class]]) {
+            tiltAngle = [ta doubleValue];
+            if (tiltAngle < 0.0) tiltAngle = 0.0;
+            if (tiltAngle > 30.0) tiltAngle = 30.0;   // AXS_TILT_ANGLE_MAX
+        }
+        if (tiltAngle != tiltAngle) tiltAngle = 3.0;
+        CGFloat tiltRad = (rightSide ? -1.0 : 1.0) * tiltAngle * 2.6 * M_PI / 180.0;
 
         // 隐藏真容器：两端由飞行快照图层 + 原生侧窗项接管，避免重影。
         CALayer *hideAll = [CALayer layer];
@@ -2388,7 +2413,8 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                       toFrame:toFrame
                      duration:duration
                       density:density
-                       radius:radius
+                    srcCorner:srcCorner
+                    dstCorner:dstCorner
                    departDir:departDir
                     arriveDir:arriveDir
                      tiltRad:tiltRad
@@ -2397,9 +2423,10 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         axs_dock_assembleInFlight = YES;
-        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f tilt=%.1f real-card",
+        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f tilt=%.1f srcR=%.1f dstR=%.1f full-tilt real-card",
                    NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
-                   toDock ? 1 : 0, departDir, arriveDir, duration, density, tiltRad * 180.0 / M_PI);
+                   toDock ? 1 : 0, departDir, arriveDir, duration, density, tiltRad * 180.0 / M_PI,
+                   srcCorner, dstCorner);
 
         __weak UIView *wcard = container;
         __weak CALayer *wmask = hideAll;
