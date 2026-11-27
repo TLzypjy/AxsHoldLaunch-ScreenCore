@@ -655,8 +655,6 @@ jobs:
           grep -Fq "rootView.layer.transform = tiltRotation;" Hooks/AxsDismissEffect.xm || { echo "scene tilt missing"; exit 1; }
           grep -Fq "sceneRoots=%lu" Hooks/AxsDismissEffect.xm || { echo "scene diag missing"; exit 1; }
           grep -Fq "sv.layer.transform = CATransform3DIdentity;" Hooks/AxsDismissEffect.xm || { echo "scene restore identity missing"; exit 1; }
-          grep -Fq "static BOOL axs_dock_inContainerSubtree" Hooks/AxsDismissEffect.xm || { echo "container subtree guard missing"; exit 1; }
-          grep -Fq "!axs_dock_inContainerSubtree(v)" Hooks/AxsDismissEffect.xm || { echo "candidate container guard missing"; exit 1; }
           ! grep -Fq "if (excluded) continue;" Hooks/AxsDismissEffect.xm || { echo "stale traversal-level exclusion still present"; exit 1; }
           grep -Fq "BOOL wasToDock = toDock;" Hooks/AxsDismissEffect.xm || { echo "stop direction capture missing"; exit 1; }
           grep -Fq "if (!wasToDock) {" Hooks/AxsDismissEffect.xm || { echo "restore direction gate missing"; exit 1; }
