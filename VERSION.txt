@@ -1,3 +1,17 @@
+beautify.246 变更（场景栈三重压制：tilt 复活 + hidden + z 序压层）：
+- 用户反馈 .245「还是一样 没有修复」。DUMP 97：fwd+1.5s 场景链仍全部可见
+  （alpha=1.00 通过 !hidden 过滤）——hidden 拉锯战原生每帧恢复，我们输。
+- 转机：.245 修好收集后，.242 的 tilt 方案现在真的能执行了。场景栈显示的就是
+  应用真实画面，与容器同 tilt 后即使原生恢复可见，呈现的也是「正确的侧倾
+  侧窗」而非正面——与原生恢复 hidden 的行为不再冲突。
+- 三重压制（enforce 每 tick）：
+  1) tilt：场景栈链根施加容器同款 tilt（显式 m14/m34，同角度配置）；
+  2) hidden：继续尝试隐藏（纳入恢复清单）；
+  3) z 序：insertSubview:belowSubview: 压到容器之下（同父视图时）——原生
+     恢复 hidden 也在容器后面，容器内容与之相同不会露馅。
+- 反向恢复（仅 toDock=NO）：unhide + transform identity 交还原生。
+- ENFORCE 日志增加 sceneRoots=N 字段，直接验证收集与压制是否落地。
+
 beautify.245 变更（总根源修复：场景收集的遍历级排除导致集合恒空）：
 - 用户反馈 .244「还是一样啊」。DUMP 96：fwd+1.5s 场景栈链仍全部 alpha=1.00 可见。
 - 总根源：axs_dock_sceneRootsAt / axs_dock_sceneCornerRadiusAt 的遍历把

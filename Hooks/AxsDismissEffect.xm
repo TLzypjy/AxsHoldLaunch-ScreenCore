@@ -1673,6 +1673,7 @@ static __weak UIWindow *axs_dock_lastWindow = nil;
 // .243: 场景内容栈压制（dock 期间隐藏，反向揭示完成后恢复）
 static BOOL axs_dock_sceneSuppressed = NO;
 static NSMutableArray *axs_dock_hiddenSceneViews = nil;
+static __weak UIView *axs_dock_lastContainer = nil;   // .246: z 序压层参照
 // .127: REPLACE the native animation entirely. Per the user's direction the
 // native animation is no longer clamped-and-run -- it is swallowed (never
 // forwarded, zero execution) and its completion is fired manually, so
@@ -2727,9 +2728,12 @@ void axs_dock_enforceDockedItemTilt(void) {
                 for (UIView *sub in item.subviews) {
                     [kids appendFormat:@"%@(hidden=%d) ", NSStringFromClass(sub.class), sub.hidden ? 1 : 0];
                 }
-                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f contents=%@ kids=[%@]",
+                NSUInteger sceneN = axs_dock_sceneSuppressed
+                    ? (NSUInteger)axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect).count : 0;
+                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f contents=%@ kids=[%@] sceneRoots=%lu",
                            (unsigned long)items.count, rad * 180.0 / M_PI,
-                           item.layer.contents != NULL ? @"YES" : @"NO", kids);
+                           item.layer.contents != NULL ? @"YES" : @"NO", kids,
+                           (unsigned long)sceneN);
             }
         }
         if (logNow) axs_dock_enforceLogAt = CACurrentMediaTime();
@@ -2740,9 +2744,20 @@ void axs_dock_enforceDockedItemTilt(void) {
         if (axs_dock_sceneSuppressed) {
             @try {
                 for (UIView *rootView in axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect)) {
+                    // .246: tilt 复活——.245 修好收集后这条真正生效。场景栈显示的
+                    // 就是应用真实画面，与容器同 tilt 后即使原生恢复可见也是
+                    // 「正确的侧倾侧窗」，不再是正面。
+                    rootView.layer.transform = tiltRotation;
                     if (!rootView.hidden) {
                         rootView.hidden = YES;
                         [axs_dock_hiddenSceneViews addObject:rootView];
+                    }
+                    // .246: z 序压到容器之下——原生若恢复 hidden，它仍在容器
+                    // 后面（容器内容与之相同），不会以正面形态盖住侧窗。
+                    UIView *cont = axs_dock_lastContainer;
+                    if (cont != nil && rootView.superview != nil
+                        && rootView.superview == cont.superview) {
+                        [rootView.superview insertSubview:rootView belowSubview:cont];
                     }
                 }
             } @catch (NSException *ignored) { }
@@ -2789,6 +2804,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
 
         UIWindow *win = container.window;
         axs_dock_lastWindow = win;
+        axs_dock_lastContainer = container;
         axs_dock_lastDockFrameRect = toDock ? toFrame : fromFrame;
 
         // .239: dock 态切换。不再 mutate 容器圆角——.238 的 36.8→12 临时修改
@@ -2942,12 +2958,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 }
                 // .244: 只有反向（侧→浮）结束才恢复场景内容栈并解除压制。
-                // .243 的恢复块正/反向共用——正向 flight 结束（1.33s）就把场景栈
-                // 放回来了，DUMP 95 实锤 1.5s 时场景链全部 hidden=NO，正面内容
-                // 随即盖住侧窗（「还是有啊」的直接原因）。
                 if (!wasToDock) {
                     for (UIView *sv in axs_dock_hiddenSceneViews) {
-                        if (sv != nil) sv.hidden = NO;
+                        if (sv != nil) {
+                            sv.hidden = NO;
+                            sv.layer.transform = CATransform3DIdentity;   // .246: 交还原生
+                        }
                     }
                     [axs_dock_hiddenSceneViews removeAllObjects];
                     axs_dock_sceneSuppressed = NO;
