@@ -2106,6 +2106,8 @@ void axs_dock_enforceDockedItemTilt(void);
 @property (nonatomic, assign) uint32_t departDir;
 @property (nonatomic, assign) uint32_t arriveDir;
 @property (nonatomic, assign) CGFloat srcTiltRad;     // .243: 消散层侧倾（反向=侧窗真实侧倾）
+@property (nonatomic, assign) BOOL dstIsScene;        // .247: dst=场景内容栈（每 tick 重找）
+@property (nonatomic, assign) BOOL suppressScene;     // .247: 反向飞行期隐藏场景栈
 @property (nonatomic, assign) BOOL dstContentReady;   // .236: docked item 内容就绪前不揭示
 @property (nonatomic, assign) CFTimeInterval dstRevealStart; // -1=未开始
 - (void)startWithWindow:(UIWindow *)window
@@ -2115,6 +2117,8 @@ void axs_dock_enforceDockedItemTilt(void);
                 dstView:(UIView *)dstView
                dstFrame:(CGRect)dstFrame
             dstIsDocked:(BOOL)dstIsDocked
+             dstIsScene:(BOOL)dstIsScene
+          suppressScene:(BOOL)suppressScene
                duration:(NSTimeInterval)duration
                 density:(CGFloat)density
              srcCorner:(CGFloat)srcCorner
@@ -2224,6 +2228,8 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
                 dstView:(UIView *)dstView
                dstFrame:(CGRect)dstFrame
             dstIsDocked:(BOOL)dstIsDocked
+             dstIsScene:(BOOL)dstIsScene
+          suppressScene:(BOOL)suppressScene
                duration:(NSTimeInterval)duration
                 density:(CGFloat)density
              srcCorner:(CGFloat)srcCorner
@@ -2238,6 +2244,8 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     self.dstView = dstView;
     self.dstFrame = dstFrame;
     self.dstIsDocked = dstIsDocked;
+    self.dstIsScene = dstIsScene;
+    self.suppressScene = suppressScene;
     self.duration = duration;
     self.departDir = departDir;
     self.arriveDir = arriveDir;
@@ -2259,12 +2267,13 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
         self.srcSavedHidden = self.srcView.hidden;
         self.srcView.hidden = YES;
     }
-    if (self.dstView != nil) {
+    if (self.dstView != nil && !self.dstIsScene) {
         self.dstSavedHidden = self.dstView.hidden;
-        // .237: dst 永远是 live card，dock 稳态被原生隐藏——揭示前强制显示，
-        // 每 tick reassert 保活；stop 不再恢复 hidden（恢复会让窗口在揭示后消失）。
+        // .237: dst=容器（反向）——揭示前强制显示，每 tick reassert 保活。
         self.dstView.hidden = NO;
     }
+    // .247: dst=场景内容栈（正向）时尊重原生显隐——它何时出现由原生决定，
+    // 出现即挂逐格揭示 mask（聚合的就是真实小窗）。
     [self installSrcLayerWithFrame:srcFrame];
     [self attachDstMask];
     self.srcBmp = [self makeSrcBmp];
@@ -2413,6 +2422,16 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
             v = found;
         }
     }
+    // .247: 场景 dst 每 tick 重找——原生何时创建/重建场景栈，何时开始逐格聚合
+    if (self.dstIsScene) {
+        UIView *found = [axs_dock_sceneRootsAt(self.win, self.dstFrame) firstObject];
+        if (found != nil && found != v) {
+            if (v != nil) { @try { if (v.layer.mask == self.dstMask) v.layer.mask = nil; } @catch (NSException *ignored) { } }
+            self.dstView = found;
+            self.dstMask = nil;   // 强制重挂
+            v = found;
+        }
+    }
     if (v == nil) return;
     [self attachDstMask];
     if (self.dstView.hidden) self.dstView.hidden = NO;   // .237: live-card dst 强制保活
@@ -2426,6 +2445,18 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
         [self paintSrc:t];
         [self reassertDst];
         axs_dock_enforceDockedItemTilt();   // .238: item 与容器同 tilt（内容晚到也是侧倾）
+        // .247: 反向飞行期隐藏场景栈（原生会把它插回浮窗矩形、正面盖住聚合中
+        // 的浮窗）；揭示完成后由 dock 入口统一恢复+复位。
+        if (self.suppressScene) {
+            @try {
+                for (UIView *rootView in axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect)) {
+                    if (!rootView.hidden) {
+                        rootView.hidden = YES;
+                        [axs_dock_hiddenSceneViews addObject:rootView];
+                    }
+                }
+            } @catch (NSException *ignored) { }
+        }
         // .236: docked dst 的揭示由「内容就绪」门控——就绪前全透明；就绪后从
         // 此刻起跑子时钟（起飞时已就绪则铺满整个 flight）。真视图的圆角/侧倾
         // 仍由系统原生渲染，不施加任何 transform。
@@ -2741,24 +2772,12 @@ void axs_dock_enforceDockedItemTilt(void) {
         // transform 覆盖，斗不过）。dock 侧窗由容器独立渲染（揭示期已验证内容
         // 完整），场景栈是 TouchPassthrough 不承载触摸，隐藏安全。反向揭示
         // 完成后由 dock 入口统一恢复。
-        if (axs_dock_sceneSuppressed) {
+        // .247: 场景内容栈=侧窗真实本体——只施加 tilt（聚合 mask 由 driver 直接
+        // 挂在它身上，粒子聚合的就是真实侧倾小窗），不再隐藏/压层/对抗原生。
+        if (axs_dock_dockedState) {
             @try {
                 for (UIView *rootView in axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect)) {
-                    // .246: tilt 复活——.245 修好收集后这条真正生效。场景栈显示的
-                    // 就是应用真实画面，与容器同 tilt 后即使原生恢复可见也是
-                    // 「正确的侧倾侧窗」，不再是正面。
                     rootView.layer.transform = tiltRotation;
-                    if (!rootView.hidden) {
-                        rootView.hidden = YES;
-                        [axs_dock_hiddenSceneViews addObject:rootView];
-                    }
-                    // .246: z 序压到容器之下——原生若恢复 hidden，它仍在容器
-                    // 后面（容器内容与之相同），不会以正面形态盖住侧窗。
-                    UIView *cont = axs_dock_lastContainer;
-                    if (cont != nil && rootView.superview != nil
-                        && rootView.superview == cont.superview) {
-                        [rootView.superview insertSubview:rootView belowSubview:cont];
-                    }
                 }
             } @catch (NSException *ignored) { }
         }
@@ -2822,10 +2841,11 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         if (toDock) {
             axs_dock_dockedState = YES;
             axs_dock_dockedStateAt = CACurrentMediaTime();
-            axs_dock_sceneSuppressed = YES;                 // .243: 场景栈压制开始
+            axs_dock_sceneSuppressed = NO;                  // .247: 正向与场景栈协作（tilt+mask），不隐藏
             if (axs_dock_hiddenSceneViews == nil) axs_dock_hiddenSceneViews = [NSMutableArray array];
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;   // enforce 从 identity 起施加
         } else {
+            axs_dock_sceneSuppressed = YES;                 // .247: 反向飞行期隐藏场景栈（tick 落实）
             axs_dock_dockedState = NO;
             if (dockItem != nil) {
                 dockItem.layer.transform = CATransform3DIdentity;   // 交还原生
@@ -2852,7 +2872,16 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             return;
         }
 
-        UIView *dstView = container;
+        // .247: 正向 dst=场景内容栈（侧窗真实本体，出现即挂逐格揭示 mask，
+        // 聚合的就是真实侧倾小窗）；反向 dst=容器（浮窗目标，一直工作正常）。
+        UIView *dstView = nil;
+        BOOL dstIsScene = NO;
+        if (toDock) {
+            dstView = [axs_dock_sceneRootsAt(win, toFrame) firstObject];
+            dstIsScene = YES;   // 可能此刻还未出现——driver 每 tick 重找
+        } else {
+            dstView = container;
+        }
         CGRect dstFrame = toFrame;
 
         // .242: 圆角按「窗口真实外观」取值——DUMP 93 证实容器自身 corner=0，
@@ -2908,6 +2937,8 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                         dstView:dstView
                        dstFrame:dstFrame
                     dstIsDocked:NO
+                     dstIsScene:dstIsScene
+                  suppressScene:!toDock
                        duration:duration
                         density:density
                      srcCorner:srcCorner
@@ -2958,6 +2989,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 }
                 // .244: 只有反向（侧→浮）结束才恢复场景内容栈并解除压制。
+                // .247: 正向兜底——场景栈一直没出现（dstView 为空）时恢复容器
+                // 显示，侧窗位置不留空白。
+                if (wasToDock && c != nil) {
+                    AXSDockFlightDriver *drv2 = objc_getAssociatedObject(c, &axs_dock_flightDriverKey);
+                    if (drv2 == nil || drv2.dstView == nil) c.hidden = NO;
+                }
                 if (!wasToDock) {
                     for (UIView *sv in axs_dock_hiddenSceneViews) {
                         if (sv != nil) {

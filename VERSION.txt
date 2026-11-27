@@ -1,3 +1,23 @@
+beautify.247 变更（聚合目标=真实场景小窗——用户点破的最终架构）：
+- 用户点破：「直接聚合成侧窗的真实小窗，侧窗的真实小窗不就是侧倾的小窗吗」。
+  场景内容栈（_UIScenePresentationView 链）就是侧窗的真实本体：应用真实画面、
+  真实圆角 36.8、enforce 每帧 tilt。前几版一直在伪造目标（快照层/item 壳/
+  容器揭示），从本版起让真实小窗自己当聚合主角。
+- 正向（浮→侧）：
+  a) dst 揭示 mask 直接挂场景内容栈链根（axs_dock_sceneRootsAt firstObject），
+     driver 每 tick 重找（dstIsScene）——原生何时创建/重建场景栈，何时开始
+     逐格聚合真实小窗；聚合完成的 mask 在 stop 时移除。
+  b) 容器保持原生隐藏，不再强拆 unhide（少一个对抗面）。enforce 只对场景栈
+     tilt（与 mask 协作：mask 在 layer 局部坐标，随 tilt 一起转）——移除
+     hide/z-press（.246 的三重压制不再需要：协作优于对抗）。
+  c) 兜底：flight 结束时场景栈仍未出现（dstView 为空）→ 恢复容器显示，
+     侧窗位置不留空白。
+- 反向（侧→浮）：
+  a) dst 仍是容器（逐格聚合浮窗，一直正常）；
+  b) 场景栈在飞行期间隐藏（suppressScene，tick 落实），避免正面插回聚合中的
+     浮窗；揭示完成（duration+0.18）统一恢复 + transform identity 交还原生。
+- 驱动签名新增 dstIsScene/suppressScene；ENFORCE 诊断保留 sceneRoots=N。
+
 beautify.246 变更（场景栈三重压制：tilt 复活 + hidden + z 序压层）：
 - 用户反馈 .245「还是一样 没有修复」。DUMP 97：fwd+1.5s 场景链仍全部可见
   （alpha=1.00 通过 !hidden 过滤）——hidden 拉锯战原生每帧恢复，我们输。
