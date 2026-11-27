@@ -1667,7 +1667,6 @@ static IMP axs_open_orig_addAnimation = NULL;
 // 导致 hook 读不到——hook 需要在 dock 态吞掉 docked item 层树的动画，否则
 // 原生延迟 2~3s 的「内容弹出+去侧倾」动画以 presentation 覆盖我们的 model tilt）。
 static BOOL axs_dock_dockedState = NO;        // YES=当前处于 dock 侧窗态
-static CGFloat axs_dock_floatRadius = 0;      // 浮窗圆角（兼容保留）
 static CGFloat axs_dock_dockedRadius = 0;     // docked item 真实圆角
 static CGRect axs_dock_lastDockFrameRect = CGRectZero;   // 最近一次侧窗矩形
 static __weak UIWindow *axs_dock_lastWindow = nil;
