@@ -2704,12 +2704,18 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             if (container.alpha < 1.0) container.alpha = 1.0;
         } @catch (NSException *ignored) { }
 
-        // 圆角按「窗口真实外观」：浮窗=树探测（36.8），侧窗=dockedRadius（36.8）。
+        // .253: 侧窗视觉圆角 = 浮窗圆角 × 缩放比。Dock 通道把浮窗内容等比
+        // 缩小渲染，圆角随宽度等比缩小——36.8 直接套在 88pt 宽的侧窗上
+        // 「四个圆角很圆」（视频实测真实侧窗圆角 ≈ 36.8×(88/264)≈12.3）。
+        CGFloat dockedVisualCorner = axs_dock_dockedRadius;
+        {
+            CGFloat dockW = toDock ? toFrame.size.width : fromFrame.size.width;
+            CGFloat floatW = toDock ? fromFrame.size.width : toFrame.size.width;
+            if (dockW > 1.0f && floatW > 1.0f) dockedVisualCorner *= dockW / floatW;
+        }
         CGFloat srcCorner = toDock ? axs_dm_cornerRadiusForView(container)
-                                   : (axs_dock_dockedRadius > 0.5f ? axs_dock_dockedRadius
-                                                                   : axs_dm_cornerRadiusForView(container));
-        CGFloat dstCorner = toDock ? (axs_dock_dockedRadius > 0.5f ? axs_dock_dockedRadius
-                                                                   : axs_dm_cornerRadiusForView(container))
+                                   : dockedVisualCorner;
+        CGFloat dstCorner = toDock ? dockedVisualCorner
                                    : axs_dm_cornerRadiusForView(container);
         if (srcCorner < 1.0f) srcCorner = 12.0f;
         if (dstCorner < 1.0f) dstCorner = 12.0f;
@@ -2725,15 +2731,14 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             if (tiltAngle > 30.0) tiltAngle = 30.0;
         }
         if (tiltAngle != tiltAngle) tiltAngle = 3.0;
-        CGFloat dockTilt = 0.0, floatTilt = 0.0;
+        CGFloat dockTilt = 0.0;
         {
             BOOL dockRight = (toFrame.origin.x + toFrame.size.width * 0.5f) > screenW * 0.5f;
             dockTilt = (dockRight ? -1.0 : 1.0) * tiltAngle * 2.6 * M_PI / 180.0;
-            BOOL floatRight = (fromFrame.origin.x + fromFrame.size.width * 0.5f) > screenW * 0.5f;
-            floatTilt = (floatRight ? -1.0 : 1.0) * tiltAngle * 2.6 * M_PI / 180.0;
         }
         CGFloat srcTiltRad = toDock ? 0.0 : dockTilt;
-        CGFloat dstTiltRad = toDock ? dockTilt : floatTilt;
+        // .253: 反向聚合终点=正面浮窗（浮窗态没有侧倾，终点倾斜会先斜后回正）。
+        CGFloat dstTiltRad = toDock ? dockTilt : 0.0;
 
         // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)，
         // 侧窗→浮窗目标左下→右上(4)。
