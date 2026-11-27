@@ -624,8 +624,8 @@ jobs:
           grep -Fq "AXSDockFlightDriver" Hooks/AxsDismissEffect.xm || { echo "real-window flight driver missing"; exit 1; }
           grep -Fq "[driver startOnWindow:win" Hooks/AxsDismissEffect.xm || { echo "flight driver start missing"; exit 1; }
           grep -Fq "CATransform3DConcat(persp, rot)" Hooks/AxsDismissEffect.xm || { echo "in-flight tilt missing"; exit 1; }
-          grep -Fq "- (void)paintSrc:(CGFloat)t" Hooks/AxsDismissEffect.xm || { echo "src per-cell mask missing"; exit 1; }
-          grep -Fq "- (void)paintDst:(CGFloat)t" Hooks/AxsDismissEffect.xm || { echo "dst per-cell mask missing"; exit 1; }
+          grep -Fq "void)paintSrc:(CGFloat)t" Hooks/AxsDismissEffect.xm || { echo "src per-cell mask missing"; exit 1; }
+          grep -Fq "void)paintDst:(CGFloat)t" Hooks/AxsDismissEffect.xm || { echo "dst per-cell mask missing"; exit 1; }
           ! grep -Fq "for (uint32_t pass = 4u; pass <= 5u; pass++)" Hooks/AxsMetalSand.xm || { echo "old puzzle tile pass still present"; exit 1; }
           grep -Fq "if (openMode == 1u || openMode == 3u) sMsdActiveOpenRenderer = renderer;" Hooks/AxsMetalSand.xm || { echo "transfer renderer handle missing"; exit 1; }
           ! grep -Fq "axs_open_interceptUntil = CACurrentMediaTime() + duration + 1.5" Hooks/AxsDismissEffect.xm || { echo "dock still swallows native animation"; exit 1; }
