@@ -1710,7 +1710,13 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
             // .239: dock 态下 docked item 层树动画一并吞掉——原生内容弹出后
             // 会以动画把 item 拉回正面，presentation 覆盖 model，我们的每帧
             // tilt 同步就失效了。completion 手动补发（与容器同款）。
-            BOOL isDockItem = (delegate != nil && axs_dock_dockedState
+            // .255: item 子树吞动画只在【挂起 settle 窗口 4s】内生效——
+            // 窗口外用户点击 docked item 触发的 position/bounds 弹簧（展开/
+            // 预览响应）曾被无差别吞掉，点击像死了（log106 6966.8 实锤）。
+            // 原生 ~2-3s 的延迟内容弹出仍在窗口内被吞，tilt 不被覆盖。
+            BOOL dockSettleWindow = axs_dock_dockedState
+                && (CACurrentMediaTime() - axs_dock_dockedStateAt) < 4.0;
+            BOOL isDockItem = (delegate != nil && dockSettleWindow
                 && strstr(object_getClassName(delegate), "DockedFloatingItem") != NULL);
             // .240: 原生动画常加在 item 的内容子层上（delegate 类名不是
             // DockedFloatingItem）——沿 superlayer 回溯判定是否处于 item 子树。
@@ -2154,13 +2160,18 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     return ((1.0f - ux) + uy) * 0.5f;
 }
 
-// .254: 飞行快照层的 dock 侧倾矩阵改为【无透视纯旋转】——与 ENFORCE 的
-// item 本体 tilt（.252 起 m14=m34=0）逐字同角度。带透视的聚合层在交接给
-// 真实侧窗的瞬间角度不同 ->「聚合成功时抖一下/正面和侧倾切换」（视频实锤）。
+// .255: 飞行快照层的 dock 侧倾恢复【透视矩阵】——与 ring 的宿主 tilt
+//（AXS_TILT_PERSPECTIVE_GAIN，同角度滑条）逐角度一致：可见侧倾的最终来源
+// 是 ring 宿主 tilt（.254 视频实锤 ~+2s 出现透视梯形），聚合层必须从第一
+// 个粒子起就是同一个观感，否则揭示瞬间 flat→透视 跳变（「先正面后侧倾」）。
+// 注意：item 本体 tilt 仍保持无透视（.252）——透视在 item 上会打死 Dock
+// 通道触摸桥（.250 实锤），ring 宿主 tilt 无此问题。
 static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
-    tiltRotation.m14 = 0.0;
-    tiltRotation.m34 = 0.0;
+    CGFloat sinRad = (CGFloat)sin(rad);
+    CGFloat cosRad = (CGFloat)cos(rad);
+    tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
+    tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
     return tiltRotation;
 }
 
@@ -2458,7 +2469,17 @@ static CFAbsoluteTime axs_dock_dockedStateAt = 0;   // .241: 进入 dock 态的�
 
 // .241: dock 态前 5s 内请求 ring 加速宿主探测（1s→0.1s）——原生为侧窗态
 // 新建/重建的内容子视图会被即刻 tilt，杜绝「正面 2~3s 后才侧倾」。
+// .255: 最近一次 dock 飞行的时刻——probeBoost 用它把转场后 3s 内的 ring
+// tick 提速到 0.1s（宿主 tilt 的施加/恢复都不再滞后 1s）。
+static CFTimeInterval axs_dock_lastFlightAt = 0;
+
 BOOL axs_dock_probeBoost(void) {
+    // .255: 转场窗口内一律加速 ring tick（0.1s）——docked 前 5s 之外，反向
+    // 脱离后的 ring 宿主 tilt 恢复也依赖 tick（旧逻辑 1s tick -> 揭示的浮窗
+    // 带着宿主 tilt 最多 1s 才回正 =「一半侧倾然后回正」）。lastFlightAt 由
+    // dockAssemblePlay 每次飞行刷新。
+    if (axs_dock_lastFlightAt > 0
+        && (CACurrentMediaTime() - axs_dock_lastFlightAt) < 3.0) return YES;
     return (axs_dock_dockedState
             && axs_dock_lastWindow != nil
             && (CACurrentMediaTime() - axs_dock_dockedStateAt) < 5.0);
@@ -2765,6 +2786,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         }
 
         // 保卫窗口：候选矩形与转场矩形相交的 open 候选跳过（防二次聚合）。
+        axs_dock_lastFlightAt = CACurrentMediaTime();   // .255: probeBoost 窗口
         axs_dock_flightGuardUntil = CACurrentMediaTime() + duration + 2.3;
         axs_dock_guardFrameA = fromFrame;
         axs_dock_guardFrameB = toFrame;

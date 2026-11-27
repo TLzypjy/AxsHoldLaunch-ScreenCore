@@ -1,3 +1,22 @@
+beautify.255 变更（聚合观感与最终侧倾统一 + ring 恢复提速 + 点击响应放行）：
+- 用户反馈 .254：a) 侧窗先聚合成正面、然后再转成侧倾；b) 侧窗转浮窗仍有一半
+  侧倾状态然后回正。
+- 根源1（先正面后侧倾）：可见侧倾的最终来源是 ring 的宿主透视 tilt
+  （splitBeautifyTiltEnabled，AXS_TILT_PERSPECTIVE_GAIN，log106 视频实锤
+  ~+2s 出现透视梯形）；而 .254 把飞行聚合层改成了无透视（观感=正面）。
+  修复：axs_dock_tiltMatrix 恢复 m14/m34 透视（与 ring 宿主 tilt 同角度同
+  观感）——聚合从第一个粒子起就是最终观感，揭示零跳变。item 本体 tilt 仍
+  保持无透视（透视在 item 上打死 Dock 通道触摸桥，.250 实锤）。
+- 根源2（反向一半侧倾）：反向脱离后 ring 宿主 tilt 的恢复依赖 ring tick
+  （probeBoost 只覆盖 docked 前 5s，其余 1s/次）——揭示的浮窗最多带 1s 宿主
+  tilt 才回正。修复：新增 axs_dock_lastFlightAt，转场后 3s 内 ring tick 提速
+  到 0.1s，施加/恢复都即时。
+- 根源3（顺手修）：log106 6966.8 实锤用户点击 docked item 的 position/bounds
+  弹簧响应动画被 DOCK SWALLOW 无差别吞掉（点击像死了）。修复：item 子树吞
+  动画只在挂起 settle 窗口 4s 内生效，窗口外放行；原生 ~2-3s 延迟内容弹出
+  仍在窗口内被吞，tilt 不被覆盖。
+- 保持：.253 等比圆角、反向正面落位；.252 飞行隐藏/揭示 + 场景栈移除。
+
 beautify.254 变更（聚合交接角度统一 + 反向到达顺序修正）：
 - 用户反馈 .253：a) 侧窗聚合成功时会「抖一下」——像正面和侧倾切换了一下；
   b) 侧窗转浮窗时浮窗先有一半是侧倾的、然后才回正。
