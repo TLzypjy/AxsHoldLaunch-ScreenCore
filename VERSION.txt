@@ -1,3 +1,23 @@
+beautify.235 变更（浮窗↔侧窗混合架构：快照源消散 + 真视图逐帧揭示）：
+- 用户反馈 .234「侧窗是直接出现的 然后消散又聚合」。视频 86 逐帧 + 日志 86 对齐：
+  浮→侧在 1.46→1.54s（<0.1s）内浮窗整块消失、侧窗整块出现（原生侧倾形态），
+  两层 per-cell mask 都没起作用；随后只有 Metal 粒子在飞。侧→浮方向 docked item
+  瞬间消失，但容器逐格聚合成功（4.0~4.6s 可见）。
+- 根因：触发时机在原生 dock 状态翻转之后——容器 frame 已被瞬间缩成侧窗
+  （原生 dock spring 被 interceptUntil 吞掉→跳变），挂在容器上的消散 mask 落空；
+  docked item 由原生通道直接显示/移除，mask 无法控制其可见性。
+  即：持久 view（容器）挂 mask 有效；被原生接管的 endpoint 挂 mask 无效。
+- 修复（混合架构）：
+  a) src（消散端）永远用连续快照层：浮→侧用容器缓存快照；侧→浮用触发瞬间对
+     docked item 的抓拍（原生会瞬间移除它，必须此刻抓）。真 src view 隐藏防重影，
+     stop 时恢复原 hidden 值。快照层插窗口最底层（atIndex:0）。
+  b) dst（聚合端）永远用真 view：浮→侧=SCDockedFloatingItemView（逐帧验活：
+     window/superview/类名校验，失效重找实例、layer.mask 被覆盖重挂、bounds
+     变化校正 mask.frame、hidden 恢复）；侧→浮=容器（.234 已证实有效，同样
+     每 tick 重挂 mask）。真圆角/真侧倾全部由系统原生渲染，绝不手动 transform。
+  c) Metal(openMode=3) 边界细沙不变，纹理改用 src 快照（侧→浮时粒子带侧窗内容色）。
+- 日志字段 snap-src real-dst 取代 live-window-mask，便于核验混合架构生效。
+
 beautify.234 变更（浮窗↔侧窗改为真窗口 per-cell mask，圆角/侧倾全原生）：
 - 用户反馈 .233「侧窗聚合成的圆角很圆不是真实圆角、不是直接聚成侧倾状态」。
 - 根因铁证：日志显示 dock 转场时真侧窗 SCDockedFloatingItemView（88x190.7,

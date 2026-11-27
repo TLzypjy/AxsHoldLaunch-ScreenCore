@@ -1998,31 +1998,41 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
     axs_dm_log(@"INSTALL %@ HOOKED", tag);
 }
 
-// ===== beautify.234: 浮窗↔侧窗 真窗口 per-cell mask（呼出动画同款） =========
-// 呼出动画 real-reveal 之所以圆角/侧倾都对，是因为它给「真窗口」挂
-// card.layer.mask（log: live window + per-cell mask, no snapshot），本体完整，
-// 圆角与侧倾全部由系统原生 layer 渲染。.232/.233 错误地往 win.layer 叠了两张
-// 浮窗截图拉伸的「假侧窗层」（dstR=44 胶囊 + 手写矩阵对 88pt 窄窗只有 2% 透视），
-// 盖住了真侧窗 SCDockedFloatingItemView，于是看到「很圆的假圆角 + 正面，
-// 结束移除假层才闪成真侧倾」。
-// .234 改为同款真窗口机制：
-//   srcView（真容器/真侧窗）挂 per-cell 消散 mask —— 右上→左下逐格隐藏；
-//   dstView（真侧窗/真容器）挂 per-cell 聚合 mask —— 右上→左下或左下→右上逐格显现；
-//   Metal(openMode=3) 只在边界画点对点细沙。
-// 圆角：mask 的 bitmap 只做逐格 alpha + 圆角 SDF（半径取真 view 探测值），
-//       本体与侧倾交给系统原生，绝不手动 transform。
+// ===== beautify.235: 浮窗↔侧窗 混合架构（快照源消散 + 真视图逐帧揭示） ========
+// .234 实测结论（视频 86 + 日志 86 对齐）：
+//   - 浮→侧：触发瞬间原生已把容器 frame 缩成侧窗（原生 dock spring 被
+//     interceptUntil 吞掉→跳变），容器上的消散 mask 无效 → 浮窗整块瞬间消失；
+//     侧窗本体由原生直接显示 → 整块直接出现。
+//   - 侧→浮：docked item 被原生瞬间移除 → 瞬间消失；但容器（持久 view）的
+//     逐格聚合是成功的（视频 4.0~4.6s 渐进聚合可见）。
+//   即：持久 view（容器）挂 mask 有效；被原生接管的 endpoint 挂 mask 无效。
+// .235 混合架构：
+//   src（消散端）= 永远用连续快照层（整图 + 渐进 bitmap mask）——浮→侧用容器
+//     缓存快照，侧→浮用触发瞬间对 docked item 的抓拍；真 src view 隐藏防重影。
+//   dst（聚合端）= 永远用真 view（侧→浮=容器；浮→侧=SCDockedFloatingItemView）
+//     逐格揭示：每 tick 验活（window/superview/类名），失效重找实例，
+//     layer.mask 被覆盖则重挂，bounds 变化则校正 mask.frame，hidden 则恢复。
+//     真圆角/真侧倾全部由系统原生渲染，绝不手动 transform。
+//   Metal(openMode=3) 只画边界点对点细沙，纹理用 src 快照。
 @interface AXSDockFlightDriver : NSObject
-@property (nonatomic, weak)   UIView *srcView;
-@property (nonatomic, weak)   UIView *dstView;
-@property (nonatomic, strong) CALayer *srcMask;
-@property (nonatomic, strong) CALayer *dstMask;
-@property (nonatomic, assign) CFTimeInterval start;
-@property (nonatomic, assign) NSTimeInterval duration;
-@property (nonatomic, strong) CADisplayLink *link;
+@property (nonatomic, weak)   UIWindow *win;
+@property (nonatomic, strong) UIImage  *srcShot;
+@property (nonatomic, strong) CALayer  *srcLayer;      // 快照消散层（连续整图）
+@property (nonatomic, strong) CALayer  *srcMaskLayer;
+@property (nonatomic, weak)   UIView   *srcView;       // 真 src（隐藏防重影，可 nil）
+@property (nonatomic, assign) BOOL     srcSavedHidden;
+@property (nonatomic, weak)   UIView   *dstView;       // 真聚合端（逐帧验活重挂）
+@property (nonatomic, strong) CALayer  *dstMask;
+@property (nonatomic, assign) BOOL     dstIsDocked;    // dst 是否 docked item（需重找）
+@property (nonatomic, assign) CGRect   dstFrame;       // 重找匹配用（window 坐标）
+@property (nonatomic, assign) BOOL     dstSavedHidden;
 @property (nonatomic, strong) NSMutableData *srcBits;
 @property (nonatomic, strong) NSMutableData *dstBits;
 @property (nonatomic, assign) CGContextRef srcBmp;
 @property (nonatomic, assign) CGContextRef dstBmp;
+@property (nonatomic, assign) CFTimeInterval start;
+@property (nonatomic, assign) NSTimeInterval duration;
+@property (nonatomic, strong) CADisplayLink *link;
 @property (nonatomic, assign) NSUInteger cols;
 @property (nonatomic, assign) NSUInteger rows;
 @property (nonatomic, assign) CGFloat srcW;
@@ -2033,14 +2043,19 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 @property (nonatomic, assign) CGFloat dstCorner;
 @property (nonatomic, assign) uint32_t departDir;
 @property (nonatomic, assign) uint32_t arriveDir;
-- (void)startOnSrc:(UIView *)srcView
-               dst:(UIView *)dstView
-          duration:(NSTimeInterval)duration
-           density:(CGFloat)density
-         srcCorner:(CGFloat)srcCorner
-         dstCorner:(CGFloat)dstCorner
-        departDir:(uint32_t)departDir
-         arriveDir:(uint32_t)arriveDir;
+- (void)startWithWindow:(UIWindow *)window
+                srcShot:(UIImage *)srcShot
+               srcFrame:(CGRect)srcFrame
+                srcView:(UIView *)srcView
+                dstView:(UIView *)dstView
+               dstFrame:(CGRect)dstFrame
+            dstIsDocked:(BOOL)dstIsDocked
+               duration:(NSTimeInterval)duration
+                density:(CGFloat)density
+             srcCorner:(CGFloat)srcCorner
+             dstCorner:(CGFloat)dstCorner
+              departDir:(uint32_t)departDir
+              arriveDir:(uint32_t)arriveDir;
 - (void)stop;
 @end
 
@@ -2086,56 +2101,93 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     return bmp;
 }
 
-// 给真 view 挂 per-cell bitmap mask；bitmap 逐格 alpha + 圆角 SDF。
-// 半径用真 view 探测值，不再猜胶囊圆角。
-- (CALayer *)attachMaskTo:(UIView *)view {
-    if (view == nil) return nil;
-    CALayer *mask = [CALayer layer];
-    mask.frame = view.bounds;
-    mask.contentsGravity = kCAGravityResize;
-    mask.backgroundColor = [UIColor clearColor].CGColor;
-    @try { view.layer.mask = mask; } @catch (NSException *ignored) { }
-    return mask;
+// src 快照消散层：连续整图 + 渐进 bitmap mask，插入窗口最底层。
+- (void)installSrcLayerWithFrame:(CGRect)srcFrame {
+    self.srcLayer = [CALayer layer];
+    self.srcLayer.contents = (__bridge id)self.srcShot.CGImage;
+    self.srcLayer.contentsGravity = kCAGravityResizeAspectFill;
+    self.srcLayer.frame = srcFrame;
+    self.srcLayer.masksToBounds = YES;
+    self.srcLayer.cornerRadius = self.srcCorner;
+    self.srcLayer.shadowOpacity = 0.0f;
+    self.srcMaskLayer = [CALayer layer];
+    self.srcMaskLayer.frame = self.srcLayer.bounds;
+    self.srcMaskLayer.contentsGravity = kCAGravityResize;
+    self.srcLayer.mask = self.srcMaskLayer;
+    self.srcW = srcFrame.size.width;
+    self.srcH = srcFrame.size.height;
+    @try { [self.win.layer insertSublayer:self.srcLayer atIndex:0]; } @catch (NSException *ignored) { }
 }
 
-- (void)startOnSrc:(UIView *)srcView
-               dst:(UIView *)dstView
-          duration:(NSTimeInterval)duration
-           density:(CGFloat)density
-         srcCorner:(CGFloat)srcCorner
-         dstCorner:(CGFloat)dstCorner
-        departDir:(uint32_t)departDir
-         arriveDir:(uint32_t)arriveDir {
+// dst 真 view 挂渐进 bitmap mask。
+- (void)attachDstMask {
+    UIView *v = self.dstView;
+    if (v == nil) return;
+    if (self.dstMask == nil || v.layer.mask != self.dstMask) {
+        CALayer *mask = [CALayer layer];
+        mask.contentsGravity = kCAGravityResize;
+        mask.frame = v.bounds;
+        @try { v.layer.mask = mask; } @catch (NSException *ignored) { return; }
+        self.dstMask = mask;
+        self.dstW = v.bounds.size.width;
+        self.dstH = v.bounds.size.height;
+    } else if (self.dstMask.frame.size.width != v.bounds.size.width
+               || self.dstMask.frame.size.height != v.bounds.size.height) {
+        self.dstMask.frame = v.bounds;
+        self.dstW = v.bounds.size.width;
+        self.dstH = v.bounds.size.height;
+    }
+}
+
+- (void)startWithWindow:(UIWindow *)window
+                srcShot:(UIImage *)srcShot
+               srcFrame:(CGRect)srcFrame
+                srcView:(UIView *)srcView
+                dstView:(UIView *)dstView
+               dstFrame:(CGRect)dstFrame
+            dstIsDocked:(BOOL)dstIsDocked
+               duration:(NSTimeInterval)duration
+                density:(CGFloat)density
+             srcCorner:(CGFloat)srcCorner
+             dstCorner:(CGFloat)dstCorner
+              departDir:(uint32_t)departDir
+              arriveDir:(uint32_t)arriveDir {
+    self.win = window;
+    self.srcShot = srcShot;
     self.srcView = srcView;
     self.dstView = dstView;
+    self.dstFrame = dstFrame;
+    self.dstIsDocked = dstIsDocked;
     self.duration = duration;
     self.departDir = departDir;
     self.arriveDir = arriveDir;
     self.srcCorner = srcCorner;
     self.dstCorner = dstCorner;
-    self.srcW = srcView != nil ? srcView.bounds.size.width : 0.0f;
-    self.srcH = srcView != nil ? srcView.bounds.size.height : 0.0f;
-    self.dstW = dstView != nil ? dstView.bounds.size.width : 0.0f;
-    self.dstH = dstView != nil ? dstView.bounds.size.height : 0.0f;
     // 网格与 Metal openMode=3 的 22000*density / aspect 对齐。
     int particles = (int)lround(22000.0 * density);
     if (particles < 200) particles = 200;
     if (particles > 48000) particles = 48000;
-    CGFloat aspect = self.dstH > 0.5 ? self.dstW / self.dstH : 1.0;
+    CGFloat aspect = dstFrame.size.height > 0.5 ? dstFrame.size.width / dstFrame.size.height : 1.0;
     NSUInteger c = (NSUInteger)lround(sqrtf((float)particles * (float)aspect));
     NSUInteger r = (NSUInteger)((particles + (int)c - 1) / (int)c);
     if (c < 2) c = 2; if (c > 320) c = 320;
     if (r < 2) r = 2; if (r > 320) r = 320;
     self.cols = c; self.rows = r;
 
-    self.srcMask = [self attachMaskTo:srcView];
-    self.dstMask = [self attachMaskTo:dstView];
+    // 隐藏真 src view 防重影（stop 时恢复原值）。
+    if (self.srcView != nil) {
+        self.srcSavedHidden = self.srcView.hidden;
+        self.srcView.hidden = YES;
+    }
+    if (self.dstView != nil) {
+        self.dstSavedHidden = self.dstView.hidden;
+    }
+    [self installSrcLayerWithFrame:srcFrame];
+    [self attachDstMask];
     self.srcBmp = [self makeSrcBmp];
     self.dstBmp = [self makeDstBmp];
-
     [self paintSrc:0.0];
     [self paintDst:0.0];
-
     self.start = CACurrentMediaTime();
     self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(dockFlightTick:)];
     [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -2144,7 +2196,7 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
 // src: 按 depart 时钟逐格消隐（右上→左下先走），带真圆角 SDF。
 - (void)paintSrc:(CGFloat)t {
     CGContextRef ctx = self.srcBmp;
-    if (ctx == NULL) return;
+    if (ctx == NULL || self.srcMaskLayer == nil) return;
     NSUInteger cols = self.cols, rows = self.rows;
     UInt8 *bytes = (UInt8 *)[self.srcBits mutableBytes];
     size_t bpr = cols * 4;
@@ -2176,15 +2228,15 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     }
     CGImageRef img = CGBitmapContextCreateImage(ctx);
     if (img != NULL) {
-        self.srcMask.contents = (__bridge id)img;
+        self.srcMaskLayer.contents = (__bridge id)img;
         CGImageRelease(img);
     }
 }
 
-// dst: 按 arrive 时钟逐格显现（右上→左下 / 左下→右上），带真圆角 SDF。
+// dst: 按 arrive 时钟逐格显现，带真圆角 SDF（真 view 的圆角/侧倾原生自渲染）。
 - (void)paintDst:(CGFloat)t {
     CGContextRef ctx = self.dstBmp;
-    if (ctx == NULL) return;
+    if (ctx == NULL || self.dstMask == nil) return;
     NSUInteger cols = self.cols, rows = self.rows;
     UInt8 *bytes = (UInt8 *)[self.dstBits mutableBytes];
     size_t bpr = cols * 4;
@@ -2221,15 +2273,38 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     }
 }
 
+// dst 每 tick 验活：docked item 可能被原生移除/重建，mask 可能被覆盖，
+// hidden 可能被改动——逐项恢复，保证「逐格揭示真视图」始终成立。
+- (void)reassertDst {
+    UIView *v = self.dstView;
+    BOOL alive = (v != nil && v.window != nil && v.superview != nil);
+    if (alive && self.dstIsDocked
+        && [NSStringFromClass(v.class) rangeOfString:@"DockedFloatingItem"].location == NSNotFound) {
+        alive = NO;   // 实例被换成别的类：按失效处理
+    }
+    if (!alive && self.dstIsDocked) {
+        UIView *found = axs_dock_findDockedItem(self.win, self.dstFrame);
+        if (found != nil) {
+            if (v != nil) { @try { if (v.layer.mask == self.dstMask) v.layer.mask = nil; } @catch (NSException *ignored) { } }
+            self.dstView = found;
+            self.dstMask = nil;   // 强制重挂
+            v = found;
+        }
+    }
+    if (v == nil) return;
+    [self attachDstMask];
+    if (self.dstView.hidden && !self.dstSavedHidden) self.dstView.hidden = NO;
+}
+
 - (void)dockFlightTick:(CADisplayLink *)link {
     @try {
         CFTimeInterval elapsed = CACurrentMediaTime() - self.start;
         CGFloat t = self.duration > 0 ? (CGFloat)(elapsed / self.duration) : 1.0f;
         if (t < 0) t = 0; if (t > 1) t = 1;
         [self paintSrc:t];
+        [self reassertDst];
         [self paintDst:t];
-        // .234: 不施加任何 transform。真窗口的侧倾由 AxsBeautifyRing 原生 tilt
-        // 驱动，从第一帧在线；mask 只逐格控制显隐，本体/圆角/侧倾全是系统原生。
+        // 不施加任何 transform：dst 真视图的圆角/侧倾由系统原生渲染，从第一帧在线。
         if (t >= 1.0) {
             [self paintSrc:1.0];
             [self paintDst:1.0];
@@ -2242,11 +2317,17 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
 - (void)stop {
     @try {
         [_link invalidate]; _link = nil;
-        @try { if (self.srcView != nil) self.srcView.layer.mask = nil; } @catch (NSException *ignored) { }
-        @try { if (self.dstView != nil) self.dstView.layer.mask = nil; } @catch (NSException *ignored) { }
+        if (self.srcLayer != nil) { @try { [self.srcLayer removeFromSuperlayer]; } @catch (NSException *ignored) { } self.srcLayer = nil; }
+        self.srcMaskLayer = nil;
+        if (self.dstView != nil) {
+            @try { if (self.dstView.layer.mask == self.dstMask) self.dstView.layer.mask = nil; } @catch (NSException *ignored) { }
+        }
+        self.dstMask = nil;
+        if (self.srcView != nil) self.srcView.hidden = self.srcSavedHidden;
+        if (self.dstView != nil && self.dstSavedHidden) self.dstView.hidden = YES;
         if (_srcBmp != NULL) { CGContextRelease(_srcBmp); _srcBmp = NULL; }
         if (_dstBmp != NULL) { CGContextRelease(_dstBmp); _dstBmp = NULL; }
-        self.srcBits = nil; self.dstBits = nil;
+        self.srcBits = nil; self.dstBits = nil; self.srcShot = nil;
     } @catch (NSException *ignored) { }
 }
 @end
@@ -2275,23 +2356,6 @@ static id axs_dock_pref(NSString *key, id def) {
     return def;
 }
 
-// container : SCFloatingContainerView（浮窗容器）
-// fromFrame : 消散源矩形（window 坐标）——浮窗或侧窗
-// toFrame   : 聚合目标矩形（window 坐标）
-// toDock    : YES=浮窗→侧窗；NO=侧窗→浮窗
-// beautify.231: 参考视频——源窗从右上→左下逐批消散，先走的粒子先飞，
-// 后面的接着飞；目标窗按方向逐批聚合。原生 position/transform 动画不再被
-// 吞掉，照常跑完，只改容器可见性（layer mask），让状态机保持原生行为。
-// container : SCFloatingContainerView（浮窗容器）
-// fromFrame : 消散源矩形（window 坐标）——浮窗或侧窗
-// toFrame   : 聚合目标矩形（window 坐标）
-// toDock    : YES=浮窗→侧窗；NO=侧窗→浮窗
-// beautify.232: 参考视频——真实窗口连续飞过去且飞行途中侧倾，粒子只在
-// 右上→左下斜向边界做消散/聚合细沙。真容器在飞行期间隐藏，两张完整快照
-// 图层按 per-cell mask 逐格交接（呼出动画同款），杜绝网格拼图感。
-// .234：遍历 window 树找真侧窗本体 SCDockedFloatingItemView。
-// 真侧窗的圆角与侧倾由系统原生 layer + AxsBeautifyRing tilt 渲染，
-// 只要给它挂 per-cell mask 就能「逐格显现真圆角、真侧倾」，不再造假层。
 static UIView *axs_dock_findDockedItem(UIWindow *win, CGRect targetFrame) {
     UIView *best = nil;
     CGFloat bestDist = CGFLOAT_MAX;
@@ -2320,9 +2384,10 @@ static UIView *axs_dock_findDockedItem(UIWindow *win, CGRect targetFrame) {
 // fromFrame : 消散源矩形（window 坐标）——浮窗或侧窗
 // toFrame   : 聚合目标矩形（window 坐标）
 // toDock    : YES=浮窗→侧窗；NO=侧窗→浮窗
-// beautify.234: 呼出动画同款「真窗口 per-cell mask」。真容器 / 真侧窗本体
-// 各自挂 bitmap mask 逐格消隐/显现；圆角取真 view 探测值，侧倾交给系统原生，
-// 不再往 win.layer 叠截图假层、不再手动 transform。Metal 只画边界细沙。
+// beautify.235: 混合架构——src 永远快照层逐格消散（浮→侧用容器缓存快照；
+// 侧→浮用触发瞬间对 docked item 的抓拍，因为原生会瞬间移除它）；dst 永远
+// 真 view 逐格揭示（浮→侧=docked item，每 tick 验活重找重挂；侧→浮=容器，
+// .234 已证实有效）。真圆角/真侧倾由系统原生渲染。
 void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock) {
     @try {
         if (container == nil || container.window == nil) return;
@@ -2354,55 +2419,76 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
 
         UIWindow *win = container.window;
 
-        // .234: 找真侧窗本体。浮→侧时它是目标，侧→浮时它是源。
-        // 找不到就退化：只用真容器做单端 mask，粒子照旧，绝不造假层。
+        // 找真侧窗本体：浮→侧是聚合目标，侧→浮是消散源。
         UIView *dockView = axs_dock_findDockedItem(win, toDock ? toFrame : fromFrame);
-        UIView *srcView = toDock ? container : dockView;
-        UIView *dstView = toDock ? dockView : container;
-        if (srcView == nil || dstView == nil) {
-            axs_dm_log(@"DOCK FLIGHT skipped (real view not found dock=%d)", dockView != nil);
+        if (dockView == nil) {
+            axs_dm_log(@"DOCK FLIGHT skipped (docked item not found)");
             return;
         }
 
-        // 真圆角：从各自真 view 的 layer 树探测（侧窗是真身圆角，不是猜的胶囊）。
-        CGFloat srcCorner = axs_dm_cornerRadiusForView(srcView);
+        // src 快照：浮→侧用容器缓存快照（连续整图）；侧→浮用触发瞬间对
+        // docked item 的抓拍（原生会瞬间移除它，必须此刻抓）。
+        UIImage *srcShot = nil;
+        UIView *srcRealView = nil;
+        if (toDock) {
+            srcShot = axs_open_cachedCardSnapshotForView(container);
+            if (srcShot == nil) srcShot = axs_open_captureVisibleCardCheap(container);
+            if (srcShot == nil) srcShot = axs_dm_snapshot(container);
+            srcRealView = container;
+        } else {
+            srcShot = axs_dm_snapshot(dockView);
+            if (srcShot == nil) srcShot = axs_open_captureVisibleCardCheap(dockView);
+            srcRealView = dockView;
+        }
+        if (srcShot == nil) {
+            axs_dm_log(@"DOCK FLIGHT skipped (no src snapshot)");
+            return;
+        }
+
+        // dst 真视图：浮→侧=docked item（逐帧验活重找）；侧→浮=容器（持久）。
+        UIView *dstView = toDock ? dockView : container;
+        CGRect dstFrame = toDock ? toFrame : fromFrame;
+
+        // 真圆角：dst 从真 view 探测；src 快照层用对应矩形的最小边近似
+        // （浮窗用探测值更准）。
+        CGFloat srcCorner = toDock ? axs_dm_cornerRadiusForView(container)
+                                   : MIN(fromFrame.size.width, fromFrame.size.height) * 0.5f;
         CGFloat dstCorner = axs_dm_cornerRadiusForView(dstView);
+        if (srcCorner < 1.0f) srcCorner = 12.0f;
+        if (dstCorner < 1.0f) dstCorner = 12.0f;
 
         // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)，
         // 侧窗→浮窗目标左下→右上(4)。
         uint32_t departDir = 3u;
         uint32_t arriveDir = toDock ? 3u : 4u;
 
-        // 边界细沙粒子（shader openMode=3）。快照只作粒子纹理，不铺整窗。
-        UIImage *shot = axs_open_cachedCardSnapshotForView(container);
-        if (shot == nil) shot = axs_open_captureVisibleCardCheap(container);
-        if (shot == nil) shot = axs_dm_snapshot(container);
-        if (shot == nil) {
-            axs_dm_log(@"DOCK FLIGHT skipped (no snapshot for grains)");
-            return;
-        }
-        void *renderer = axs_metalDockTransferPlayRet(shot, fromFrame, toFrame,
+        // 边界细沙粒子（shader openMode=3），纹理=src 快照。
+        void *renderer = axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame,
                                                       duration, density, departDir, arriveDir);
         if (renderer == nil) {
             axs_dm_log(@"DOCK FLIGHT metal unavailable -> native restore");
             return;
         }
 
-        // 真窗口 per-cell mask：真容器 + 真侧窗本体逐格交接。
         AXSDockFlightDriver *driver = [AXSDockFlightDriver new];
-        [driver startOnSrc:srcView
-                       dst:dstView
-                  duration:duration
-                   density:density
-                 srcCorner:srcCorner
-                 dstCorner:dstCorner
-                departDir:departDir
-                 arriveDir:arriveDir];
+        [driver startWithWindow:win
+                        srcShot:srcShot
+                       srcFrame:fromFrame
+                        srcView:srcRealView
+                        dstView:dstView
+                       dstFrame:dstFrame
+                    dstIsDocked:toDock
+                       duration:duration
+                        density:density
+                     srcCorner:srcCorner
+                     dstCorner:dstCorner
+                      departDir:departDir
+                      arriveDir:arriveDir];
         objc_setAssociatedObject(container, &axs_dock_flightDriverKey, driver,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         axs_dock_assembleInFlight = YES;
-        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f live-window-mask",
+        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f snap-src real-dst",
                    NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
                    toDock ? 1 : 0, departDir, arriveDir, duration, density,
                    srcCorner, dstCorner);
