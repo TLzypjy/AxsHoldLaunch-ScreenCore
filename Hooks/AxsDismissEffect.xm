@@ -33,6 +33,11 @@ void axs_msd_setDirectionMode(uint32_t mode);
 BOOL axs_metalReplaceTexture(void *renderer, UIImage *img);
 // .155: exact shared clock of the running open renderer.
 CFTimeInterval axs_metalAssembleStartTime(void *renderer);
+// .230: rect-to-rect particle transfer (float<->dock diagonal dissolve+assemble)
+void *axs_metalDockTransferPlayRet(UIImage *shot, CGRect fromFrame, CGRect toFrame,
+                                   CGFloat duration, CGFloat density,
+                                   uint32_t departDir, uint32_t arriveDir);
+void axs_msd_setTransferConfig(CGRect from, uint32_t departDir, uint32_t arriveDir);
 // .131: open assemble returning the live renderer handle (used by the wipe flow)
 void *axs_metalAssemblePlayRet(UIImage *shot, CGRect frameInWindow, CGFloat duration,
                                CGFloat density, CGPoint sourcePoint);
@@ -2017,14 +2022,17 @@ static id axs_dock_pref(NSString *key, id def) {
 }
 
 // container : SCFloatingContainerView（浮窗容器）
-// fromFrame : 翻转前记录的浮窗 frame（window 坐标）→ 粒子起飞中心
-// toFrame   : 翻转瞬间容器 frame（window 坐标）→ 粒子聚合终点（侧窗矩形）
-void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame) {
+// fromFrame : 消散源矩形（window 坐标）——浮窗或侧窗
+// toFrame   : 聚合目标矩形（window 坐标）
+// toDock    : YES=浮窗→侧窗；NO=侧窗→浮窗
+// beautify.230: 参考视频——源窗从右上→左下依次消散，粒子点对点直飞，
+// 目标窗按方向依次聚合（浮窗→侧窗右上→左下；侧窗→浮窗左下→右上）。
+void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock) {
     @try {
         if (container == nil || container.window == nil) return;
         id sw = axs_dock_pref(@"splitBeautifyDockAnimEnabled", @NO);
         if (![sw isKindOfClass:[NSNumber class]] || ![sw boolValue]) {
-            axs_dm_log(@"DOCK ASSEMBLE skipped (switch off)");
+            axs_dm_log(@"DOCK TRANSFER skipped (switch off)");
             return;
         }
         if (axs_dock_assembleInFlight) return;
@@ -2044,46 +2052,43 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame) {
             if (density > 3.0) density = 3.0;
         }
         if (density != density || density <= 0.0) density = 1.0;
-        CGFloat duration = 1.0 / speed;
-        if (toFrame.size.width < 8.0 || toFrame.size.height < 8.0) {
-            axs_dm_log(@"DOCK ASSEMBLE skipped (bad toFrame %@)", NSStringFromCGRect(toFrame));
-            return;
-        }
-        CGPoint source = CGRectIsEmpty(fromFrame)
-            ? CGPointMake(CGRectGetMidX(toFrame), CGRectGetMidY(toFrame))
-            : CGPointMake(CGRectGetMidX(fromFrame), CGRectGetMidY(fromFrame));
+        CGFloat duration = 1.15 / speed;
+        if (toFrame.size.width < 8.0 || toFrame.size.height < 8.0) return;
+        if (CGRectIsEmpty(fromFrame)) fromFrame = toFrame;
 
-        // 纹理：优先浮窗态缓存快照（真正的浮窗内容），现场抓拍兜底
+        // 纹理：统一用浮窗缓存快照（浮窗与侧窗内容相同，只是几何不同）
         UIImage *shot = axs_open_cachedCardSnapshotForView(container);
         if (shot == nil) shot = axs_open_captureVisibleCardCheap(container);
         if (shot == nil) shot = axs_dm_snapshot(container);
         if (shot == nil) {
-            axs_dm_log(@"DOCK ASSEMBLE skipped (no snapshot)");
+            axs_dm_log(@"DOCK TRANSFER skipped (no snapshot)");
             return;
         }
         shot = axs_dm_fixSnapshotCorners(shot, container);
         if (shot == nil) return;
 
-        // frame 0 起隐藏真容器（静态 clear mask），粒子聚合完成后移除
+        // 隐藏真容器，让粒子独占两端画面；聚合完成后恢复
         CALayer *hideAll = [CALayer layer];
         hideAll.frame = container.bounds;
         hideAll.backgroundColor = [UIColor clearColor].CGColor;
         container.layer.mask = hideAll;
         objc_setAssociatedObject(container, &axs_dock_assembleMaskKey, hideAll,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        // 吞掉原生 dock 变形动画（复用现有 addAnimation hook 的 intercept 窗口）
         axs_open_interceptUntil = CACurrentMediaTime() + duration + 1.5;
-        // 终点是矩形侧窗；侧倾交给现有 tilt，故不开 cornerKill、方向用默认
         axs_msd_setCornerKill(0u, 0.0f);
-        axs_msd_setDirectionMode(0u);
 
+        // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)，
+        // 侧窗→浮窗目标左下→右上(4)。
+        uint32_t departDir = 3u;
+        uint32_t arriveDir = toDock ? 3u : 4u;
         axs_dock_assembleInFlight = YES;
-        axs_dm_log(@"DOCK ASSEMBLE play from=%@ to=%@ src=%@ dur=%.2f dens=%.2f",
+        axs_dm_log(@"DOCK TRANSFER play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f",
                    NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
-                   NSStringFromCGPoint(source), duration, density);
-        void *renderer = axs_metalAssemblePlayRet(shot, toFrame, duration, density, source);
+                   toDock ? 1 : 0, departDir, arriveDir, duration, density);
+        void *renderer = axs_metalDockTransferPlayRet(shot, fromFrame, toFrame,
+                                                      duration, density, departDir, arriveDir);
         if (renderer == nil) {
-            axs_dm_log(@"DOCK ASSEMBLE metal failed -> restore card");
+            axs_dm_log(@"DOCK TRANSFER metal failed -> restore card");
             @try { container.layer.mask = nil; } @catch (NSException *ignored) { }
             axs_dock_assembleInFlight = NO;
             return;
@@ -2091,7 +2096,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame) {
         __weak UIView *wcard = container;
         __weak CALayer *wmask = hideAll;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                     (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
+                                     (int64_t)((duration + 0.10) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 UIView *c = wcard;

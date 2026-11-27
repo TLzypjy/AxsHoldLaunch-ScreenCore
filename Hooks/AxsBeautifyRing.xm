@@ -7,7 +7,7 @@
 
 // beautify.228: 浮窗→侧窗粒子聚合（实现在 AxsDismissEffect.xm，同一 dylib）
 // fromFrame = 翻转前浮窗 frame(window坐标)，toFrame = 翻转瞬间容器 frame(window坐标)
-extern void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame);
+extern void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock);
 
 // ---------------------------------------------------------------------------
 // 美化 · 光圈外框 (ring frame, beautify.19) — 稳定圆角矩形描边 + 整框 mask 半径
@@ -1001,6 +1001,7 @@ static void axs_ring_detachDriver(NSString *key);   // beautify.95：前置声�
 @property (nonatomic, assign) BOOL loggedZOrder;                     // beautify.59：ZORDER 日志只写一次
 @property (nonatomic, assign) BOOL lastDockSnap;                     // beautify.59：上帧贴边态（翻转时抓拍快照）
 @property (nonatomic, assign) CGRect lastUndockedFrame;              // beautify.228：翻转前浮窗 frame(window坐标)，供 dock 粒子起飞点
+@property (nonatomic, assign) CGRect lastDockedFrame;                // beautify.230：翻转前侧窗 frame(window坐标)，供 dock→浮窗粒子起飞点
 @property (nonatomic, assign) BOOL tiltShadowWasActive;              // beautify.95：本 driver 是否处于倾斜态（全局计数对账用）
 @property (nonatomic, assign) int scanMissCount;                     // beautify.95：连续缺席扫描次数（宽限期防抖）
 @property (nonatomic, assign) BOOL tiltShadowProbed;                 // beautify.95：SHADOW_PROBE 每次倾斜会话只输出一次
@@ -1358,6 +1359,11 @@ static void axs_ring_syncDriver2(AXSRingLinkDriver *driver, BOOL preferModel) {
     if (!docked && container.window != nil) {
         CGRect f = [container convertRect:container.bounds toView:nil];
         if (f.size.width > 40.0 && f.size.height > 40.0) driver.lastUndockedFrame = f;
+    }
+    // beautify.230：贴边态每帧记录侧窗 frame，作为侧窗→浮窗翻转的粒子起飞矩形
+    if (docked && container.window != nil) {
+        CGRect f = [container convertRect:container.bounds toView:nil];
+        if (f.size.width > 8.0 && f.size.height > 8.0) driver.lastDockedFrame = f;
     }
     BOOL ringAllowed = axs_ring_ringAllowedFor(docked, container);
     BOOL glowAllowed = axs_ring_glowAllowedFor(docked, container);
@@ -2592,9 +2598,24 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                         CGFloat x = (side >= 0) ? (sw - w) : 0.0;
                         toF = CGRectMake(x, (sh - h) * 0.5, w, h);
                     }
-                    axs_dockAssemblePlay(container, driver.lastUndockedFrame, toF);
-                    axs_ring_log(@"ring DOCK ASSEMBLE trigger from=%@ to=%@",
+                    driver.lastDockedFrame = toF;   // 缓存侧窗矩形供反向触发使用
+                    axs_dockAssemblePlay(container, driver.lastUndockedFrame, toF, YES);
+                    axs_ring_log(@"ring DOCK TRANSFER trigger float->dock from=%@ to=%@",
                                  NSStringFromCGRect(driver.lastUndockedFrame), NSStringFromCGRect(toF));
+                } @catch (NSException *ignored) { }
+            } else {
+                // beautify.230：侧窗→浮窗——侧窗从右上→左下消散，粒子点对点直飞，
+                // 浮窗从左下→右上聚合。源=记录的侧窗 frame，目标=翻转后的浮窗 frame。
+                @try {
+                    CGRect toF = [container convertRect:container.bounds toView:nil];
+                    if (toF.size.width < 40.0 || toF.size.height < 40.0) {
+                        toF = driver.lastUndockedFrame;   // 翻转瞬间尺寸未更新时用展开态
+                    }
+                    if (!CGRectIsEmpty(toF) && !CGRectIsEmpty(driver.lastDockedFrame)) {
+                        axs_dockAssemblePlay(container, driver.lastDockedFrame, toF, NO);
+                        axs_ring_log(@"ring DOCK TRANSFER trigger dock->float from=%@ to=%@",
+                                     NSStringFromCGRect(driver.lastDockedFrame), NSStringFromCGRect(toF));
+                    }
                 } @catch (NSException *ignored) { }
             }
             // beautify.59（.27 日志结论）：贴边稳态时 SCFloatingHostWindow 被原生隐藏、

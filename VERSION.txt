@@ -1,3 +1,12 @@
+beautify.230 变更（浮窗↔侧窗粒子动画重做）：
+- 按参考视频重做：源窗从右上→左下依次消散，粒子点对点直飞到目标窗对应位置，
+  目标窗按方向依次聚合（浮窗→侧窗右上→左下；侧窗→浮窗左下→右上）。
+- Metal 新增 openMode=3 双矩形 transfer：srcOrigin/srcSize + departDir/arriveDir，
+  每格粒子从源矩形自己的格飞到目标矩形自己的格（贝塞尔+微弧），带源图像素。
+- axs_dockAssemblePlay 改双向（加 toDock 参数）；BeautifyRing 两方向都触发，
+  新增 lastDockedFrame 缓存侧窗矩形供反向起飞。
+- 速度/密度滑条继续控制 duration/density。
+
 beautify.229 变更（浮窗转侧窗面板位置修正）：
 - 移除 .228 新增的独立分组「浮窗转侧窗动画」，三项并入「美化」分组，
   紧跟在「呼出显现方向」下方：浮窗转换侧窗 / 粒子聚合速度 / 粒子聚合密度。

@@ -89,6 +89,10 @@ struct DustUniforms {\n\
     uint cornerKill;\n\
     float cornerRadius;\n\
     uint dirMode;\n\
+    float2 srcOrigin;\n\
+    float2 srcSize;\n\
+    uint departDir;\n\
+    uint arriveDir;\n\
 };\n\
 struct DustVertex {\n\
     float4 position [[position]];\n\
@@ -112,6 +116,15 @@ float3 axsPalette(float p) {\n\
     if (p < 3.0) return mix(float3(0.68,0.28,0.98), float3(0.98,0.30,0.68), p-2.0);\n\
     if (p < 4.0) return mix(float3(0.98,0.30,0.68), float3(1.00,0.68,0.22), p-3.0);\n\
     return mix(float3(1.00,0.68,0.22), float3(0.10,0.86,0.94), p-4.0);\n\
+}\n\
+float axsTransferOrder(float2 unit, uint mode) {\n\
+    if (mode == 0u) return unit.y;\n\
+    if (mode == 1u) return (1.0-unit.y);\n\
+    if (mode == 2u) return (unit.x+unit.y)*0.5;\n\
+    if (mode == 3u) return ((1.0-unit.x)+unit.y)*0.5;\n\
+    if (mode == 4u) return (unit.x+(1.0-unit.y))*0.5;\n\
+    if (mode == 5u) return ((1.0-unit.x)+(1.0-unit.y))*0.5;\n\
+    return ((1.0-unit.x)+unit.y)*0.5;\n\
 }\n\
 vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[instance_id]],\n\
                               constant DustUniforms& u [[buffer(0)]]) {\n\
@@ -231,6 +244,36 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         outT.noiseY=hf2;\n\
         return outT;\n\
     }\n\
+    if (u.openMode == 3u) {\n\
+        uint h3 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+        h3 ^= h3 >> 13u; h3 *= 1274126177u; h3 ^= h3 >> 16u;\n\
+        float depOrder = axsTransferOrder(unit, u.departDir);\n\
+        float arrOrder = axsTransferOrder(unit, u.arriveDir);\n\
+        float depart = 0.06 + 0.30*depOrder;\n\
+        float arrive = 0.58 + 0.34*arrOrder;\n\
+        float time3 = clamp((u.time-depart)/max(arrive-depart,0.05), 0.0, 1.0);\n\
+        float2 jitter3 = (float2(float((h3>>16)&255u), float((h3>>24)&255u))/255.0 - 0.5)*0.18;\n\
+        float2 landing3 = (cell + 0.5 + jitter3)/grid;\n\
+        float2 from3 = u.srcOrigin + landing3*u.srcSize;\n\
+        float2 dest3 = u.origin + landing3*u.cardSize;\n\
+        float2 ctrl3 = mix(from3,dest3,0.5) + float2((r2-0.5)*70.0, (r3-0.5)*70.0);\n\
+        float b3 = 1.0-time3;\n\
+        float2 pos3 = b3*b3*from3 + 2.0*b3*time3*ctrl3 + time3*time3*dest3;\n\
+        pos3 += (corner-0.5)*float2(mix(1.2,2.2,r3));\n\
+        float born3 = step(depart, u.time);\n\
+        DustVertex out3;\n\
+        out3.position=float4(2.0*pos3.x/u.viewport.x-1.0,1.0-2.0*pos3.y/u.viewport.y,0,1);\n\
+        out3.uv=unit;\n\
+        out3.local=corner;\n\
+        out3.fade=born3;\n\
+        out3.breakage=0.0;\n\
+        out3.dock=time3;\n\
+        out3.tint=float3(0.0);\n\
+        out3.isOpen=3.0;\n\
+        out3.noiseX=r;\n\
+        out3.noiseY=r3;\n\
+        return out3;\n\
+    }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
     float len = length(rel); if (len < 1.0) len = 1.0;\n\
     float2 dirOut = rel/len;\n\
@@ -338,6 +381,11 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
 fragment float4 nlDustFragment(DustVertex in [[stage_in]], constant DustUniforms& u [[buffer(0)]], texture2d<float> image [[texture(0)]]) {\n\
     constexpr sampler sampleImage(coord::normalized,address::clamp_to_edge,filter::linear);\n\
     float4 texel=image.sample(sampleImage,in.uv);\n\
+    if (in.isOpen > 2.5) {\n\
+        float roundDust = 1.0-smoothstep(0.34,0.53,length(in.local-0.5));\n\
+        float3 base = mix(texel.rgb, axsPalette(in.noiseX + u.time*0.06), 0.25);\n\
+        return float4(base,1.0)*(roundDust*in.fade);\n\
+    }\n\
     if (in.isOpen > 1.5) {\n\
         return texel*in.fade;\n\
     }\n\
@@ -375,6 +423,10 @@ typedef struct {
     uint32_t cornerKill;
     float cornerRadius;
     uint32_t dirMode;
+    float srcOrigin[2];
+    float srcSize[2];
+    uint32_t departDir;
+    uint32_t arriveDir;
 } AXSMetalDustUniforms;
 
 // ---- cached device + queue + pipeline (compiled once, reused) --------------
@@ -405,6 +457,17 @@ void axs_msd_setCornerKill(uint32_t on, float radius) { sMsdCornerKill = on; sMs
 static uint32_t sMsdDirMode = 0;
 void axs_msd_setDirectionMode(uint32_t mode);
 void axs_msd_setDirectionMode(uint32_t mode) { sMsdDirMode = mode; }
+// beautify.230: dock transfer (openMode=3) config -- two source/target rects
+// and independent departure/arrival diagonal orders.
+static CGRect sMsdTransferFrom = CGRectZero;
+static uint32_t sMsdTransferDepartDir = 3u;   // 3 = top-right -> bottom-left
+static uint32_t sMsdTransferArriveDir = 3u;
+void axs_msd_setTransferConfig(CGRect from, uint32_t departDir, uint32_t arriveDir);
+void axs_msd_setTransferConfig(CGRect from, uint32_t departDir, uint32_t arriveDir) {
+    sMsdTransferFrom = from;
+    sMsdTransferDepartDir = departDir;
+    sMsdTransferArriveDir = arriveDir;
+}
 static BOOL sMsdTried = NO;
 
 static NSString *sMsdFailReason = nil;   // .114: survives log rotation
@@ -547,18 +610,24 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     u.cornerKill = sMsdCornerKill;
     u.cornerRadius = sMsdCornerKillRadius;
     u.dirMode = sMsdDirMode;
+    u.srcOrigin[0] = (float)sMsdTransferFrom.origin.x;
+    u.srcOrigin[1] = (float)sMsdTransferFrom.origin.y;
+    u.srcSize[0] = (float)sMsdTransferFrom.size.width;
+    u.srcSize[1] = (float)sMsdTransferFrom.size.height;
+    u.departDir = sMsdTransferDepartDir;
+    u.arriveDir = sMsdTransferArriveDir;
     // Grid = per-style base resolution scaled by the density slider.
     // Style 8 (sand) and open mode use the reference plugin's particle-count
     // model (14000 * density distributed by card aspect); the 8 grid styles
     // scale their characteristic base grids (Glass stays chunky 5x6, Dust 14x14...).
     uint32_t cols, rows;
-    if (style == 8u || openMode == 1u) {
+    if (style == 8u || openMode == 1u || openMode == 3u) {
         // .142: raise the cap and the rows clamp -- at density=3 the old
         // rows>240 clamp truncated 42000 grains down to 32640, so the slider
         // never actually delivered its full density on the tall card aspect.
         // .152: open mode uses a denser cloud so the band hugging the reveal
         // front reads as a tight cluster (reference), not a sparse drizzle.
-        int particles = (int)lround((openMode == 1u ? 22000.0 : 14000.0) * density);
+        int particles = (int)lround(((openMode == 1u || openMode == 3u) ? 22000.0 : 14000.0) * density);
         if (particles < 200) particles = 200;
         if (particles > 48000) particles = 48000;
         CGFloat aspect = frame.size.height > 0.5 ? frame.size.width / frame.size.height : 1.0;
@@ -927,6 +996,19 @@ BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration
                            CGFloat density, CGPoint sourcePoint) {
     return axs_metalPlayCommon(shot, frameInWindow, duration, 8, density, 1,
                                sourcePoint);
+}
+
+// beautify.230: rect-to-rect particle transfer for float<->dock.
+// fromFrame/toFrame are window coordinates; particles start at their own cell
+// inside fromFrame and fly straight to the matching cell inside toFrame.
+// departDir/arriveDir are the 0..7 diagonal order modes (3 = TR->BL, 4 = BL->TR).
+void *axs_metalDockTransferPlayRet(UIImage *shot, CGRect fromFrame, CGRect toFrame,
+                                   CGFloat duration, CGFloat density,
+                                   uint32_t departDir, uint32_t arriveDir) {
+    axs_msd_setTransferConfig(fromFrame, departDir, arriveDir);
+    BOOL ok = axs_metalPlayCommon(shot, toFrame, duration, 8, density, 3,
+                                  CGPointMake(0, 0));
+    return ok ? (__bridge void *)sMsdActiveOpenRenderer : NULL;
 }
 
 // .155: the CPU reveal mask must use the renderer's exact clock, not a
