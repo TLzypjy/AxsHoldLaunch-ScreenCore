@@ -2860,6 +2860,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
 
         // .243: 反向消散层侧倾=侧窗真实侧倾（右贴朝中心，与 enforce 同款）
         CGFloat srcTiltRad = 0.0;
+        BOOL wasToDock = toDock;   // .244: 停止块按方向分流（正向不得解除场景压制）
         if (!toDock) {
             CGFloat screenW2 = win.bounds.size.width;
             BOOL rightSide2 = (fromFrame.origin.x + fromFrame.size.width * 0.5f) > screenW2 * 0.5f;
@@ -2923,12 +2924,17 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                     objc_setAssociatedObject(c, &axs_dock_flightDriverKey, nil,
                                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 }
-                // .243: 反向揭示完成——恢复场景内容栈（浮窗态由 ring tilt 接管）
-                for (UIView *sv in axs_dock_hiddenSceneViews) {
-                    if (sv != nil) sv.hidden = NO;
+                // .244: 只有反向（侧→浮）结束才恢复场景内容栈并解除压制。
+                // .243 的恢复块正/反向共用——正向 flight 结束（1.33s）就把场景栈
+                // 放回来了，DUMP 95 实锤 1.5s 时场景链全部 hidden=NO，正面内容
+                // 随即盖住侧窗（「还是有啊」的直接原因）。
+                if (!wasToDock) {
+                    for (UIView *sv in axs_dock_hiddenSceneViews) {
+                        if (sv != nil) sv.hidden = NO;
+                    }
+                    [axs_dock_hiddenSceneViews removeAllObjects];
+                    axs_dock_sceneSuppressed = NO;
                 }
-                [axs_dock_hiddenSceneViews removeAllObjects];
-                axs_dock_sceneSuppressed = NO;
             } @catch (NSException *ignored) { }
         });
     } @catch (NSException *ignored) {
