@@ -653,8 +653,6 @@ jobs:
           grep -Fq "BOOL axs_dock_probeBoost(void)" Hooks/AxsDismissEffect.xm || { echo "probe boost helper missing"; exit 1; }
           grep -Fq "extern BOOL axs_dock_probeBoost(void);" Hooks/AxsBeautifyRing.xm || { echo "ring extern probe boost missing"; exit 1; }
           grep -Fq "probeInterval = axs_dock_probeBoost() ? 0.1 : 1.0;" Hooks/AxsBeautifyRing.xm || { echo "dynamic probe interval missing"; exit 1; }
-          grep -Fq "static void axs_dock_dumpViewsAtFrame" Hooks/AxsDismissEffect.xm || { echo "dock view dump missing"; exit 1; }
-          grep -Fq "DOCK DUMP [" Hooks/AxsDismissEffect.xm || { echo "dock dump log missing"; exit 1; }
           grep -Fq "DOCK SWALLOW anim=" Hooks/AxsDismissEffect.xm || { echo "subtree swallow diag missing"; exit 1; }
           grep -Fq "walk = walk.superlayer;" Hooks/AxsDismissEffect.xm || { echo "subtree superlayer walk missing"; exit 1; }
           grep -Fq "DOCK ENFORCE items=" Hooks/AxsDismissEffect.xm || { echo "enforce diag missing"; exit 1; }

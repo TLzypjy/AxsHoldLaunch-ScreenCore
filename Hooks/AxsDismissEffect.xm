@@ -2415,40 +2415,6 @@ BOOL axs_dock_probeBoost(void) {
             && (CACurrentMediaTime() - axs_dock_dockedStateAt) < 5.0);
 }
 
-// .241: 一次性诊断转储——列出所有窗口中与目标矩形相交的可见视图
-// （类名/frame/圆角/clips/hidden/alpha），定位正面内容与直角光晕来源。
-static void axs_dock_dumpViewsAtFrame(CGRect frame, NSString *tag) {
-    @try {
-        axs_dm_log(@"DOCK DUMP [%@] begin frame=%@", tag, NSStringFromCGRect(frame));
-        NSArray<UIScene *> *scenes = [UIApplication sharedApplication].connectedScenes.allObjects;
-        for (UIScene *sc in scenes) {
-            if (![sc isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *w in ((UIWindowScene *)sc).windows) {
-                if (w == nil || w.hidden) continue;
-                NSMutableArray *stack = [NSMutableArray arrayWithObject:w];
-                int guardN = 0;
-                while (stack.count > 0 && guardN++ < 900) {
-                    UIView *v = [stack lastObject];
-                    [stack removeLastObject];
-                    if (v == nil) continue;
-                    CGRect f = [v convertRect:v.bounds toView:nil];
-                    BOOL intersects = CGRectIntersectsRect(f, frame);
-                    BOOL dockSized = f.size.width > 30.0 && f.size.width < 200.0
-                                     && f.size.height > 60.0;
-                    if (intersects && dockSized && !v.hidden && v.alpha > 0.05) {
-                        axs_dm_log(@"DOCK DUMP [%@] %@ win=%@ frame=%@ corner=%.1f clips=%d alpha=%.2f contents=%@",
-                                   tag, NSStringFromClass(v.class), NSStringFromClass(w.class),
-                                   NSStringFromCGRect(f), v.layer.cornerRadius,
-                                   v.layer.masksToBounds ? 1 : 0, v.alpha,
-                                   v.layer.contents != NULL ? @"YES" : @"NO");
-                    }
-                    [stack addObjectsFromArray:v.subviews];
-                }
-            }
-        }
-        axs_dm_log(@"DOCK DUMP [%@] end", tag);
-    } @catch (NSException *ignored) { }
-}
 
 // .242: 收集 dock 矩形上的「App 场景内容栈」链根。DUMP 93 铁证：dock 翻转时
 // 原生把 _UIScenePresentationView 宿主链移出容器（ring tilt 宿主明确排除
