@@ -682,6 +682,7 @@ static CFAbsoluteTime axs_open_lastTouchUpAt = 0;
 static CGPoint axs_open_arcIconPos = {-1, -1};
 static CFAbsoluteTime axs_open_arcIconPosAt = 0;
 static IMP axs_open_orig_setHidden = NULL;   // NULL = not installed; (IMP)1 = class_addMethod super-forward
+static CFAbsoluteTime axs_dock_dockedStateAt = 0;   // .241: 进入 dock 态的时刻（.255 hook 的 settle 窗口也读）
 static IMP axs_open_orig_didMove = NULL;
 
 static BOOL axs_open_enabled(void) {
@@ -2465,7 +2466,6 @@ static CGFloat axs_dock_tiltAngleCfg(void) {
     return a;
 }
 
-static CFAbsoluteTime axs_dock_dockedStateAt = 0;   // .241: 进入 dock 态的时刻
 
 // .241: dock 态前 5s 内请求 ring 加速宿主探测（1s→0.1s）——原生为侧窗态
 // 新建/重建的内容子视图会被即刻 tilt，杜绝「正面 2~3s 后才侧倾」。
