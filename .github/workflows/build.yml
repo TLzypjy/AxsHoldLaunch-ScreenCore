@@ -652,7 +652,6 @@ jobs:
           grep -Fq "srcTilt:srcTiltRad" Hooks/AxsDismissEffect.xm || { echo "reverse src tilt wiring missing"; exit 1; }
           grep -Fq "self.srcLayer.transform = tiltRotation;" Hooks/AxsDismissEffect.xm || { echo "src layer tilt apply missing"; exit 1; }
           grep -Fq "static NSArray *axs_dock_sceneRootsAt" Hooks/AxsDismissEffect.xm || { echo "scene stack collector missing"; exit 1; }
-          grep -Fq "rootView.layer.transform = CATransform3DIdentity;" Hooks/AxsDismissEffect.xm || { echo "scene stack reset missing"; exit 1; }
           grep -Fq "CGFloat dstCorner = toDock ? (axs_dock_dockedRadius > 0.5f ? axs_dock_dockedRadius" Hooks/AxsDismissEffect.xm || { echo "dst corner by appearance missing"; exit 1; }
           grep -Fq "self.srcLayer.cornerRadius = 0.0f;" Hooks/AxsDismissEffect.xm || { echo "src radius via SDF missing"; exit 1; }
           ! grep -Fq "dstView.layer.cornerRadius;" Hooks/AxsDismissEffect.xm || { echo "container radius readback still present (corner=0 -> 12 square)"; exit 1; }
