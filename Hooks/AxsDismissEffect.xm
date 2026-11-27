@@ -683,6 +683,7 @@ static CGPoint axs_open_arcIconPos = {-1, -1};
 static CFAbsoluteTime axs_open_arcIconPosAt = 0;
 static IMP axs_open_orig_setHidden = NULL;   // NULL = not installed; (IMP)1 = class_addMethod super-forward
 static CFAbsoluteTime axs_dock_dockedStateAt = 0;   // .241: 进入 dock 态的时刻（.255 hook 的 settle 窗口也读）
+static BOOL axs_dock_dumpDoneForSession = NO;       // .258: 每次 dock 会话只转储一次
 static IMP axs_open_orig_didMove = NULL;
 
 static BOOL axs_open_enabled(void) {
@@ -2584,6 +2585,30 @@ static CGFloat axs_dock_sceneCornerRadiusAt(UIWindow *win, CGRect dockFrame) {
 }
 
 // 由 ring applyTilt 每帧 + driver tick 调用；自门控（非 dock 态直接返回）。
+// .258: docked 态 +2s 一次性深转储——定位可见 docked 卡片的真实载体。
+// 每个节点打 class/frame/transform 关键分量（m11=水平缩放、m14/m34=透视）、
+// hidden/alpha，彻底回答「tilt 到底渲染自哪个视图」。
+static void axs_dock_dumpDockedTree(UIView *root) {
+    @try {
+        NSMutableArray *stack = [NSMutableArray arrayWithObject:root];
+        int n = 0;
+        while (stack.count > 0 && n < 70) {
+            UIView *v = [stack lastObject];
+            [stack removeLastObject];
+            if (v == nil) continue;
+            n++;
+            CATransform3D t = v.layer.transform;
+            axs_dm_log(@"DOCK DUMP2 d=%d %@ frame=%@ m11=%.3f m14=%.4f m34=%.4f hid=%d alpha=%.2f",
+                       n, NSStringFromClass(v.class),
+                       NSStringFromCGRect(v.frame),
+                       t.m11, t.m14, t.m34,
+                       v.hidden ? 1 : 0, v.alpha);
+            [stack addObjectsFromArray:[[v.subviews reverseObjectEnumerator] allObjects]];
+        }
+        axs_dm_log(@"DOCK DUMP2 end nodes=%d", n);
+    } @catch (NSException *ignored) { }
+}
+
 void axs_dock_enforceDockedItemTilt(void) {
     @try {
         if (!axs_dock_dockedState || axs_dock_lastWindow == nil) return;
@@ -2650,6 +2675,13 @@ void axs_dock_enforceDockedItemTilt(void) {
             }
         }
         if (logNow) axs_dock_enforceLogAt = CACurrentMediaTime();
+        // .258: docked 态 +2s 一次性深转储（每次 dock 会话一次）
+        if (!axs_dock_dumpDoneForSession
+            && (CACurrentMediaTime() - axs_dock_dockedStateAt) > 2.0) {
+            axs_dock_dumpDoneForSession = YES;
+            axs_dm_log(@"DOCK DUMP2 begin (dockedStateAt+2s)");
+            axs_dock_dumpDockedTree(axs_dock_lastWindow);
+        }
         // .252: 场景栈 tilt 移除。.251 实测它对 Dock 通道镜像完全不可见
         //（item tilt 摘掉后用户报告倾斜消失，sceneRoots=2 仍在 tilt 却没有
         // 视觉），却会污染桥接的坐标映射（点击可用但手势全失效）。纯害无利。
@@ -2718,6 +2750,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;
         } else {
             axs_dock_dockedState = NO;
+            axs_dock_dumpDoneForSession = NO;   // .258: 下次 dock 会话重新转储
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;
             for (UIView *rootView in axs_dock_sceneRootsAt(win, axs_dock_lastDockFrameRect)) {
                 rootView.layer.transform = CATransform3DIdentity;   // 场景栈交还原生

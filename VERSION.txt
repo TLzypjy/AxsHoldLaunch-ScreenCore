@@ -1,3 +1,14 @@
+beautify.258 变更（docked 态深转储：定位可见侧倾的真实载体）：
+- 用户反馈 .257：聚合时侧窗是侧倾（飞行层矩阵生效 ✓）但聚合完成后变正面；
+  点击侧窗时侧窗跳变一下再开始转。ENFORCE 每帧给 item 施透视 tilt，但用户
+  看到的 docked 卡片在聚合完成后是正面——「可见 docked 卡片到底渲染自哪个
+  视图」始终是推测，不再猜。
+- 修复（诊断优先）：docked 态 +2s 一次性深转储（DOCK DUMP2）——从
+  SCFloatingHostWindow 深度遍历，每节点打 class/frame/transform 关键分量
+  （m11/m14/m34）/hidden/alpha，用事实回答 tilt 渲染自哪个视图、item 与
+  container 是父子还是兄弟、tap 时哪个 transform 被谁改写。
+- 其余保持 .257（item 透视 tilt/飞行层同矩阵/反向缓存快照/吞窗限界）。
+
 beautify.257 变更（item 透视 tilt 复权 + 反向终点图改用缓存浮窗快照）：
 - 用户反馈 .256：a) 侧窗聚合时是正面、然后才闪成侧倾；b) 浮窗仍一半侧倾一半正面。
 - 日志 108 两个决定性事实：
