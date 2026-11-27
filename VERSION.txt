@@ -1,3 +1,24 @@
+beautify.238 变更（docked item 每帧侧倾同步 + 圆角三方统一）：
+- 用户反馈 .237「侧窗聚合成功时右半边正面左半边侧倾，右半边 2~3 秒后才侧倾；
+  侧窗转浮窗时侧窗四个角变更圆」。视频 aeeea7c5：聚合完成 ~3.3s 后整个侧窗
+  变成正面矩形直到 undock。
+- 根因：docked item 不在容器树内，ring tilt 从不管理它；其内容被原生延迟 2~3s
+  填充且为正面形态，弹出后盖住我们已侧倾的容器揭示 → 右半（实际为整面）
+  正面闪现。反向消散层用容器圆角 36.8，而侧窗稳态是 item 的原生圆角（更小）
+  → 四角变更圆。
+- 修复：
+  1) 新增 axs_dock_enforceDockedItemTilt（AxsDismissEffect，ring extern 每帧调用
+     + driver tick 调用，自门控）：给 docked item 施加与 axs_ring_applyTilt 逐字
+     同款的 tilt（GAIN 2.6 + 显式 m14/m34，sideSign 按屏幕半边），不隐藏 item、
+     不动其手势，内容弹出即刻就是侧倾形态。
+  2) 圆角三方统一：forward 时读 item 的 layer.cornerRadius 存为 dockedRadius，
+     dock 期间临时应用到容器（稳态=揭示=聚合圆角一致）；reverse 恢复容器浮窗
+     圆角；反向消散层 srcCorner 用 dockedRadius → 消散外观与稳态一致。
+  3) forward 从浮窗态进入时才保存 floatRadius（防快速连翻互相污染）；
+     forward/reverse 都把 item.transform 复位 identity（enforce 从 identity 起施加，
+     reverse 交还原生）。
+- ring 侧仅新增 extern 声明与每帧调用，config reads 保持 15。
+
 beautify.237 变更（dst 改真容器，消除透明聚合与侧窗晚现）：
 - 用户反馈 .236「粒子飞过去聚成侧窗时侧窗是透明的，聚合完成过五六秒侧窗才出现，
   出现时是正面闪一下才侧倾」。视频 f67a5b2e：3.4~5.1s 侧窗位置完全空白，5.8s

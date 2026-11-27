@@ -2024,6 +2024,8 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 // ===== beautify.235: 浮窗↔侧窗 混合架构（快照源消散 + 真视图逐帧揭示） ========
 // 前置声明：定义在 dock 入口段（本块 reassertDst 每 tick 重找 docked item 用）。
 static UIView *axs_dock_findDockedItem(UIWindow *win, CGRect targetFrame);
+// .238: docked item 每帧 tilt 同步（定义在 dock 入口段，driver tick 与 ring 共用）。
+void axs_dock_enforceDockedItemTilt(void);
 // .234 实测结论（视频 86 + 日志 86 对齐）：
 //   - 浮→侧：触发瞬间原生已把容器 frame 缩成侧窗（原生 dock spring 被
 //     interceptUntil 吞掉→跳变），容器上的消散 mask 无效 → 浮窗整块瞬间消失；
@@ -2372,6 +2374,7 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
         if (t < 0) t = 0; if (t > 1) t = 1;
         [self paintSrc:t];
         [self reassertDst];
+        axs_dock_enforceDockedItemTilt();   // .238: item 与容器同 tilt（内容晚到也是侧倾）
         // .236: docked dst 的揭示由「内容就绪」门控——就绪前全透明；就绪后从
         // 此刻起跑子时钟（起飞时已就绪则铺满整个 flight）。真视图的圆角/侧倾
         // 仍由系统原生渲染，不施加任何 transform。
@@ -2467,6 +2470,51 @@ static UIView *axs_dock_findDockedItem(UIWindow *win, CGRect targetFrame) {
     return best;
 }
 
+// ===== beautify.238: docked item 每帧侧倾同步 + 圆角统一 ====================
+// .237 实测：聚合完成 2~3 秒后原生把 docked item 的内容（正面、原生圆角）弹出
+// 盖在容器上——item 不在容器树内，ring tilt 从不管理它 → 「右半正面左半侧倾」。
+// 反向消散层用容器圆角 36.8，而侧窗稳态是 item 的原生圆角（更小）→「四角变更圆」。
+// 修复：每帧给 item 施加与 ring 完全一致的 tilt（不隐藏、不动手势，内容弹出时
+// 已是侧倾形态）；dock 期间容器圆角临时切到 item 真实值，反向恢复，消散层同源。
+static BOOL axs_dock_dockedState = NO;        // YES=当前处于 dock 侧窗态
+static CGFloat axs_dock_floatRadius = 0;      // 浮窗圆角（mutate 前保存）
+static CGFloat axs_dock_dockedRadius = 0;     // docked item 真实圆角
+static CGRect axs_dock_lastDockFrameRect = CGRectZero;   // 最近一次侧窗矩形
+static __weak UIWindow *axs_dock_lastWindow = nil;
+
+static CGFloat axs_dock_tiltAngleCfg(void) {
+    CGFloat a = 3.0;
+    id ta = axs_dock_pref(@"splitBeautifyTiltAngle", @3.0);
+    if ([ta isKindOfClass:[NSNumber class]]) {
+        a = [ta doubleValue];
+        if (a < 0.0) a = 0.0;
+        if (a > 30.0) a = 30.0;
+    }
+    if (a != a) a = 3.0;
+    return a;
+}
+
+// 由 ring applyTilt 每帧 + driver tick 调用；自门控（非 dock 态直接返回）。
+void axs_dock_enforceDockedItemTilt(void) {
+    @try {
+        if (!axs_dock_dockedState || axs_dock_lastWindow == nil) return;
+        UIView *item = axs_dock_findDockedItem(axs_dock_lastWindow, axs_dock_lastDockFrameRect);
+        if (item == nil || item.layer == nil) return;
+        if (item.hidden) item.hidden = NO;   // 侧窗本体应可见（内容由我们遮不住也无所谓）
+        CGRect f = [item convertRect:item.bounds toView:nil];
+        CGFloat sw = axs_dock_lastWindow.bounds.size.width;
+        BOOL rightSide = (f.origin.x + f.size.width * 0.5f) > sw * 0.5f;
+        // 与 AxsBeautifyRing.axs_ring_applyTilt 逐字同款：GAIN 2.6 + 显式 m14/m34。
+        CGFloat rad = (rightSide ? -1.0 : 1.0) * axs_dock_tiltAngleCfg() * 2.6 * M_PI / 180.0;
+        CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
+        CGFloat sinRad = (CGFloat)sin(rad);
+        CGFloat cosRad = (CGFloat)cos(rad);
+        tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
+        tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
+        item.layer.transform = tiltRotation;
+    } @catch (NSException *ignored) { }
+}
+
 // container : SCFloatingContainerView（真浮窗容器）
 // fromFrame : 消散源矩形（window 坐标）——浮窗或侧窗
 // toFrame   : 聚合目标矩形（window 坐标）
@@ -2505,6 +2553,27 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         if (CGRectIsEmpty(fromFrame)) fromFrame = toFrame;
 
         UIWindow *win = container.window;
+        axs_dock_lastWindow = win;
+        axs_dock_lastDockFrameRect = toDock ? toFrame : fromFrame;
+
+        // .238: dock 态切换 + 圆角统一。item 真实圆角在 forward 时读取，
+        // dock 期间临时应用到容器（稳态外观一致），reverse 恢复浮窗圆角。
+        UIView *dockItem = axs_dock_findDockedItem(win, toDock ? toFrame : fromFrame);
+        if (toDock) {
+            if (!axs_dock_dockedState) {
+                axs_dock_floatRadius = container.layer.cornerRadius;   // 从浮窗态进入
+            }
+            axs_dock_dockedState = YES;
+            if (dockItem != nil) {
+                if (dockItem.layer.cornerRadius > 0.5f) axs_dock_dockedRadius = dockItem.layer.cornerRadius;
+                dockItem.layer.transform = CATransform3DIdentity;      // enforce 从 identity 起施加
+            }
+            if (axs_dock_dockedRadius > 0.5f) container.layer.cornerRadius = axs_dock_dockedRadius;
+        } else {
+            axs_dock_dockedState = NO;
+            if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;
+            if (axs_dock_floatRadius > 0.5f) container.layer.cornerRadius = axs_dock_floatRadius;
+        }
 
         // .237: dst 永远是真容器（live card）。日志 88 实测：docked item 的
         // layer.contents 只是占位/装饰（start=1 却揭示出透明空壳），真实内容由
@@ -2524,13 +2593,13 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         UIView *dstView = container;
         CGRect dstFrame = toFrame;
 
-        // .236: dst 圆角优先读真 view 的 layer.cornerRadius（原生真实值），
-        // 探测值只作兜底——杜绝 mask SDF 圆角与真窗对不上。src 快照层圆角同源。
-        CGFloat srcCorner = container.layer.cornerRadius;
-        if (srcCorner < 0.5f) srcCorner = toDock ? axs_dm_cornerRadiusForView(container)
-                                   : MIN(fromFrame.size.width, fromFrame.size.height) * 0.5f;
+        // .238: 圆角统一——src（消散层）在反向用 item 真实圆角（axs_dock_dockedRadius，
+        // 正向消散的是浮窗快照用容器圆角）；dst（容器揭示层）用容器当前圆角
+        // （forward 已被切到 dockedRadius）→ 稳态/消散/聚合三方圆角完全一致。
+        CGFloat srcCorner = toDock ? container.layer.cornerRadius
+                                   : (axs_dock_dockedRadius > 0.5f ? axs_dock_dockedRadius
+                                                                   : container.layer.cornerRadius);
         CGFloat dstCorner = dstView.layer.cornerRadius;
-        if (dstCorner < 0.5f) dstCorner = axs_dm_cornerRadiusForView(dstView);
         if (srcCorner < 1.0f) srcCorner = 12.0f;
         if (dstCorner < 1.0f) dstCorner = 12.0f;
 

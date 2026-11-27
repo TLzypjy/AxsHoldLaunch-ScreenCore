@@ -8,6 +8,10 @@
 // beautify.228: 浮窗→侧窗粒子聚合（实现在 AxsDismissEffect.xm，同一 dylib）
 // fromFrame = 翻转前浮窗 frame(window坐标)，toFrame = 翻转瞬间容器 frame(window坐标)
 extern void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock);
+// beautify.238: docked item 每帧同步 tilt（实现在 AxsDismissEffect.xm，同一 dylib）。
+// item 不在容器树内，ring tilt 管不到；其内容由原生延迟 2~6s 填充且为正面，
+// 每帧同步成与容器一致的侧倾后，内容弹出即刻就是侧倾形态（消灭正面闪现）。
+extern void axs_dock_enforceDockedItemTilt(void);
 
 // ---------------------------------------------------------------------------
 // 美化 · 光圈外框 (ring frame, beautify.19) — 稳定圆角矩形描边 + 整框 mask 半径
@@ -2643,6 +2647,8 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                 }
             }
         }
+        // .238: 每帧同步 docked item 的 tilt（自门控，非 dock 态为 no-op）。
+        axs_dock_enforceDockedItemTilt();
         BOOL needProbe = !driver.tiltVisualProbed
                          || (now - driver.tiltVisualProbeTime >= 1.0);
         if (needProbe) {
