@@ -2208,6 +2208,9 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     }
     if (self.dstView != nil) {
         self.dstSavedHidden = self.dstView.hidden;
+        // .237: dst 永远是 live card，dock 稳态被原生隐藏——揭示前强制显示，
+        // 每 tick reassert 保活；stop 不再恢复 hidden（恢复会让窗口在揭示后消失）。
+        self.dstView.hidden = NO;
     }
     [self installSrcLayerWithFrame:srcFrame];
     [self attachDstMask];
@@ -2359,7 +2362,7 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     }
     if (v == nil) return;
     [self attachDstMask];
-    if (!self.dstIsDocked && self.dstView.hidden && !self.dstSavedHidden) self.dstView.hidden = NO;
+    if (self.dstView.hidden) self.dstView.hidden = NO;   // .237: live-card dst 强制保活
 }
 
 - (void)dockFlightTick:(CADisplayLink *)link {
@@ -2407,7 +2410,8 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
         }
         self.dstMask = nil;
         if (self.srcView != nil) self.srcView.hidden = self.srcSavedHidden;
-        if (self.dstView != nil && self.dstSavedHidden) self.dstView.hidden = YES;
+        // .237: dst（live card）保持显示——dock 稳态就由它展示，恢复 hidden 会让
+        // 侧窗在揭示完成后凭空消失（.236 实测）。
         if (_srcBmp != NULL) { CGContextRelease(_srcBmp); _srcBmp = NULL; }
         if (_dstBmp != NULL) { CGContextRelease(_dstBmp); _dstBmp = NULL; }
         self.srcBits = nil; self.dstBits = nil; self.srcShot = nil;
@@ -2502,35 +2506,23 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
 
         UIWindow *win = container.window;
 
-        // 找真侧窗本体：浮→侧是聚合目标，侧→浮是消散源。
-        UIView *dockView = axs_dock_findDockedItem(win, toDock ? toFrame : fromFrame);
-        if (dockView == nil) {
-            axs_dm_log(@"DOCK FLIGHT skipped (docked item not found)");
-            return;
-        }
-
-        // src 快照：浮→侧用容器缓存快照（连续整图）；侧→浮用触发瞬间对
-        // docked item 的抓拍（原生会瞬间移除它，必须此刻抓）。
-        UIImage *srcShot = nil;
-        UIView *srcRealView = nil;
-        if (toDock) {
-            srcShot = axs_open_cachedCardSnapshotForView(container);
-            if (srcShot == nil) srcShot = axs_open_captureVisibleCardCheap(container);
-            if (srcShot == nil) srcShot = axs_dm_snapshot(container);
-            srcRealView = container;
-        } else {
-            srcShot = axs_dm_snapshot(dockView);
-            if (srcShot == nil) srcShot = axs_open_captureVisibleCardCheap(dockView);
-            srcRealView = dockView;
-        }
+        // .237: dst 永远是真容器（live card）。日志 88 实测：docked item 的
+        // layer.contents 只是占位/装饰（start=1 却揭示出透明空壳），真实内容由
+        // 原生异步填充且晚 5~6 秒才出现（出现还是正面，等 ring tilt 重探测才
+        // 侧倾）。容器是持久、内容常驻、由 ring tilt 管理侧倾的真视图——
+        // .235 open hook 误揭示容器时用户看到的就是正确的侧窗。
+        // src 两向都用容器缓存快照（浮窗与侧窗 aspect ratio 一致，aspectFill
+        // 即原生外观）。dock 稳态原生隐藏容器，dst 揭示前强制 unhide。
+        UIImage *srcShot = axs_open_cachedCardSnapshotForView(container);
+        if (srcShot == nil) srcShot = axs_open_captureVisibleCardCheap(container);
+        if (srcShot == nil) srcShot = axs_dm_snapshot(container);
         if (srcShot == nil) {
             axs_dm_log(@"DOCK FLIGHT skipped (no src snapshot)");
             return;
         }
 
-        // dst 真视图：浮→侧=docked item（逐帧验活重找）；侧→浮=容器（持久）。
-        UIView *dstView = toDock ? dockView : container;
-        CGRect dstFrame = toDock ? toFrame : fromFrame;
+        UIView *dstView = container;
+        CGRect dstFrame = toFrame;
 
         // .236: dst 圆角优先读真 view 的 layer.cornerRadius（原生真实值），
         // 探测值只作兜底——杜绝 mask SDF 圆角与真窗对不上。src 快照层圆角同源。
@@ -2569,10 +2561,10 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         [driver startWithWindow:win
                         srcShot:srcShot
                        srcFrame:fromFrame
-                        srcView:srcRealView
+                        srcView:nil
                         dstView:dstView
                        dstFrame:dstFrame
-                    dstIsDocked:toDock
+                    dstIsDocked:NO
                        duration:duration
                         density:density
                      srcCorner:srcCorner
@@ -2583,7 +2575,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         axs_dock_assembleInFlight = YES;
-        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f gate=%d snap-src real-dst",
+        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f gate=%d snap-src live-card-dst",
                    NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
                    toDock ? 1 : 0, departDir, arriveDir, duration, density,
                    srcCorner, dstCorner, driver.dstContentReady ? 1 : 0);

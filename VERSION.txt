@@ -1,3 +1,23 @@
+beautify.237 变更（dst 改真容器，消除透明聚合与侧窗晚现）：
+- 用户反馈 .236「粒子飞过去聚成侧窗时侧窗是透明的，聚合完成过五六秒侧窗才出现，
+  出现时是正面闪一下才侧倾」。视频 f67a5b2e：3.4~5.1s 侧窗位置完全空白，5.8s
+  内容才突然出现。日志 88：dst content ready at start=1（探测误报——docked item
+  的 layer.contents 只是占位/装饰）且整段无 dst content became ready。
+- 根因：docked item（SCDockedFloatingItemView）不是可靠的揭示目标——它的真实
+  内容由原生异步填充（实测晚 5~6 秒），内容出现时是正面、等 ring tilt 重探测
+  （≤1s 节流）才侧倾。而 dock 稳态原生隐藏容器；.236 stop 时把容器 hidden 恢复
+  为 YES，flight 结束到 item 内容出现之间什么都没有。
+- 修复：dst 永远改用真容器（live card）——持久、内容常驻、由 ring tilt 管理侧倾
+  的真视图（.235 open hook 误揭示容器时用户看到的就是正确的侧窗）：
+  1) dock 入口去掉 docked item 依赖与 srcRealView；src 两向都用容器缓存快照
+     （浮窗与侧窗 aspect ratio 一致，aspectFill 即原生外观）。
+  2) dst=container，dstIsDocked=NO（内容门控自动通过，铺满整个 flight 揭示）。
+  3) startWithWindow 对 dst 强制 unhide；reassertDst 每 tick 保活
+     （hidden 即恢复 NO）；stop 不再恢复 dst hidden（.236 恢复导致侧窗凭空消失）。
+  4) docked item 不再参与任何显隐控制，留给原生 dock 通道自管理。
+- 日志字面量 snap-src live-card-dst；保留 guard/内容门控代码（对 docked dst
+  仍生效，作为兜底）。
+
 beautify.236 变更（消除侧窗二次聚合/透明聚合/圆角对不上）：
 - 用户反馈 .235「侧窗会聚合两次，第一次透明，第二次才是侧倾真窗但圆角对不上」。
 - 日志 87 铁证（每次 dock flight 后紧接）：
