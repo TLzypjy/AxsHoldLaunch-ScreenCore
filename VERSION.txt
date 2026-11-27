@@ -1,3 +1,18 @@
+beautify.248 变更（移除容器子树守卫——场景栈就在容器内，守卫把它挡住了）：
+- 用户反馈 .247「侧窗直接出现在边角；侧转浮四角变更圆」。日志 98 对账：
+  fwd DUMP（1.5s）明确显示场景栈链在 SCFloatingHostWindow 内且 DFS 顺序为
+  容器→内部子视图→overlay→场景链 = 场景栈在【容器子树内】；
+  同期 ENFORCE sceneRoots=0、dstR=12（圆角读取也落空）。
+- 总根源（第二个）：.245 加的 axs_dock_inContainerSubtree 守卫把容器子树整体
+  排除——场景栈刚好在容器子树内 → 收集恒空。.242 的 tilt、.243/.244 的隐藏、
+  .247 的 mask 挂接从未执行。
+- 修复：移除容器子树排除；候选规则改为「transform 恒等 或 已命名
+  AXS_DOCK_SCENE」——ring tilt 过的宿主（transform 非恒等）天然排除（不会
+  双重 tilt），场景栈（恒等）被收集；enforce tilt 后打命名标记，后续 tick 靠
+  标记持续接管（防原生重置 transform 后失联）；反向恢复时清标记+identity。
+- 生效预期：sceneRoots>0（ENFORCE 日志验证）；正向揭示 mask 挂上场景栈
+  （逐格聚合真实小窗）；dockedRadius=36.8（圆角一致）。
+
 beautify.247 变更（聚合目标=真实场景小窗——用户点破的最终架构）：
 - 用户点破：「直接聚合成侧窗的真实小窗，侧窗的真实小窗不就是侧倾的小窗吗」。
   场景内容栈（_UIScenePresentationView 链）就是侧窗的真实本体：应用真实画面、
