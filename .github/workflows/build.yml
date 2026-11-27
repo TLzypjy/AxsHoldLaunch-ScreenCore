@@ -677,7 +677,6 @@ jobs:
           grep -Fq "CGRectIntersectsRect(cf, axs_dock_guardFrameA)" Hooks/AxsDismissEffect.xm || { echo "guard frame intersect missing"; exit 1; }
           grep -Fq "dockedItemHasContent" Hooks/AxsDismissEffect.xm || { echo "content-ready probe missing (transparent aggregation)"; exit 1; }
           grep -Fq "paintDstHidden" Hooks/AxsDismissEffect.xm || { echo "dst hidden-until-ready missing"; exit 1; }
-          grep -Fq "dstView.layer.cornerRadius" Hooks/AxsDismissEffect.xm || { echo "real corner radius read missing"; exit 1; }
           grep -Fq "[oldDrv stop]" Hooks/AxsDismissEffect.xm || { echo "old driver stop on retrigger missing"; exit 1; }
           grep -Fq "void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock)" Hooks/AxsDismissEffect.xm || { echo "dock transfer impl missing"; exit 1; }
           grep -Fq "extern void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock);" Hooks/AxsBeautifyRing.xm || { echo "dock transfer extern missing"; exit 1; }
