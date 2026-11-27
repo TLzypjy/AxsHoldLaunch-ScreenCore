@@ -1670,6 +1670,9 @@ static BOOL axs_dock_dockedState = NO;        // YES=当前处于 dock 侧窗态
 static CGFloat axs_dock_dockedRadius = 0;     // docked item 真实圆角
 static CGRect axs_dock_lastDockFrameRect = CGRectZero;   // 最近一次侧窗矩形
 static __weak UIWindow *axs_dock_lastWindow = nil;
+// .243: 场景内容栈压制（dock 期间隐藏，反向揭示完成后恢复）
+static BOOL axs_dock_sceneSuppressed = NO;
+static NSMutableArray *axs_dock_hiddenSceneViews = nil;
 // .127: REPLACE the native animation entirely. Per the user's direction the
 // native animation is no longer clamped-and-run -- it is swallowed (never
 // forwarded, zero execution) and its completion is fired manually, so
@@ -2101,6 +2104,7 @@ void axs_dock_enforceDockedItemTilt(void);
 @property (nonatomic, assign) CGFloat dstCorner;
 @property (nonatomic, assign) uint32_t departDir;
 @property (nonatomic, assign) uint32_t arriveDir;
+@property (nonatomic, assign) CGFloat srcTiltRad;     // .243: 消散层侧倾（反向=侧窗真实侧倾）
 @property (nonatomic, assign) BOOL dstContentReady;   // .236: docked item 内容就绪前不揭示
 @property (nonatomic, assign) CFTimeInterval dstRevealStart; // -1=未开始
 - (void)startWithWindow:(UIWindow *)window
@@ -2114,6 +2118,7 @@ void axs_dock_enforceDockedItemTilt(void);
                 density:(CGFloat)density
              srcCorner:(CGFloat)srcCorner
              dstCorner:(CGFloat)dstCorner
+              srcTilt:(CGFloat)srcTiltRad
               departDir:(uint32_t)departDir
               arriveDir:(uint32_t)arriveDir;
 - (void)stop;
@@ -2172,6 +2177,16 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     // 防 ring 光晕半径探测被毒化）。视觉与 cornerRadius 完全一致。
     self.srcLayer.cornerRadius = 0.0f;
     self.srcLayer.shadowOpacity = 0.0f;
+    // .243: 反向消散层带侧窗真实侧倾（DUMP：消散的是已侧倾的侧窗，不能变正面）
+    if (self.srcTiltRad != 0.0f) {
+        CGFloat rad = self.srcTiltRad;
+        CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
+        CGFloat sinRad = (CGFloat)sin(rad);
+        CGFloat cosRad = (CGFloat)cos(rad);
+        tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
+        tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
+        self.srcLayer.transform = tiltRotation;
+    }
     self.srcMaskLayer = [CALayer layer];
     self.srcMaskLayer.frame = self.srcLayer.bounds;
     self.srcMaskLayer.contentsGravity = kCAGravityResize;
@@ -2212,9 +2227,11 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
                 density:(CGFloat)density
              srcCorner:(CGFloat)srcCorner
              dstCorner:(CGFloat)dstCorner
+              srcTilt:(CGFloat)srcTiltRad
               departDir:(uint32_t)departDir
               arriveDir:(uint32_t)arriveDir {
     self.win = window;
+    self.srcTiltRad = srcTiltRad;
     self.srcShot = srcShot;
     self.srcView = srcView;
     self.dstView = dstView;
@@ -2615,6 +2632,36 @@ static NSArray *axs_dock_sceneRootsAt(UIWindow *win, CGRect dockFrame) {
     return roots;
 }
 
+// .243: 场景链成员里 cornerRadius>0.5 的那一层就是侧窗的可见圆角
+// （DUMP 93：docked item/container 自身 corner=0，真实 36.8 在场景内容裁剪层）。
+static CGFloat axs_dock_sceneCornerRadiusAt(UIWindow *win, CGRect dockFrame) {
+    CGFloat found = 0;
+    @try {
+        NSMutableArray *stack = [NSMutableArray arrayWithObject:win];
+        int guardN = 0;
+        while (stack.count > 0 && guardN++ < 900) {
+            UIView *v = [stack lastObject];
+            [stack removeLastObject];
+            if (v == nil) continue;
+            NSString *cn = NSStringFromClass(v.class);
+            BOOL excluded = [cn hasPrefix:@"SCFloating"]
+                         || [cn isEqualToString:@"SCDockedFloatingItemView"]
+                         || [cn isKindOfClass:[UIWindow class]];
+            if (!excluded && v.layer.cornerRadius > 0.5f) {
+                CGRect f = [v convertRect:v.bounds toView:nil];
+                if (fabs(f.origin.x - dockFrame.origin.x) < 9.0
+                    && fabs(f.origin.y - dockFrame.origin.y) < 9.0
+                    && fabs(f.size.width - dockFrame.size.width) < 12.0
+                    && fabs(f.size.height - dockFrame.size.height) < 14.0) {
+                    if (v.layer.cornerRadius > found) found = v.layer.cornerRadius;
+                }
+            }
+            [stack addObjectsFromArray:v.subviews];
+        }
+    } @catch (NSException *ignored) { }
+    return found;
+}
+
 // 由 ring applyTilt 每帧 + driver tick 调用；自门控（非 dock 态直接返回）。
 void axs_dock_enforceDockedItemTilt(void) {
     @try {
@@ -2669,13 +2716,20 @@ void axs_dock_enforceDockedItemTilt(void) {
             }
         }
         if (logNow) axs_dock_enforceLogAt = CACurrentMediaTime();
-        // .242: App 场景内容栈与容器同 tilt——浮窗态 ring 本就这么做且可交互，
-        // dock 态它被移出容器成了 tilt 空白区，这里是补齐。
-        @try {
-            for (UIView *rootView in axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect)) {
-                rootView.layer.transform = tiltRotation;
-            }
-        } @catch (NSException *ignored) { }
+        // .243: App 场景内容栈直接隐藏（.242 的 tilt 会被场景机器每帧重写自身
+        // transform 覆盖，斗不过）。dock 侧窗由容器独立渲染（揭示期已验证内容
+        // 完整），场景栈是 TouchPassthrough 不承载触摸，隐藏安全。反向揭示
+        // 完成后由 dock 入口统一恢复。
+        if (axs_dock_sceneSuppressed) {
+            @try {
+                for (UIView *rootView in axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect)) {
+                    if (!rootView.hidden) {
+                        rootView.hidden = YES;
+                        [axs_dock_hiddenSceneViews addObject:rootView];
+                    }
+                }
+            } @catch (NSException *ignored) { }
+        }
     } @catch (NSException *ignored) { }
 }
 
@@ -2724,12 +2778,19 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         // 毒化了 ring 光晕的路径半径探测（光晕用 12 建浮窗 mask → 直角边，
         // 缓存 3~4s 才刷新）。圆角统一改为只走 mask SDF。
         UIView *dockItem = axs_dock_findDockedItem(win, toDock ? toFrame : fromFrame);
-        if (dockItem != nil && dockItem.layer.cornerRadius > 0.5f) {
-            axs_dock_dockedRadius = dockItem.layer.cornerRadius;   // 记录真实圆角供 SDF 用
+        // .243: 侧窗可见圆角=场景内容裁剪层（36.8，DUMP 铁证），item 自身
+        // cornerRadius(12) 不是可见圆角——优先读场景链，item 值兜底。
+        CGFloat sceneR = axs_dock_sceneCornerRadiusAt(win, toDock ? toFrame : fromFrame);
+        if (sceneR > 0.5f) {
+            axs_dock_dockedRadius = sceneR;
+        } else if (dockItem != nil && dockItem.layer.cornerRadius > 0.5f) {
+            axs_dock_dockedRadius = dockItem.layer.cornerRadius;
         }
         if (toDock) {
             axs_dock_dockedState = YES;
             axs_dock_dockedStateAt = CACurrentMediaTime();
+            axs_dock_sceneSuppressed = YES;                 // .243: 场景栈压制开始
+            if (axs_dock_hiddenSceneViews == nil) axs_dock_hiddenSceneViews = [NSMutableArray array];
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;   // enforce 从 identity 起施加
         } else {
             axs_dock_dockedState = NO;
@@ -2739,9 +2800,8 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                     if (sub != nil) sub.hidden = NO;
                 }
             }
-            for (UIView *rootView in axs_dock_sceneRootsAt(win, axs_dock_lastDockFrameRect)) {
-                rootView.layer.transform = CATransform3DIdentity;   // .242: 场景栈交还原生
-            }
+            // .243: 场景栈保持隐藏到反向揭示完成（下方 dispatch_after 恢复），
+            // 避免它在飞行途中以正面形态插回浮窗矩形。
         }
 
         // .237: dst 永远是真容器（live card）。日志 88 实测：docked item 的
@@ -2798,6 +2858,14 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         AXSDockFlightDriver *oldDrv = objc_getAssociatedObject(container, &axs_dock_flightDriverKey);
         if (oldDrv != nil) [oldDrv stop];
 
+        // .243: 反向消散层侧倾=侧窗真实侧倾（右贴朝中心，与 enforce 同款）
+        CGFloat srcTiltRad = 0.0;
+        if (!toDock) {
+            CGFloat screenW2 = win.bounds.size.width;
+            BOOL rightSide2 = (fromFrame.origin.x + fromFrame.size.width * 0.5f) > screenW2 * 0.5f;
+            srcTiltRad = (rightSide2 ? -1.0 : 1.0) * axs_dock_tiltAngleCfg() * 2.6 * M_PI / 180.0;
+        }
+
         AXSDockFlightDriver *driver = [AXSDockFlightDriver new];
         [driver startWithWindow:win
                         srcShot:srcShot
@@ -2810,6 +2878,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                         density:density
                      srcCorner:srcCorner
                      dstCorner:dstCorner
+                      srcTilt:srcTiltRad
                       departDir:departDir
                       arriveDir:arriveDir];
         objc_setAssociatedObject(container, &axs_dock_flightDriverKey, driver,
@@ -2854,6 +2923,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                     objc_setAssociatedObject(c, &axs_dock_flightDriverKey, nil,
                                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 }
+                // .243: 反向揭示完成——恢复场景内容栈（浮窗态由 ring tilt 接管）
+                for (UIView *sv in axs_dock_hiddenSceneViews) {
+                    if (sv != nil) sv.hidden = NO;
+                }
+                [axs_dock_hiddenSceneViews removeAllObjects];
+                axs_dock_sceneSuppressed = NO;
             } @catch (NSException *ignored) { }
         });
     } @catch (NSException *ignored) {

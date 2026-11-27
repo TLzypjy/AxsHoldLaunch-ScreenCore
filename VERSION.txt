@@ -1,3 +1,22 @@
+beautify.243 变更（场景栈压制 + 消散层侧倾 + 侧窗圆角 36.8）：
+- 用户反馈 .242（截图 2 张）：①浮→侧边缘半边正面还在；②侧→浮时把侧倾的
+  变成正面、侧窗四圆角变更圆。
+- 根因修正：
+  1) .242 对场景内容栈 tilt 无效——场景宿主机器每帧重写自身 transform，
+     斗不过。场景栈 frame({338,54,85,203}) 比容器({334,60,88,191}) 偏右 4pt，
+     正好盖住靠边缘那半边 → 「边缘半边正面」。
+     修复：dock 期间直接隐藏场景栈（axs_dock_sceneSuppressed，enforce 每 tick
+     落实）。侧窗由容器独立渲染（揭示期已验证内容完整），场景栈是
+     TouchPassthrough 不承载触摸，隐藏安全。反向揭示完成（duration+0.18）
+     统一恢复，避免它在飞行途中以正面形态插回浮窗矩形（「变成正面」）。
+  2) 侧窗可见圆角=场景内容裁剪层的 36.8（DUMP 93：item/container 自身
+     corner=0，item 的 12 不是可见圆角）。dockedRadius 改为优先读场景链
+     （axs_dock_sceneCornerRadiusAt），item 值兜底 → 正向揭示/反向消散的
+     SDF 圆角与真实侧窗一致（「变更圆」消失）。
+  3) 反向消散层带侧窗真实侧倾（srcTilt，显式 m14/m34 同款）——消散的是
+     已侧倾的侧窗，不再变正面。正向消散层保持不变。
+- 保留 .242 全部机制（DOCK DUMP/ENFORCE/SWALLOW 诊断、探测加速、真容器揭示）。
+
 beautify.242 变更（App 场景内容栈 tilt + 揭示圆角按真实外观）：
 - DUMP 93 铁证（fwd+1.5s，侧窗矩形上三条分支）：
   SCDockedFloatingItemView corner=0 contents=NO（已 tilt、空壳）
