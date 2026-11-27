@@ -879,6 +879,15 @@ static void axs_open_playShockwave(UIWindow *win, CGPoint point) {
     SEL tick196 = @selector(tick:);
     self.link = [CADisplayLink displayLinkWithTarget:self selector:tick196];
     [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+    // .250: 兜底保险——display link 一旦中途停摆（异常/主线程阻塞/竞争），
+    // mask 会冻结在半开状态：真实容器永远半白（log101 视频实锤）。
+    // duration+0.6s 后无条件强制 stop（幂等；正常完成时 tick 已 stop，无副作用）。
+    __weak AXSOpenRevealDriver *weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 (int64_t)((duration + 0.6) * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        [weakSelf stop];
+    });
 }
 
 - (void)paintAtTime:(CGFloat)t {
@@ -1031,6 +1040,11 @@ static BOOL axs_open_isAssembled(UIView *v) {
 static CFAbsoluteTime axs_open_interceptUntil = 0;
 // .125: true while the particle assemble owns the card (hidden from frame 0)
 static BOOL axs_open_assembleInFlight = NO;
+// .250: 容器动画吞窗口。旧的 5s 全局 intercept（每次触摸抬手布防）把 dock
+// 手势后 App 给容器的原生位移/侧倾弹簧动画也吞了——容器瞬移到位，侧窗
+// 「直接显示」、真实浮窗不再飞（log101 视频实锤）。容器层动画只在呼出
+// 聚合窗口内吞；dock item 子树的吞不受此影响。
+static CFAbsoluteTime axs_open_animSwallowUntil = 0;
 
 // .125: independent open-effect controls (like the dismiss has)
 static CGFloat axs_open_speedScale(void) {
@@ -1364,6 +1378,13 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
                        dispatch_get_main_queue(), ^{
             UIView *c = weakCardCache;
             if (c == nil) return;
+            // .250: 防缓存污染——容器还戴着 reveal mask（或聚合未收尾）时
+            // 捕到的是半开/半白快照，绝不能写入缓存：下一次 dock 转场会把
+            // 这张毒快照当 srcShot，粒子直接继承白块（log101 视频实锤）。
+            if (axs_open_assembleInFlight || c.layer.mask != nil) {
+                axs_dm_log(@"OPEN cached card snapshot skipped (mask/in-flight)");
+                return;
+            }
             UIImage *fresh = axs_open_captureVisibleCardCheap(c);
             if (fresh != nil) {
                 axs_open_cacheCardSnapshot(c, fresh);
@@ -1493,6 +1514,9 @@ static void axs_open_becameVisible(UIView *v) {
         // .165: the flight + reveal read too fast at the default speed;
         // the base duration goes 0.85s -> 1.15s (speed slider still scales).
         CGFloat duration = 1.15 / axs_open_speedScale();
+        // .250: 容器动画吞窗口 = 呼出聚合全程 + 余量。dock 手势时此窗口
+        // 已过期 -> 容器原生飞行动画放行（真实浮窗连续飞向侧窗）。
+        axs_open_animSwallowUntil = CACurrentMediaTime() + duration + 0.3;
         // .192: own the card for the WHOLE assemble+reveal+cleanup window.
         // .191 used duration+0.3 which expired mid-animation (pollStep settles
         // ~0.26s) and let stale/orphaned checks fire on our own events.
@@ -1704,6 +1728,12 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
             if (delegate != nil
                 && (strcmp(object_getClassName(delegate), "SCFloatingContainerView") == 0
                     || isDockItem)) {
+                // .250: 容器层动画只在呼出聚合窗口内吞（axs_open_animSwallowUntil）。
+                // dock 手势后的原生位移/transform 动画必须放行——真实容器要像
+                // 呼出动画那样连续飞到侧窗/浮窗位（log101：5s 盲吞导致容器瞬移，
+                // 侧窗直接显示、无飞行）。dock item 子树的吞（isDockItem）保留。
+                BOOL containerAnimWindow = CACurrentMediaTime() < axs_open_animSwallowUntil;
+                if (isDockItem || containerAnimWindow) {
                 if (isDockItem) {
                     axs_dm_log(@"DOCK SWALLOW anim=%@ key=%@ on %s",
                                NSStringFromClass([anim class]), key ?: @"nil",
@@ -2634,6 +2664,28 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             }
         }
 
+        // .250: 转场前把真实容器恢复到完整态。残留的 reveal mask（半白卡）、
+        // hidden、半透明都必须在快照捕获前清掉：否则 srcShot 半白，
+        // 粒子和聚合层直接继承白块（log101 视频实锤）。
+        @try {
+            id wipeDrv = objc_getAssociatedObject(container, &axs_open_wipeDriverKey);
+            if (wipeDrv != nil) {
+                [wipeDrv performSelector:@selector(stop)];
+                objc_setAssociatedObject(container, &axs_open_wipeDriverKey, nil,
+                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            if (container.layer.mask != nil) container.layer.mask = nil;
+            if (container.hidden) {
+                if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                    ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                        container, @selector(setHidden:), NO);
+                } else {
+                    container.hidden = NO;
+                }
+            }
+            if (container.alpha < 1.0) container.alpha = 1.0;
+        } @catch (NSException *ignored) { }
+
         // 圆角按「窗口真实外观」：浮窗=树探测（36.8），侧窗=dockedRadius（36.8）。
         CGFloat srcCorner = toDock ? axs_dm_cornerRadiusForView(container)
                                    : (axs_dock_dockedRadius > 0.5f ? axs_dock_dockedRadius
@@ -2671,8 +2723,10 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         uint32_t arriveDir = toDock ? 3u : 4u;
 
         // 边界细沙粒子（shader openMode=3），纹理=src 快照。
-        UIImage *srcShot = axs_open_cachedCardSnapshotForView(container);
-        if (srcShot == nil) srcShot = axs_open_captureVisibleCardCheap(container);
+        // .250: fresh capture 优先——容器刚被清理成完整态，现拍现用；
+        // 缓存快照可能是被 mask/隐藏态污染的半白图，只作兜底。
+        UIImage *srcShot = axs_open_captureVisibleCardCheap(container);
+        if (srcShot == nil) srcShot = axs_open_cachedCardSnapshotForView(container);
         if (srcShot == nil) srcShot = axs_dm_snapshot(container);
         if (srcShot == nil) {
             axs_dm_log(@"DOCK FLIGHT skipped (no src snapshot)");

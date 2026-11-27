@@ -1,3 +1,23 @@
+beautify.250 变更（三重回归修复：半白卡/白卡 + 侧窗直接显示 + 真实容器连续飞行）：
+- 用户反馈 .249「浮窗变成白色大卡/半黑半白卡；侧窗点不了；侧窗直接显示」。
+  log101+视频逐帧取证，三个独立根源：
+- 根源1（半白卡）：AXSOpenRevealDriver 的 per-cell mask 装在真实容器 layer 上，
+  display link 一旦中途停摆 mask 冻结在半开状态 -> 容器永远半白；dock 转场把
+  半白容器快照成 srcShot，粒子/聚合层继承白块；快照缓存也被污染。
+  修复：a) reveal driver duration+0.6s 兜底强制 stop（幂等）；
+        b) dockAssemblePlay 转场前清容器（stop wipe driver + mask/hidden/alpha 复位）；
+        c) 快照缓存防污染（mask 存在/聚合活跃时拒绝 refresh 写缓存）；
+        d) dock 转场 srcShot 改为 fresh capture 优先，缓存只作兜底。
+- 根源2（侧窗直接显示/无飞行）：每次触摸抬手盲布 5s 动画拦截窗，dock 手势后
+  App 给容器的原生位移弹簧动画被吞 -> 容器瞬移到位。
+  修复：新增 axs_open_animSwallowUntil 专用吞窗（=呼出聚合全程+0.3s），
+  容器层动画只在呼出窗口内吞；dock 手势的原生飞行动画放行——真实容器
+  像呼出动画那样连续飞到位（用户核心诉求）。dock item 子树的吞保留。
+- 根源3（点不了）：同根源2 的瞬移+completion 立即补发打乱 App 状态机；
+  随根源2 一并修复。
+- 保持：自包含快照飞行（src/dst 快照层+SDF 圆角+显式侧倾矩阵）、
+  dock flight guard、ENFORCE 场景栈 tilt、DOCK SWALLOW（dock 态）。
+
 beautify.249 变更（稳定化重构：自包含快照飞行，真实窗口零干预）：
 - 用户反馈 .248「侧窗有时候不显示 有时候侧窗点不了」——场景栈接管（hidden/
   mask/tilt/z 序）与原生状态机打架的回归：item 子视图隐藏挡了触摸（点不了）；
