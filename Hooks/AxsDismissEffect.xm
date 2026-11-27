@@ -2583,6 +2583,17 @@ static void axs_dock_dumpViewsAtFrame(CGRect frame, NSString *tag) {
     } @catch (NSException *ignored) { }
 }
 
+// .242: 容器子树判定（容器自身内容是 ring tilt 域，不得收集/隐藏）。
+static BOOL axs_dock_inContainerSubtree(UIView *v) {
+    UIView *a = v.superview;
+    int guard = 0;
+    while (a != nil && guard++ < 14) {
+        if ([NSStringFromClass(a.class) isEqualToString:@"SCFloatingContainerView"]) return YES;
+        a = a.superview;
+    }
+    return NO;
+}
+
 // .242: 收集 dock 矩形上的「App 场景内容栈」链根。DUMP 93 铁证：dock 翻转时
 // 原生把 _UIScenePresentationView 宿主链移出容器（ring tilt 宿主明确排除
 // scene 根）→ 应用真实画面正面显示在侧窗矩形上。排除容器子树（ring 域）、
@@ -2599,16 +2610,19 @@ static NSArray *axs_dock_sceneRootsAt(UIWindow *win, CGRect dockFrame) {
             [stack removeLastObject];
             if (v == nil) continue;
             NSString *cn = NSStringFromClass(v.class);
-            BOOL excluded = [cn hasPrefix:@"SCFloating"]
-                         || [cn isEqualToString:@"SCDockedFloatingItemView"]
-                         || [cn isKindOfClass:[UIWindow class]];
-            if (excluded) continue;   // 不下探容器子树（ring 域）/item/overlay
+            // .245: 遍历不再跳过 SCFloating 前缀（起点 SCFloatingHostWindow 本身
+            // 就是该前缀，旧写法第一层即被跳过 → 集合恒空，.242-.244 全部落空）。
+            // 只在「候选」级别排除已知视图与容器子树。
             CGRect f = [v convertRect:v.bounds toView:nil];
             BOOL dockSized = fabs(f.origin.x - dockFrame.origin.x) < 9.0
                           && fabs(f.origin.y - dockFrame.origin.y) < 9.0
                           && fabs(f.size.width - dockFrame.size.width) < 12.0
                           && fabs(f.size.height - dockFrame.size.height) < 14.0;
-            if (dockSized && !v.hidden && v.alpha > 0.5) {
+            BOOL known = [cn hasPrefix:@"SCFloating"]
+                      || [cn isEqualToString:@"SCDockedFloatingItemView"]
+                      || [v isKindOfClass:[UIWindow class]];
+            if (dockSized && !known && !v.hidden && v.alpha > 0.5
+                && !axs_dock_inContainerSubtree(v)) {
                 UIView *root = v;
                 while (root.superview != nil) {
                     UIView *p = root.superview;
@@ -2621,7 +2635,9 @@ static NSArray *axs_dock_sceneRootsAt(UIWindow *win, CGRect dockFrame) {
                         || fabs(pf.size.height - dockFrame.size.height) > 16.0) break;
                     root = p;
                 }
-                if (root != nil && ![seen containsObject:root]) {
+                if (root != nil && !axs_dock_inContainerSubtree(root)
+                    && ![NSStringFromClass(root.class) hasPrefix:@"SCFloating"]
+                    && ![seen containsObject:root]) {
                     [seen addObject:root];
                     [roots addObject:root];
                 }
@@ -2643,18 +2659,19 @@ static CGFloat axs_dock_sceneCornerRadiusAt(UIWindow *win, CGRect dockFrame) {
             UIView *v = [stack lastObject];
             [stack removeLastObject];
             if (v == nil) continue;
+            // .245: 遍历不跳过（同 sceneRootsAt 修正），仅候选级排除。
             NSString *cn = NSStringFromClass(v.class);
-            BOOL excluded = [cn hasPrefix:@"SCFloating"]
-                         || [cn isEqualToString:@"SCDockedFloatingItemView"]
-                         || [cn isKindOfClass:[UIWindow class]];
-            if (!excluded && v.layer.cornerRadius > 0.5f) {
-                CGRect f = [v convertRect:v.bounds toView:nil];
-                if (fabs(f.origin.x - dockFrame.origin.x) < 9.0
-                    && fabs(f.origin.y - dockFrame.origin.y) < 9.0
-                    && fabs(f.size.width - dockFrame.size.width) < 12.0
-                    && fabs(f.size.height - dockFrame.size.height) < 14.0) {
-                    if (v.layer.cornerRadius > found) found = v.layer.cornerRadius;
-                }
+            BOOL known = [cn hasPrefix:@"SCFloating"]
+                      || [cn isEqualToString:@"SCDockedFloatingItemView"]
+                      || [v isKindOfClass:[UIWindow class]];
+            CGRect f = [v convertRect:v.bounds toView:nil];
+            BOOL dockSized = fabs(f.origin.x - dockFrame.origin.x) < 9.0
+                          && fabs(f.origin.y - dockFrame.origin.y) < 9.0
+                          && fabs(f.size.width - dockFrame.size.width) < 12.0
+                          && fabs(f.size.height - dockFrame.size.height) < 14.0;
+            if (!known && dockSized && v.layer.cornerRadius > 0.5f
+                && !axs_dock_inContainerSubtree(v)) {
+                if (v.layer.cornerRadius > found) found = v.layer.cornerRadius;
             }
             [stack addObjectsFromArray:v.subviews];
         }

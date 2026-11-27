@@ -1,3 +1,15 @@
+beautify.245 变更（总根源修复：场景收集的遍历级排除导致集合恒空）：
+- 用户反馈 .244「还是一样啊」。DUMP 96：fwd+1.5s 场景栈链仍全部 alpha=1.00 可见。
+- 总根源：axs_dock_sceneRootsAt / axs_dock_sceneCornerRadiusAt 的遍历把
+  SCFloating 前缀视图连同子树整体跳过（continue），而遍历起点
+  SCFloatingHostWindow 本身就是该前缀 → 第一层即被跳过，两个函数【永远返回
+  空/0】——.242 的 tilt、.243/.244 的隐藏、圆角 36.8 读取全部从未生效！
+- 修复：遍历全树不跳过；排除只在「候选」级别（SCFloating* / item /
+  UIWindow 不是候选；axs_dock_inContainerSubtree 排除容器子树候选，防误伤
+  容器自身内容）。爬链到根后同样校验非容器子树/非 SCFloating 前缀。
+- 生效预期：场景栈在 dock 态被真正隐藏（正面内容消失）；dockedRadius 读到
+  36.8（揭示/消散圆角与真实侧窗一致）。
+
 beautify.244 变更（场景压制生命周期修正：只有反向结束才恢复）：
 - 用户反馈 .243「还是有啊」。DUMP 95 铁证：fwd+1.5s 时场景内容栈链全部
   hidden=NO——.243 的恢复块正/反向共用，正向 flight 结束（flight+1.33s）就把
