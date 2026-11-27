@@ -2154,13 +2154,13 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     return ((1.0f - ux) + uy) * 0.5f;
 }
 
-// 与 AxsBeautifyRing.axs_ring_applyTilt 逐字同款的显式 m14/m34 侧倾矩阵。
+// .254: 飞行快照层的 dock 侧倾矩阵改为【无透视纯旋转】——与 ENFORCE 的
+// item 本体 tilt（.252 起 m14=m34=0）逐字同角度。带透视的聚合层在交接给
+// 真实侧窗的瞬间角度不同 ->「聚合成功时抖一下/正面和侧倾切换」（视频实锤）。
 static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
-    CGFloat sinRad = (CGFloat)sin(rad);
-    CGFloat cosRad = (CGFloat)cos(rad);
-    tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
-    tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
+    tiltRotation.m14 = 0.0;
+    tiltRotation.m34 = 0.0;
     return tiltRotation;
 }
 
@@ -2740,10 +2740,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         // .253: 反向聚合终点=正面浮窗（浮窗态没有侧倾，终点倾斜会先斜后回正）。
         CGFloat dstTiltRad = toDock ? dockTilt : 0.0;
 
-        // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)，
-        // 侧窗→浮窗目标左下→右上(4)。
+        // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)。
+        // .254: 反向聚合目标改为右上→左下(3)（=粒子行程方向：靠侧窗近的格子
+        // 先落位，顶边早成形）。旧的(4)左下先到让右上角留下斜切楔形缺口直到
+        // 最后——视觉上像「半张浮窗是倾斜的，然后才回正」（视频实锤）。
         uint32_t departDir = 3u;
-        uint32_t arriveDir = toDock ? 3u : 4u;
+        uint32_t arriveDir = 3u;
 
         // 边界细沙粒子（shader openMode=3），纹理=src 快照。
         // .250: fresh capture 优先——容器刚被清理成完整态，现拍现用；
