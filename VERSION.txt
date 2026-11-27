@@ -1,3 +1,22 @@
+beautify.240 变更（子层树吞动画 + 内容子视图隐藏 + tail 缩短救光晕）：
+- 用户反馈 .239「还是一样的问题」：视频 86b1128d 与 .238 现象一致（侧窗边缘
+  半边正面、浮窗完成后光晕晚 2~3s）。日志 91：光晕出现的时刻与 driver 停止
+  （移除容器 mask，flight+3.15s）两次精确吻合。
+- 根因修正：
+  1) .239 的动画吞拦截只匹配 delegate 类名含 DockedFloatingItem 的层——原生
+     的去侧倾/内容动画加在 item 的【内容子层】上（delegate 是普通类名），
+     拦不住。改为沿 superlayer 回溯（≤6 跳）判定子树归属，子树内动画全吞，
+     并加 DOCK SWALLOW 诊断日志（动画类/键/所在层）。
+  2) 正面内容载体是 item 的直接子视图——enforce 每 tick 隐藏全部直接子视图
+     （壳本体与命中测试不受影响，手势仍由 item 承接），无论子视图带什么
+     动画/transform 都不再可见。undock 时恢复子视图可见性。加 DOCK ENFORCE
+     诊断日志（实例数/tilt/contents/子视图类名），下一轮日志可直接定位内容
+     来源，不再盲改。
+  3) driver 停止从 duration+2.0 收回 duration+0.15/0.18：tail 期间容器 mask
+     一直挂着，与光晕晚现时刻两次精确吻合；dstIsDocked=NO 后内容门控已
+     不需要尾巴。mask 早撤 → 光晕即回。
+- 保留 .239 全部机制（全实例 tilt、hook 吞拦截、无圆角 mutation）。
+
 beautify.239 变更（吞 docked item 动画保 tilt + 移除圆角 mutation 救光晕）：
 - 用户反馈 .238「贴边缘的那半边还是正面，过两三秒才侧倾；侧窗转浮窗时浮窗四角
   直角光晕，完整光晕 3~4s 后才出现」。视频 c73ae1ba：侧窗 2.6~3.8s 侧倾、

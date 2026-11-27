@@ -1687,9 +1687,27 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
             // tilt 同步就失效了。completion 手动补发（与容器同款）。
             BOOL isDockItem = (delegate != nil && axs_dock_dockedState
                 && strstr(object_getClassName(delegate), "DockedFloatingItem") != NULL);
+            // .240: 原生动画常加在 item 的内容子层上（delegate 类名不是
+            // DockedFloatingItem）——沿 superlayer 回溯判定是否处于 item 子树。
+            if (!isDockItem && delegate != nil && axs_dock_dockedState) {
+                CALayer *walk = (CALayer *)self;
+                for (int hop = 0; walk != nil && hop < 6; hop++) {
+                    id wd = walk.delegate;
+                    if (wd != nil && strstr(object_getClassName(wd), "DockedFloatingItem") != NULL) {
+                        isDockItem = YES;
+                        break;
+                    }
+                    walk = walk.superlayer;
+                }
+            }
             if (delegate != nil
                 && (strcmp(object_getClassName(delegate), "SCFloatingContainerView") == 0
                     || isDockItem)) {
+                if (isDockItem) {
+                    axs_dm_log(@"DOCK SWALLOW anim=%@ key=%@ on %@",
+                               NSStringFromClass([anim class]), key ?: @"nil",
+                               NSStringFromClass(delegate.class));
+                }
                 // fire the animation's own completion manually (finished=YES):
                 // UIView block animations attach their completion block to the
                 // CAAnimation's delegate, so this is exactly the notification
@@ -2533,11 +2551,28 @@ void axs_dock_enforceDockedItemTilt(void) {
         CGFloat cosRad = (CGFloat)cos(rad);
         tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
         tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
+        static CFTimeInterval axs_dock_enforceLogAt = 0;
+        BOOL logNow = (CACurrentMediaTime() - axs_dock_enforceLogAt > 1.0);
         for (UIView *item in items) {
             if (item == nil || item.layer == nil) continue;
-            if (item.hidden) item.hidden = NO;   // 侧窗本体应可见
+            if (item.hidden) item.hidden = NO;   // 侧窗本体应可见（壳保持可命中）
+            // .240: 直接子视图=原生延迟弹出的正面内容载体——隐藏之，正面内容
+            // 无论带什么动画都不再可见；壳本体与命中测试不受影响。
+            for (UIView *sub in item.subviews) {
+                if (sub != nil && !sub.hidden) sub.hidden = YES;
+            }
             item.layer.transform = tiltRotation;
+            if (logNow) {
+                NSMutableString *kids = [NSMutableString string];
+                for (UIView *sub in item.subviews) {
+                    [kids appendFormat:@"%@(hidden=%d) ", NSStringFromClass(sub.class), sub.hidden ? 1 : 0];
+                }
+                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f contents=%@ kids=[%@]",
+                           (unsigned long)items.count, rad * 180.0 / M_PI,
+                           item.layer.contents != NULL ? @"YES" : @"NO", kids);
+            }
         }
+        if (logNow) axs_dock_enforceLogAt = CACurrentMediaTime();
     } @catch (NSException *ignored) { }
 }
 
@@ -2594,7 +2629,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;   // enforce 从 identity 起施加
         } else {
             axs_dock_dockedState = NO;
-            if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;   // 交还原生
+            if (dockItem != nil) {
+                dockItem.layer.transform = CATransform3DIdentity;   // 交还原生
+                for (UIView *sub in dockItem.subviews) {            // .240: 恢复被隐藏的内容子视图
+                    if (sub != nil) sub.hidden = NO;
+                }
+            }
         }
 
         // .237: dst 永远是真容器（live card）。日志 88 实测：docked item 的
@@ -2675,16 +2715,16 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                    srcCorner, dstCorner, driver.dstContentReady ? 1 : 0);
 
         __weak UIView *wcard = container;
-        // .236: in-flight 标记按原节奏释放（duration+0.12）；driver 停止延后到
-        // duration+2.0——docked item 内容就绪可能晚于 flight 结束，揭示尾巴
-        // 需要driver 继续驱动（内容就绪门控 + 0.8s 子时钟）。
+        // .240: driver 停止回归 duration+0.15——tail(duration+2.0) 期间容器
+        // mask 挂着，与「光晕在浮窗聚合完成后晚 2~3s 才出现」的时刻两次精确
+        // 吻合（dstIsDocked=NO 后内容门控已不需要尾巴）。mask 一撤光晕即回。
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                     (int64_t)((duration + 0.12) * NSEC_PER_SEC)),
+                                     (int64_t)((duration + 0.15) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             axs_dock_assembleInFlight = NO;
         });
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                     (int64_t)((duration + 2.0) * NSEC_PER_SEC)),
+                                     (int64_t)((duration + 0.18) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 UIView *c = wcard;
