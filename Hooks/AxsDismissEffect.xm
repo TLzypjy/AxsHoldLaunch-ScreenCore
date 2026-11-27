@@ -1397,6 +1397,14 @@ static void axs_open_pollStep(UIView *card, NSInteger polls, CGFloat duration,
     }
 }
 
+// .236: dock flight guard -- dock 转场期间/尾部，open poll 会把重新出现的卡片
+// （docked 几何或 docked item 本体）误判为呼出候选，在侧窗上再跑一遍完整
+// assemble（双重聚合 + 浮窗圆角 36.8 的 corner kill 套在侧窗上=圆角对不上）。
+// 转场矩形相关的候选在保卫窗口内一律跳过。
+static CFAbsoluteTime axs_dock_flightGuardUntil = 0;
+static CGRect axs_dock_guardFrameA = CGRectZero;
+static CGRect axs_dock_guardFrameB = CGRectZero;
+
 static void axs_open_becameVisible(UIView *v) {
     @try {
         // .192: CHECK THE OWNERSHIP WINDOW FIRST. In .191 this test ran LAST,
@@ -1416,6 +1424,21 @@ static void axs_open_becameVisible(UIView *v) {
                            axs_open_openActiveUntil - nowB);
                 return;
             }
+        }
+        // .236: dock flight guard -- 候选矩形与最近一次 dock 转场矩形相交时跳过，
+        // 且不触碰 stale/self-restore 标记（守卫期过后由既有路径正常处理）。
+        if (CACurrentMediaTime() < axs_dock_flightGuardUntil) {
+            @try {
+                CGRect cf = [v convertRect:v.bounds toView:nil];
+                BOOL dockInvolved =
+                    CGRectIntersectsRect(cf, axs_dock_guardFrameA)
+                    || CGRectIntersectsRect(cf, axs_dock_guardFrameB);
+                if (dockInvolved) {
+                    axs_dm_log(@"OPEN candidate skipped (dock flight guard %.2fs)",
+                               axs_dock_flightGuardUntil - CACurrentMediaTime());
+                    return;
+                }
+            } @catch (NSException *ignored) { }
         }
         // .144: a card already owned by an assemble is STILL the same visible
         // window -- its own reveal and ScreenCore's repeated presents must not
@@ -2045,6 +2068,8 @@ static UIView *axs_dock_findDockedItem(UIWindow *win, CGRect targetFrame);
 @property (nonatomic, assign) CGFloat dstCorner;
 @property (nonatomic, assign) uint32_t departDir;
 @property (nonatomic, assign) uint32_t arriveDir;
+@property (nonatomic, assign) BOOL dstContentReady;   // .236: docked item 内容就绪前不揭示
+@property (nonatomic, assign) CFTimeInterval dstRevealStart; // -1=未开始
 - (void)startWithWindow:(UIWindow *)window
                 srcShot:(UIImage *)srcShot
                srcFrame:(CGRect)srcFrame
@@ -2188,6 +2213,13 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     [self attachDstMask];
     self.srcBmp = [self makeSrcBmp];
     self.dstBmp = [self makeDstBmp];
+    self.dstRevealStart = -1;
+    self.dstContentReady = NO;
+    if (self.dstIsDocked) {
+        self.dstContentReady = [self dockedItemHasContent];
+        if (self.dstContentReady) self.dstRevealStart = 0;
+        axs_dm_log(@"DOCK FLIGHT dst content ready at start=%d", self.dstContentReady ? 1 : 0);
+    }
     [self paintSrc:0.0];
     [self paintDst:0.0];
     self.start = CACurrentMediaTime();
@@ -2275,6 +2307,38 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     }
 }
 
+// .236: docked item 内容就绪探测——内容（app 快照 image layer）被原生异步填充，
+// 就绪前揭示只会得到「透明聚合」。逐层找 layer.contents != NULL。
+- (BOOL)dockedItemHasContent {
+    UIView *v = self.dstView;
+    if (v == nil) return NO;
+    if (v.layer.contents != NULL) return YES;
+    @try {
+        NSMutableArray *stack = [NSMutableArray arrayWithObject:v];
+        int guardN = 0;
+        while (stack.count > 0 && guardN++ < 240) {
+            UIView *u = [stack lastObject];
+            [stack removeLastObject];
+            if (u == nil) continue;
+            if (u.layer.contents != NULL) return YES;
+            for (UIView *sub in u.subviews) [stack addObject:sub];
+        }
+    } @catch (NSException *ignored) { }
+    return NO;
+}
+
+// .236: 内容就绪前 dst 全透明位图。
+- (void)paintDstHidden {
+    CGContextRef ctx = self.dstBmp;
+    if (ctx == NULL || self.dstMask == nil) return;
+    memset((UInt8 *)[self.dstBits mutableBytes], 0, self.cols * 4 * self.rows);
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
+    if (img != NULL) {
+        self.dstMask.contents = (__bridge id)img;
+        CGImageRelease(img);
+    }
+}
+
 // dst 每 tick 验活：docked item 可能被原生移除/重建，mask 可能被覆盖，
 // hidden 可能被改动——逐项恢复，保证「逐格揭示真视图」始终成立。
 - (void)reassertDst {
@@ -2295,7 +2359,7 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     }
     if (v == nil) return;
     [self attachDstMask];
-    if (self.dstView.hidden && !self.dstSavedHidden) self.dstView.hidden = NO;
+    if (!self.dstIsDocked && self.dstView.hidden && !self.dstSavedHidden) self.dstView.hidden = NO;
 }
 
 - (void)dockFlightTick:(CADisplayLink *)link {
@@ -2305,12 +2369,29 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
         if (t < 0) t = 0; if (t > 1) t = 1;
         [self paintSrc:t];
         [self reassertDst];
-        [self paintDst:t];
-        // 不施加任何 transform：dst 真视图的圆角/侧倾由系统原生渲染，从第一帧在线。
-        if (t >= 1.0) {
-            [self paintSrc:1.0];
-            [self paintDst:1.0];
+        // .236: docked dst 的揭示由「内容就绪」门控——就绪前全透明；就绪后从
+        // 此刻起跑子时钟（起飞时已就绪则铺满整个 flight）。真视图的圆角/侧倾
+        // 仍由系统原生渲染，不施加任何 transform。
+        if (self.dstIsDocked && !self.dstContentReady) {
+            if ([self dockedItemHasContent]) {
+                self.dstContentReady = YES;
+                if (self.dstRevealStart < 0) self.dstRevealStart = elapsed;
+                axs_dm_log(@"DOCK FLIGHT dst content became ready at %.2fs", elapsed);
+            }
         }
+        if (self.dstIsDocked) {
+            if (!self.dstContentReady) {
+                [self paintDstHidden];
+            } else {
+                CGFloat span = (self.dstRevealStart <= 0.001) ? MAX(self.duration, 0.5) : 0.8;
+                CGFloat dstT = (CGFloat)((elapsed - self.dstRevealStart) / span);
+                if (dstT < 0) dstT = 0; if (dstT > 1) dstT = 1;
+                [self paintDst:dstT];
+            }
+        } else {
+            [self paintDst:t];
+        }
+        if (t >= 1.0) [self paintSrc:1.0];
     } @catch (NSException *ignored) {
         [self stop];
     }
@@ -2451,11 +2532,13 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         UIView *dstView = toDock ? dockView : container;
         CGRect dstFrame = toDock ? toFrame : fromFrame;
 
-        // 真圆角：dst 从真 view 探测；src 快照层用对应矩形的最小边近似
-        // （浮窗用探测值更准）。
-        CGFloat srcCorner = toDock ? axs_dm_cornerRadiusForView(container)
+        // .236: dst 圆角优先读真 view 的 layer.cornerRadius（原生真实值），
+        // 探测值只作兜底——杜绝 mask SDF 圆角与真窗对不上。src 快照层圆角同源。
+        CGFloat srcCorner = container.layer.cornerRadius;
+        if (srcCorner < 0.5f) srcCorner = toDock ? axs_dm_cornerRadiusForView(container)
                                    : MIN(fromFrame.size.width, fromFrame.size.height) * 0.5f;
-        CGFloat dstCorner = axs_dm_cornerRadiusForView(dstView);
+        CGFloat dstCorner = dstView.layer.cornerRadius;
+        if (dstCorner < 0.5f) dstCorner = axs_dm_cornerRadiusForView(dstView);
         if (srcCorner < 1.0f) srcCorner = 12.0f;
         if (dstCorner < 1.0f) dstCorner = 12.0f;
 
@@ -2471,6 +2554,16 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             axs_dm_log(@"DOCK FLIGHT metal unavailable -> native restore");
             return;
         }
+
+        // .236: 保卫窗口覆盖 flight + 内容等待尾巴；候选矩形与转场矩形相交的
+        // open 候选一律跳过（防第二次聚合 + 浮窗圆角 corner kill 污染侧窗）。
+        axs_dock_flightGuardUntil = CACurrentMediaTime() + duration + 2.3;
+        axs_dock_guardFrameA = fromFrame;
+        axs_dock_guardFrameB = toFrame;
+
+        // 快速连翻时停掉上一个 driver（mask/hidden 恢复后由新 driver 接管）。
+        AXSDockFlightDriver *oldDrv = objc_getAssociatedObject(container, &axs_dock_flightDriverKey);
+        if (oldDrv != nil) [oldDrv stop];
 
         AXSDockFlightDriver *driver = [AXSDockFlightDriver new];
         [driver startWithWindow:win
@@ -2490,14 +2583,22 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
         axs_dock_assembleInFlight = YES;
-        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f snap-src real-dst",
+        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f gate=%d snap-src real-dst",
                    NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
                    toDock ? 1 : 0, departDir, arriveDir, duration, density,
-                   srcCorner, dstCorner);
+                   srcCorner, dstCorner, driver.dstContentReady ? 1 : 0);
 
         __weak UIView *wcard = container;
+        // .236: in-flight 标记按原节奏释放（duration+0.12）；driver 停止延后到
+        // duration+2.0——docked item 内容就绪可能晚于 flight 结束，揭示尾巴
+        // 需要driver 继续驱动（内容就绪门控 + 0.8s 子时钟）。
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
                                      (int64_t)((duration + 0.12) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            axs_dock_assembleInFlight = NO;
+        });
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     (int64_t)((duration + 2.0) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 UIView *c = wcard;
@@ -2508,7 +2609,6 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                 }
             } @catch (NSException *ignored) { }
-            axs_dock_assembleInFlight = NO;
         });
     } @catch (NSException *ignored) {
         axs_dock_assembleInFlight = NO;

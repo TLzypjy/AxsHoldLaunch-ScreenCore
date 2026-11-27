@@ -1,3 +1,29 @@
+beautify.236 变更（消除侧窗二次聚合/透明聚合/圆角对不上）：
+- 用户反馈 .235「侧窗会聚合两次，第一次透明，第二次才是侧倾真窗但圆角对不上」。
+- 日志 87 铁证（每次 dock flight 后紧接）：
+  OPEN stale assembled flag released, re-assembling
+  OPEN candidate accepted frame={{334,60},{88,190.7}}   ← 侧窗几何
+  OPEN real reveal corner kill armed radius=36.8        ← 浮窗圆角套侧窗
+  metal started open=1 frame={{334,60},{88,190.7}}      ← 在侧窗上又跑 1.15s 聚合
+  即：dock flight 结束后，open poll 把 docked 状态的容器/侧窗误判为呼出候选，
+  又跑一遍完整 open reveal —— 这就是「第二次聚合」；其 corner kill 用浮窗
+  圆角 36.8 → 「圆角对不上」。「第一次聚合透明」= 我们的 dst 真侧窗逐格揭示
+  时原生还没把内容（app 快照）填充进 docked item，揭示了个空壳。
+- 修复：
+  1) dock flight guard：axs_dock_flightGuardUntil/guardFrameA/B（定义在
+     becameVisible 之前）；axs_open_becameVisible 在 open-active 检查后、
+     stale-flag 处理前，若候选矩形与最近转场矩形（from/to）相交且在保卫窗口
+     内（duration+2.3s）直接跳过，不触碰 stale/self-restore 标记。
+  2) 内容就绪门控：driver 新增 dockedItemHasContent（有界遍历找
+     layer.contents != NULL）；docked dst 在内容就绪前 mask 全透明
+     （paintDstHidden），就绪后从当下起 0.8s 子时钟揭示（起飞时已就绪则铺满
+     整个 flight）。driver 停止延后到 duration+2.0（in-flight 标记仍
+     duration+0.12 释放），内容就绪可能晚于 flight 结束。
+  3) 圆角：dst/src 圆角优先读真 view 的 layer.cornerRadius，探测值兜底。
+  4) docked dst 不再抢 hidden 控制权（原生管理其可见性）；快速连翻时先停旧
+     driver 再起新 driver。
+- 日志加 gate=%d 字段；新日志 DOCK FLIGHT dst content ready/became ready 便于核验。
+
 beautify.235 变更（浮窗↔侧窗混合架构：快照源消散 + 真视图逐帧揭示）：
 - 用户反馈 .234「侧窗是直接出现的 然后消散又聚合」。视频 86 逐帧 + 日志 86 对齐：
   浮→侧在 1.46→1.54s（<0.1s）内浮窗整块消失、侧窗整块出现（原生侧倾形态），
