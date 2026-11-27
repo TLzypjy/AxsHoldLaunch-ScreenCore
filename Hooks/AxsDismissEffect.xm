@@ -1704,9 +1704,9 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
                 && (strcmp(object_getClassName(delegate), "SCFloatingContainerView") == 0
                     || isDockItem)) {
                 if (isDockItem) {
-                    axs_dm_log(@"DOCK SWALLOW anim=%@ key=%@ on %@",
+                    axs_dm_log(@"DOCK SWALLOW anim=%@ key=%@ on %s",
                                NSStringFromClass([anim class]), key ?: @"nil",
-                               NSStringFromClass(delegate.class));
+                               object_getClassName(delegate));
                 }
                 // fire the animation's own completion manually (finished=YES):
                 // UIView block animations attach their completion block to the
