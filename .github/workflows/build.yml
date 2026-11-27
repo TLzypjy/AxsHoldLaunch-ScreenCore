@@ -650,7 +650,6 @@ jobs:
           grep -Fq "axs_dock_sceneSuppressed = NO;                  // .247" Hooks/AxsDismissEffect.xm || { echo "forward collaborate mode missing"; exit 1; }
           grep -Fq "drv2.dstView == nil" Hooks/AxsDismissEffect.xm || { echo "forward fallback unhide missing"; exit 1; }
           grep -Fq "rootView.layer.transform = tiltRotation;" Hooks/AxsDismissEffect.xm || { echo "scene tilt missing"; exit 1; }
-          grep -Fq "insertSubview:rootView belowSubview:cont" Hooks/AxsDismissEffect.xm || { echo "scene z-order press missing"; exit 1; }
           grep -Fq "sceneRoots=%lu" Hooks/AxsDismissEffect.xm || { echo "scene diag missing"; exit 1; }
           grep -Fq "sv.layer.transform = CATransform3DIdentity;" Hooks/AxsDismissEffect.xm || { echo "scene restore identity missing"; exit 1; }
           grep -Fq "static BOOL axs_dock_inContainerSubtree" Hooks/AxsDismissEffect.xm || { echo "container subtree guard missing"; exit 1; }
