@@ -1998,6 +1998,268 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
     axs_dm_log(@"INSTALL %@ HOOKED", tag);
 }
 
+// ===== beautify.232: 浮窗↔侧窗 真实窗口飞行 driver（呼出动画同款） ============
+// 呼出动画是「live 窗口 + per-cell bitmap mask 逐格揭示 + 边界粒子」。本 driver
+// 把同一机制用于 dock 转场：两张完整快照图层（不是网格 quad 拼图）——
+//   src 层在 fromFrame，按 departDir(右上→左下) 逐格消隐；
+//   dst 层在 toFrame，  按 arriveDir 逐格显现，并全程带侧倾 rotationY+m34；
+//   Metal(openMode=3) 只在两层的消散/聚合边界画点对点细沙。
+// 窗口本体始终是「一整张连续的图」，网格只用于 mask 的时钟，不再铺图。
+@interface AXSDockFlightDriver : NSObject
+@property (nonatomic, weak)   UIWindow *win;
+@property (nonatomic, strong) CALayer *srcLayer;
+@property (nonatomic, strong) CALayer *dstLayer;
+@property (nonatomic, assign) CFTimeInterval start;
+@property (nonatomic, assign) NSTimeInterval duration;
+@property (nonatomic, strong) CADisplayLink *link;
+@property (nonatomic, strong) NSMutableData *srcBits;
+@property (nonatomic, strong) NSMutableData *dstBits;
+@property (nonatomic, assign) CGContextRef srcBmp;
+@property (nonatomic, assign) CGContextRef dstBmp;
+@property (nonatomic, assign) NSUInteger cols;
+@property (nonatomic, assign) NSUInteger rows;
+@property (nonatomic, assign) CGFloat srcW;
+@property (nonatomic, assign) CGFloat srcH;
+@property (nonatomic, assign) CGFloat dstW;
+@property (nonatomic, assign) CGFloat dstH;
+@property (nonatomic, assign) CGFloat corner;
+@property (nonatomic, assign) uint32_t departDir;
+@property (nonatomic, assign) uint32_t arriveDir;
+@property (nonatomic, assign) CGFloat tiltRad;   // 目标侧倾角（带符号）
+@property (nonatomic, assign) BOOL tiltDst;      // YES: 侧倾施加在 dst（浮→侧）
+- (void)startOnWindow:(UIWindow *)win
+                 shot:(UIImage *)shot
+            fromFrame:(CGRect)fromFrame
+              toFrame:(CGRect)toFrame
+             duration:(NSTimeInterval)duration
+              density:(CGFloat)density
+               radius:(CGFloat)radius
+           departDir:(uint32_t)departDir
+            arriveDir:(uint32_t)arriveDir
+             tiltRad:(CGFloat)tiltRad
+             tiltDst:(BOOL)tiltDst;
+- (void)stop;
+@end
+
+static inline CGFloat axs_dock_smooth(CGFloat a, CGFloat b, CGFloat x) {
+    CGFloat t = (x - a) / (b - a);
+    if (t < 0) t = 0; if (t > 1) t = 1;
+    return t * t * (3.0 - 2.0 * t);
+}
+
+// 与 shader axsTransferOrder 完全一致（mode 0..7）。
+static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
+    if (mode == 0u) return uy;
+    if (mode == 1u) return 1.0f - uy;
+    if (mode == 2u) return (ux + uy) * 0.5f;
+    if (mode == 3u) return ((1.0f - ux) + uy) * 0.5f;
+    if (mode == 4u) return (ux + (1.0f - uy)) * 0.5f;
+    if (mode == 5u) return ((1.0f - ux) + (1.0f - uy)) * 0.5f;
+    return ((1.0f - ux) + uy) * 0.5f;
+}
+
+@implementation AXSDockFlightDriver
+
+- (CGContextRef)makeBmpFor:(NSMutableData **)bitsOut {
+    NSUInteger bpr = self.cols * 4;
+    NSMutableData *bits = [NSMutableData dataWithLength:bpr * self.rows];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef bmp = CGBitmapContextCreate([bits mutableBytes], self.cols, self.rows,
+                                             8, bpr, cs,
+                                             kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGColorSpaceRelease(cs);
+    *bitsOut = bits;
+    return bmp;
+}
+
+- (CALayer *)makeCardLayer:(UIImage *)shot frame:(CGRect)frame radius:(CGFloat)radius {
+    CALayer *card = [CALayer layer];
+    card.contents = (__bridge id)shot.CGImage;
+    card.contentsGravity = kCAGravityResizeAspectFill;
+    card.frame = frame;
+    card.masksToBounds = YES;
+    card.cornerRadius = radius;
+    card.shadowOpacity = 0.0f;
+    return card;
+}
+
+- (void)startOnWindow:(UIWindow *)win
+                 shot:(UIImage *)shot
+            fromFrame:(CGRect)fromFrame
+              toFrame:(CGRect)toFrame
+             duration:(NSTimeInterval)duration
+              density:(CGFloat)density
+               radius:(CGFloat)radius
+           departDir:(uint32_t)departDir
+            arriveDir:(uint32_t)arriveDir
+             tiltRad:(CGFloat)tiltRad
+             tiltDst:(BOOL)tiltDst {
+    self.win = win;
+    self.duration = duration;
+    self.departDir = departDir;
+    self.arriveDir = arriveDir;
+    self.tiltRad = tiltRad;
+    self.tiltDst = tiltDst;
+    self.srcW = fromFrame.size.width;  self.srcH = fromFrame.size.height;
+    self.dstW = toFrame.size.width;    self.dstH = toFrame.size.height;
+    self.corner = radius;
+    // 网格只作 mask 时钟；与 Metal openMode=3 的 22000*density / aspect 一致。
+    int particles = (int)lround(22000.0 * density);
+    if (particles < 200) particles = 200;
+    if (particles > 48000) particles = 48000;
+    CGFloat aspect = toFrame.size.height > 0.5 ? toFrame.size.width / toFrame.size.height : 1.0;
+    NSUInteger c = (NSUInteger)lround(sqrtf((float)particles * (float)aspect));
+    NSUInteger r = (NSUInteger)((particles + (int)c - 1) / (int)c);
+    if (c < 2) c = 2; if (c > 320) c = 320;
+    if (r < 2) r = 2; if (r > 320) r = 320;
+    self.cols = c; self.rows = r;
+
+    self.srcLayer = [self makeCardLayer:shot frame:fromFrame radius:radius];
+    self.dstLayer = [self makeCardLayer:shot frame:toFrame radius:radius];
+    CALayer *srcMask = [CALayer layer];
+    srcMask.frame = self.srcLayer.bounds;
+    srcMask.contentsGravity = kCAGravityResize;
+    CALayer *dstMask = [CALayer layer];
+    dstMask.frame = self.dstLayer.bounds;
+    dstMask.contentsGravity = kCAGravityResize;
+    self.srcLayer.mask = srcMask;
+    self.dstLayer.mask = dstMask;
+    [win.layer addSublayer:self.dstLayer];   // dst 在下，src 在上
+    [win.layer addSublayer:self.srcLayer];
+
+    self.srcBmp = [self makeBmpFor:&_srcBits];
+    self.dstBmp = [self makeBmpFor:&_dstBits];
+
+    // 起始：src 全显，dst 全隐。
+    [self paintSrc:0.0];
+    [self paintDst:0.0];
+
+    self.start = CACurrentMediaTime();
+    self.link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
+    [self.link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
+}
+
+// src: 按 depart 时钟逐格消隐（右上→左下先走），带圆角 SDF。
+- (void)paintSrc:(CGFloat)t {
+    CGContextRef ctx = self.srcBmp;
+    if (ctx == NULL) return;
+    NSUInteger cols = self.cols, rows = self.rows;
+    UInt8 *bytes = (UInt8 *)[self.srcBits mutableBytes];
+    size_t bpr = cols * 4;
+    memset(bytes, 0, bpr * rows);
+    for (NSUInteger cy = 0; cy < rows; cy++) {
+        CGFloat uy = (cy + 0.5f) / (CGFloat)rows;
+        UInt8 *row = bytes + cy * bpr;
+        for (NSUInteger cx = 0; cx < cols; cx++) {
+            CGFloat ux = (cx + 0.5f) / (CGFloat)cols;
+            uint32_t h = (uint32_t)cx * 73856093u ^ (uint32_t)cy * 19349663u ^ 83492791u;
+            h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
+            CGFloat hf = (CGFloat)(h & 0xffffu) / 65535.0f;
+            CGFloat order = 0.96f * axs_dock_order(ux, uy, self.departDir) + 0.04f * hf;
+            CGFloat depart = 0.02f + 0.50f * order;
+            CGFloat a = 1.0f - axs_dock_smooth(depart - 0.006f, depart + 0.006f, t);
+            // 圆角：角落外的格子永不显示
+            CGFloat px = ux * self.srcW, py = uy * self.srcH;
+            if (self.corner > 0.5f && self.srcW > 1.0f && self.srcH > 1.0f) {
+                CGFloat qx = fabs(px - self.srcW * 0.5f) - (self.srcW * 0.5f - self.corner);
+                CGFloat qy = fabs(py - self.srcH * 0.5f) - (self.srcH * 0.5f - self.corner);
+                CGFloat dxo = qx > 0 ? qx : 0, dyo = qy > 0 ? qy : 0;
+                CGFloat inner = qx > qy ? qx : qy;
+                CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo) + (inner < 0 ? inner : 0) - self.corner;
+                a *= 1.0f - axs_dock_smooth(-1.5f, 1.5f, dOut);
+            }
+            UInt8 av = (UInt8)(a * 255.0f);
+            UInt8 *q = row + cx * 4;
+            q[0] = av; q[1] = av; q[2] = av; q[3] = av;
+        }
+    }
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
+    if (img != NULL) {
+        self.srcLayer.mask.contents = (__bridge id)img;
+        CGImageRelease(img);
+    }
+}
+
+// dst: 按 arrive 时钟逐格显现（右上→左下 / 左下→右上），带圆角 SDF。
+- (void)paintDst:(CGFloat)t {
+    CGContextRef ctx = self.dstBmp;
+    if (ctx == NULL) return;
+    NSUInteger cols = self.cols, rows = self.rows;
+    UInt8 *bytes = (UInt8 *)[self.dstBits mutableBytes];
+    size_t bpr = cols * 4;
+    memset(bytes, 0, bpr * rows);
+    for (NSUInteger cy = 0; cy < rows; cy++) {
+        CGFloat uy = (cy + 0.5f) / (CGFloat)rows;
+        UInt8 *row = bytes + cy * bpr;
+        for (NSUInteger cx = 0; cx < cols; cx++) {
+            CGFloat ux = (cx + 0.5f) / (CGFloat)cols;
+            uint32_t h = (uint32_t)cx * 73856093u ^ (uint32_t)cy * 19349663u ^ 83492791u;
+            h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;
+            CGFloat hf = (CGFloat)(h & 0xffffu) / 65535.0f;
+            CGFloat order = 0.96f * axs_dock_order(ux, uy, self.arriveDir) + 0.04f * hf;
+            CGFloat arrive = 0.38f + 0.56f * order;
+            CGFloat a = axs_dock_smooth(arrive - 0.006f, arrive + 0.006f, t);
+            CGFloat px = ux * self.dstW, py = uy * self.dstH;
+            if (self.corner > 0.5f && self.dstW > 1.0f && self.dstH > 1.0f) {
+                CGFloat qx = fabs(px - self.dstW * 0.5f) - (self.dstW * 0.5f - self.corner);
+                CGFloat qy = fabs(py - self.dstH * 0.5f) - (self.dstH * 0.5f - self.corner);
+                CGFloat dxo = qx > 0 ? qx : 0, dyo = qy > 0 ? qy : 0;
+                CGFloat inner = qx > qy ? qx : qy;
+                CGFloat dOut = sqrtf(dxo * dxo + dyo * dyo) + (inner < 0 ? inner : 0) - self.corner;
+                a *= 1.0f - axs_dock_smooth(-1.5f, 1.5f, dOut);
+            }
+            UInt8 av = (UInt8)(a * 255.0f);
+            UInt8 *q = row + cx * 4;
+            q[0] = av; q[1] = av; q[2] = av; q[3] = av;
+        }
+    }
+    CGImageRef img = CGBitmapContextCreateImage(ctx);
+    if (img != NULL) {
+        self.dstLayer.mask.contents = (__bridge id)img;
+        CGImageRelease(img);
+    }
+}
+
+- (void)tick:(CADisplayLink *)link {
+    @try {
+        CFTimeInterval elapsed = CACurrentMediaTime() - self.start;
+        CGFloat t = self.duration > 0 ? (CGFloat)(elapsed / self.duration) : 1.0f;
+        if (t < 0) t = 0; if (t > 1) t = 1;
+        [self paintSrc:t];
+        [self paintDst:t];
+        // 飞行途中侧倾：dst(浮→侧) 从 0 渐变到侧窗角；src(侧→浮) 从侧窗角回到 0。
+        CGFloat ease = t * t * (3.0f - 2.0f * t);
+        CGFloat rad = self.tiltDst ? (ease * self.tiltRad) : ((1.0f - ease) * self.tiltRad);
+        CATransform3D persp = CATransform3DIdentity; persp.m34 = -1.0 / 600.0;
+        CATransform3D rot = CATransform3DRotate(CATransform3DIdentity, rad, 0, 1, 0);
+        CATransform3D comb = CATransform3DConcat(persp, rot);
+        if (self.tiltDst) self.dstLayer.transform = comb;
+        else              self.srcLayer.transform = comb;
+        if (t >= 1.0) {
+            [self paintSrc:1.0];
+            [self paintDst:1.0];
+        }
+    } @catch (NSException *ignored) {
+        [self stop];
+    }
+}
+
+- (void)stop {
+    @try {
+        [_link invalidate]; _link = nil;
+        CALayer *s = self.srcLayer, *d = self.dstLayer;
+        s.opacity = 0.0f; d.opacity = 0.0f;
+        [s removeFromSuperlayer];
+        [d removeFromSuperlayer];
+        if (_srcBmp != NULL) { CGContextRelease(_srcBmp); _srcBmp = NULL; }
+        if (_dstBmp != NULL) { CGContextRelease(_dstBmp); _dstBmp = NULL; }
+        self.srcBits = nil; self.dstBits = nil;
+    } @catch (NSException *ignored) { }
+}
+@end
+
+static char axs_dock_flightDriverKey;
+
 // ===== beautify.228: 浮窗→侧窗 粒子聚合 ====================================
 // 由 AxsBeautifyRing.xm 的 dock 翻转检测调用（浮窗变侧窗的那一帧）。
 // 视觉：浮窗内容碎成粒子 → 从浮窗原位置飞向侧边 → 聚合成侧窗矩形 →
@@ -2028,12 +2290,19 @@ static id axs_dock_pref(NSString *key, id def) {
 // beautify.231: 参考视频——源窗从右上→左下逐批消散，先走的粒子先飞，
 // 后面的接着飞；目标窗按方向逐批聚合。原生 position/transform 动画不再被
 // 吞掉，照常跑完，只改容器可见性（layer mask），让状态机保持原生行为。
+// container : SCFloatingContainerView（浮窗容器）
+// fromFrame : 消散源矩形（window 坐标）——浮窗或侧窗
+// toFrame   : 聚合目标矩形（window 坐标）
+// toDock    : YES=浮窗→侧窗；NO=侧窗→浮窗
+// beautify.232: 参考视频——真实窗口连续飞过去且飞行途中侧倾，粒子只在
+// 右上→左下斜向边界做消散/聚合细沙。真容器在飞行期间隐藏，两张完整快照
+// 图层按 per-cell mask 逐格交接（呼出动画同款），杜绝网格拼图感。
 void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock) {
     @try {
         if (container == nil || container.window == nil) return;
         id sw = axs_dock_pref(@"splitBeautifyDockAnimEnabled", @NO);
         if (![sw isKindOfClass:[NSNumber class]] || ![sw boolValue]) {
-            axs_dm_log(@"DOCK TRANSFER skipped (switch off)");
+            axs_dm_log(@"DOCK FLIGHT skipped (switch off)");
             return;
         }
         if (axs_dock_assembleInFlight) return;
@@ -2057,52 +2326,85 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         if (toFrame.size.width < 8.0 || toFrame.size.height < 8.0) return;
         if (CGRectIsEmpty(fromFrame)) fromFrame = toFrame;
 
-        // 纹理：统一用浮窗缓存快照（浮窗与侧窗内容相同，只是几何不同）
+        // 纹理：完整浮窗快照（图层本体是一整张连续图，不是网格 quad）
         UIImage *shot = axs_open_cachedCardSnapshotForView(container);
         if (shot == nil) shot = axs_open_captureVisibleCardCheap(container);
         if (shot == nil) shot = axs_dm_snapshot(container);
         if (shot == nil) {
-            axs_dm_log(@"DOCK TRANSFER skipped (no snapshot)");
+            axs_dm_log(@"DOCK FLIGHT skipped (no snapshot)");
             return;
         }
         shot = axs_dm_fixSnapshotCorners(shot, container);
         if (shot == nil) return;
 
-        // 隐藏真容器，让粒子独占两端画面；聚合完成后恢复
+        UIWindow *win = container.window;
+        CGFloat radius = axs_dm_cornerRadiusForView(container);
+
+        // 侧倾方向：右贴 sideSign=-1（朝中心左倾），左贴 +1；有效角度 = 配置 * 2.6，
+        // 与现有 tilt 视觉一致（约 15°）。飞行途中从 0 渐变到该角。
+        CGFloat sw = win.bounds.size.width;
+        BOOL rightSide = ((toDock ? toFrame : fromFrame).origin.x + (toDock ? toFrame : fromFrame).size.width * 0.5f) > sw * 0.5f;
+        CGFloat tiltRad = (rightSide ? -1.0 : 1.0) * (3.0 * 2.6) * M_PI / 180.0;
+
+        // 隐藏真容器：两端由飞行快照图层 + 原生侧窗项接管，避免重影。
         CALayer *hideAll = [CALayer layer];
         hideAll.frame = container.bounds;
         hideAll.backgroundColor = [UIColor clearColor].CGColor;
         container.layer.mask = hideAll;
         objc_setAssociatedObject(container, &axs_dock_assembleMaskKey, hideAll,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        // .231: 用户要求不要 hook/吞掉原生动画，原生 spring 照常执行。
         axs_msd_setCornerKill(0u, 0.0f);
 
         // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)，
         // 侧窗→浮窗目标左下→右上(4)。
         uint32_t departDir = 3u;
         uint32_t arriveDir = toDock ? 3u : 4u;
-        axs_dock_assembleInFlight = YES;
-        axs_dm_log(@"DOCK TRANSFER play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f staged=1 native=1",
-                   NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
-                   toDock ? 1 : 0, departDir, arriveDir, duration, density);
+
+        // 边界细沙粒子（shader openMode=3，只画飞行粒子，不铺整窗）
         void *renderer = axs_metalDockTransferPlayRet(shot, fromFrame, toFrame,
                                                       duration, density, departDir, arriveDir);
         if (renderer == nil) {
-            axs_dm_log(@"DOCK TRANSFER metal failed -> restore card");
+            axs_dm_log(@"DOCK FLIGHT metal unavailable -> card restore");
             @try { container.layer.mask = nil; } @catch (NSException *ignored) { }
-            axs_dock_assembleInFlight = NO;
             return;
         }
+
+        // 两张完整快照图层的 per-cell 交接（真窗口视觉）+ 飞行侧倾
+        AXSDockFlightDriver *driver = [AXSDockFlightDriver new];
+        [driver startOnWindow:win
+                         shot:shot
+                    fromFrame:fromFrame
+                      toFrame:toFrame
+                     duration:duration
+                      density:density
+                       radius:radius
+                   departDir:departDir
+                    arriveDir:arriveDir
+                     tiltRad:tiltRad
+                     tiltDst:toDock];
+        objc_setAssociatedObject(container, &axs_dock_flightDriverKey, driver,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+        axs_dock_assembleInFlight = YES;
+        axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f tilt=%.1f real-card",
+                   NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
+                   toDock ? 1 : 0, departDir, arriveDir, duration, density, tiltRad * 180.0 / M_PI);
+
         __weak UIView *wcard = container;
         __weak CALayer *wmask = hideAll;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                     (int64_t)((duration + 0.10) * NSEC_PER_SEC)),
+                                     (int64_t)((duration + 0.12) * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             @try {
                 UIView *c = wcard;
                 CALayer *m = wmask;
-                if (c != nil && m != nil && c.layer.mask == m) c.layer.mask = nil;
+                if (c != nil) {
+                    AXSDockFlightDriver *drv = objc_getAssociatedObject(c, &axs_dock_flightDriverKey);
+                    [drv stop];
+                    objc_setAssociatedObject(c, &axs_dock_flightDriverKey, nil,
+                                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    if (m != nil && c.layer.mask == m) c.layer.mask = nil;
+                }
             } @catch (NSException *ignored) { }
             axs_dock_assembleInFlight = NO;
         });

@@ -785,20 +785,10 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     if (enc == nil) return NO;
     [enc setRenderPipelineState:sMsdPipeline];
     [enc setFragmentTexture:self.texture atIndex:0];
-    uint32_t savedOpenMode = _u.openMode;
-    if (savedOpenMode == 3u) {
-        // .231: staged wave -- draw the still-intact source card behind the
-        // dissolve front, then the growing target card, then the flying grains.
-        for (uint32_t pass = 4u; pass <= 5u; pass++) {
-            _u.openMode = pass;
-            [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
-            [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
-            [enc drawPrimitives:MTLPrimitiveTypeTriangle
-                    vertexStart:0 vertexCount:6
-                  instanceCount:(NSUInteger)(_u.columns * _u.rows)];
-        }
-        _u.openMode = savedOpenMode;
-    }
+    // .232: the two window bodies are now REAL full snapshot layers driven by
+    // AXSDockFlightDriver (per-cell reveal + in-flight tilt). Metal draws ONLY
+    // the flying edge-sand grains (openMode=3) -- no tiled quad carpeting that
+    // read as a puzzle. openMode 4/5 shader branches are kept for reference.
     [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     // .156: the open fragment reads u.seed/u.time for the sparkle phase;
     // without this binding the whole shader failed to compile and BOTH
@@ -1066,10 +1056,12 @@ BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration
                                sourcePoint);
 }
 
-// beautify.231: staged rect-to-rect particle transfer for float<->dock.
-// A cell leaves the source only when the dissolve front reaches it, flies to
-// its matching target cell, and deposits there; the source stays intact behind
-// the front and the target grows cell by cell. No whole-plane translation.
+// beautify.232: edge-sand rect-to-rect particle flight for float<->dock.
+// The two window BODIES are real full snapshot layers (AXSDockFlightDriver);
+// Metal draws only the grains peeling off the dissolve front and landing on
+// the arrival front. A cell leaves its source cell only when the front reaches
+// it and flies point-to-point to its matching target cell. No tiled quad
+// carpeting (that read as a puzzle), no whole-plane translation.
 // departDir/arriveDir are the 0..7 diagonal order modes (3 = TR->BL, 4 = BL->TR).
 void *axs_metalDockTransferPlayRet(UIImage *shot, CGRect fromFrame, CGRect toFrame,
                                    CGFloat duration, CGFloat density,

@@ -1,3 +1,17 @@
+beautify.232 变更（浮窗↔侧窗改为真实窗口飞行 + 侧倾 + 边界细沙）：
+- 用户反馈 .231「像拼图一样飞过去、飞成侧窗还是正面、要真实浮窗飞过去像呼出动画」。
+- 根因：.231 的 shader pass4/pass5 把源窗/目标窗按 149x320 网格 quad 整面铺图
+  （拼图感）；真容器被 hideAll 全藏；终点画正面矩形；原生 transform 被 open
+  遗留 interceptUntil 吞掉（日志 OPEN native animation replaced key=transform）。
+- 修复 1：新增 AXSDockFlightDriver——两张完整快照图层（src 在 fromFrame 按
+  departDir 逐格消隐、dst 在 toFrame 按 arriveDir 逐格显现），per-cell bitmap
+  mask 时钟与 shader 的 axsTransferDepart/Arrive 完全一致（呼出动画同款真窗口视觉）。
+- 修复 2：飞行途中 dst(浮→侧)/src(侧→浮) 施加 rotationY + m34 透视侧倾，从 0
+  渐变到侧窗角（配置角度*2.6，右贴朝中心），到达即侧倾形态，不再是正面。
+- 修复 3：shader renderOnce 去掉 pass4/pass5 整面铺图，Metal 只画 openMode=3
+  边界飞行细沙（点对点直飞、逐批时钟不变）。窗口本体始终是一整张连续图。
+- 速度/密度滑条不变，继续控制 duration/mask 网格密度。
+
 beautify.231 变更（浮窗↔侧窗逐批粒子转换，原生动画不再被吞）：
 - 根因：.230 的 DOCK TRANSFER 每次都打印 "metal failed -> restore card"——
   openMode=3 的渲染器句柄仍只从 openMode=1 槽位读取，返回 NULL 后回退到
