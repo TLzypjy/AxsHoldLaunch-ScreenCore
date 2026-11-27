@@ -1999,6 +1999,8 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 }
 
 // ===== beautify.235: 浮窗↔侧窗 混合架构（快照源消散 + 真视图逐帧揭示） ========
+// 前置声明：定义在 dock 入口段（本块 reassertDst 每 tick 重找 docked item 用）。
+static UIView *axs_dock_findDockedItem(UIWindow *win, CGRect targetFrame);
 // .234 实测结论（视频 86 + 日志 86 对齐）：
 //   - 浮→侧：触发瞬间原生已把容器 frame 缩成侧窗（原生 dock spring 被
 //     interceptUntil 吞掉→跳变），容器上的消散 mask 无效 → 浮窗整块瞬间消失；
