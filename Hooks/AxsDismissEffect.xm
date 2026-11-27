@@ -684,6 +684,14 @@ static CFAbsoluteTime axs_open_arcIconPosAt = 0;
 static IMP axs_open_orig_setHidden = NULL;   // NULL = not installed; (IMP)1 = class_addMethod super-forward
 static CFAbsoluteTime axs_dock_dockedStateAt = 0;   // .241: 进入 dock 态的时刻（.255 hook 的 settle 窗口也读）
 static BOOL axs_dock_dumpDoneForSession = NO;       // .258: 每次 dock 会话只转储一次
+// .259: 可见 docked 卡片=SCFloatingContainerView（DUMP2 铁证：item 只有占位
+// 图标，container 承载 App 场景内容）。tilt 施加到 container 本体，组合其
+// 原生缩放 base；离开 dock 态恢复 base。
+static CATransform3D axs_dock_containerNativeBase = CATransform3DIdentity;
+static BOOL axs_dock_containerBaseValid = NO;
+static UIImage *axs_dock_dockedShotCache = nil;     // 稳态侧倾观感缓存（+1.5s 捕获）
+static BOOL axs_dock_dockedShotValid = NO;
+static UIView *axs_dock_findContainerInWindow(UIWindow *win);
 static IMP axs_open_orig_didMove = NULL;
 
 static BOOL axs_open_enabled(void) {
@@ -2133,6 +2141,8 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 // .256: 目标侧快照——侧倾观感直接烤进图片（fwd=宿主 tilt 后的 docked 观感，
 // rev=宿主复位后的浮窗观感），飞行层不再自带 transform，交接零跳变。
 @property (nonatomic, strong) UIImage *dstShot;
+// .259: dock 侧层透视缩放比 s=dockW/floatW（S·M·S⁻¹ 等效 container tilt 观感）
+@property (nonatomic, assign) CGFloat perspScale;
 - (void)startWithWindow:(UIWindow *)window
                 srcShot:(UIImage *)srcShot
                 dstShot:(UIImage *)dstShot
@@ -2145,7 +2155,8 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
                 srcTilt:(CGFloat)srcTiltRad
                 dstTilt:(CGFloat)dstTiltRad
               departDir:(uint32_t)departDir
-              arriveDir:(uint32_t)arriveDir;
+              arriveDir:(uint32_t)arriveDir
+             perspScale:(CGFloat)perspScale;
 - (void)stop;
 @end
 
@@ -2179,6 +2190,19 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
     tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
     return tiltRotation;
+}
+// .259: 缩放等效矩阵——container tilt 作用于 App 尺寸 bounds 空间再被
+// dock 缩放 s 呈现；飞行 dock 侧层（内容已预缩放到 dock 尺寸）用
+// M'=S·M·S⁻¹（m14/m34 同乘 s）达到同一屏幕观感。
+static CATransform3D axs_dock_tiltMatrixScaled(CGFloat rad, CGFloat s) {
+    if (s < 0.05f) s = 0.05f;
+    if (s > 1.0f) s = 1.0f;
+    CATransform3D m = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
+    CGFloat sinRad = (CGFloat)sin(rad);
+    CGFloat cosRad = (CGFloat)cos(rad);
+    m.m14 = -sinRad * (-s / 600.0);
+    m.m34 =  cosRad * (-s / 600.0);
+    return m;
 }
 
 @implementation AXSDockFlightDriver
@@ -2228,7 +2252,7 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     self.srcMaskLayer.frame = self.srcLayer.bounds;
     self.srcMaskLayer.contentsGravity = kCAGravityResize;
     self.srcLayer.mask = self.srcMaskLayer;
-    if (self.srcTiltRad != 0.0f) self.srcLayer.transform = axs_dock_tiltMatrix(self.srcTiltRad);
+    if (self.srcTiltRad != 0.0f) self.srcLayer.transform = axs_dock_tiltMatrixScaled(self.srcTiltRad, self.perspScale);
     @try { [self.win.layer insertSublayer:self.srcLayer atIndex:0]; } @catch (NSException *ignored) { }
 
     UIImage *dImg = self.dstShot ?: self.srcShot;
@@ -2237,7 +2261,7 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     self.dstMaskLayer.frame = self.dstLayer.bounds;
     self.dstMaskLayer.contentsGravity = kCAGravityResize;
     self.dstLayer.mask = self.dstMaskLayer;
-    if (self.dstTiltRad != 0.0f) self.dstLayer.transform = axs_dock_tiltMatrix(self.dstTiltRad);
+    if (self.dstTiltRad != 0.0f) self.dstLayer.transform = axs_dock_tiltMatrixScaled(self.dstTiltRad, self.perspScale);
     @try { [self.win.layer addSublayer:self.dstLayer]; } @catch (NSException *ignored) { }
 }
 
@@ -2253,7 +2277,8 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
                 srcTilt:(CGFloat)srcTiltRad
                 dstTilt:(CGFloat)dstTiltRad
               departDir:(uint32_t)departDir
-              arriveDir:(uint32_t)arriveDir {
+              arriveDir:(uint32_t)arriveDir
+             perspScale:(CGFloat)perspScale {
     self.win = window;
     self.srcShot = srcShot;
     self.dstShot = dstShot;
@@ -2264,6 +2289,7 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
     self.dstTiltRad = dstTiltRad;
     self.departDir = departDir;
     self.arriveDir = arriveDir;
+    self.perspScale = perspScale;
     // 网格与 Metal openMode=3 的 22000*density / aspect 对齐。
     int particles = (int)lround(22000.0 * density);
     if (particles < 200) particles = 200;
@@ -2609,40 +2635,53 @@ static void axs_dock_dumpDockedTree(UIView *root) {
     } @catch (NSException *ignored) { }
 }
 
+// .259: docked 态每帧把透视 tilt 施加到【SCFloatingContainerView 本体】——
+// DUMP2 铁证：可见 docked 卡片=container（App 场景内容在其内，d7 缩放 0.613），
+// item 只是「hidden UIView + 28x28 图标」的占位兄弟视图，tilt 它毫无视觉效果
+// （.251/.256 移除 item tilt 后侧倾变化的真正原因是：旧代码把 container 的
+// transform 当成 item 链一部分的假设错了）。tilt 与 container 的原生缩放 base
+// （m11=0.334）复合，离开 dock 态恢复 base。
+static UIView *axs_dock_findContainerInWindow(UIWindow *win) {
+    @try {
+        NSMutableArray *stack = [NSMutableArray arrayWithObject:win];
+        int guardN = 0;
+        while (stack.count > 0 && guardN++ < 600) {
+            UIView *v = [stack lastObject];
+            [stack removeLastObject];
+            if (v == nil) continue;
+            if (strcmp(object_getClassName(v), "SCFloatingContainerView") == 0) return v;
+            [stack addObjectsFromArray:v.subviews];
+        }
+    } @catch (NSException *ignored) { }
+    return nil;
+}
+
 void axs_dock_enforceDockedItemTilt(void) {
     @try {
-        if (!axs_dock_dockedState || axs_dock_lastWindow == nil) return;
-        // .239: 对窗口树内【全部】DockedFloatingItem 实例施加 tilt——原生可能
-        // 重建实例，只 tilt 最近匹配会把 transform 留在被替换的旧实例上。
-        NSMutableArray *items = [NSMutableArray array];
-        @try {
-            NSMutableArray *stack = [NSMutableArray arrayWithObject:axs_dock_lastWindow];
-            int guardN = 0;
-            while (stack.count > 0 && guardN++ < 600) {
-                UIView *v = [stack lastObject];
-                [stack removeLastObject];
-                if (v == nil) continue;
-                if ([NSStringFromClass(v.class)
-                     rangeOfString:@"DockedFloatingItem"].location != NSNotFound) {
-                    [items addObject:v];
-                }
-                [stack addObjectsFromArray:v.subviews];
+        // .259: 非 dock 态自愈——closeSession 从 dock 直接关闭不经过 reverse
+        // 分支时，这里把 container transform 复位回原生 base。
+        if (!axs_dock_dockedState) {
+            if (axs_dock_containerBaseValid && axs_dock_lastWindow != nil) {
+                UIView *c = axs_dock_findContainerInWindow(axs_dock_lastWindow);
+                if (c != nil && c.layer != nil) c.layer.transform = axs_dock_containerNativeBase;
             }
-        } @catch (NSException *ignored) { }
-        if (items.count == 0) return;
-        // 与 AxsBeautifyRing.axs_ring_applyTilt 逐字同款：GAIN 2.6 + 显式 m14/m34。
+            axs_dock_containerBaseValid = NO;
+            return;
+        }
+        if (axs_dock_lastWindow == nil) return;
+        UIView *container = axs_dock_findContainerInWindow(axs_dock_lastWindow);
+        if (container == nil || container.layer == nil) return;
+        if (container.hidden) container.hidden = NO;   // docked 态 container 必须可见
+        // base 首次缓存（原生缩放 m11=0.334 等）
+        if (!axs_dock_containerBaseValid) {
+            axs_dock_containerNativeBase = container.layer.transform;
+            axs_dock_containerBaseValid = YES;
+        }
+        // 角度：container 屏幕中心在右 -> 负向（与旧 item 公式同源）
         CGFloat sw = axs_dock_lastWindow.bounds.size.width;
-        CGRect f0 = [(UIView *)items[0] convertRect:[(UIView *)items[0] bounds] toView:nil];
+        CGRect f0 = [container convertRect:container.bounds toView:nil];
         BOOL rightSide = (f0.origin.x + f0.size.width * 0.5f) > sw * 0.5f;
         CGFloat rad = (rightSide ? -1.0 : 1.0) * axs_dock_tiltAngleCfg() * 2.6 * M_PI / 180.0;
-        // .252: item 本体 tilt 恢复（.251 摘除后用户实测侧窗倾斜消失——可见
-        // 侧倾一直由 item 本体承担，场景栈 tilt 在 Dock 通道镜像里不可见）。
-        // 但去掉 m14/m34 透视项：.250 的「点不了」正是带透视的 item tilt 破坏
-        // Dock 通道触摸映射所致（.251 去掉 item tilt 后点击恢复，winHid=0
-        // 证明宿主窗口可见、hitView=nil 是桥接正常现象）。纯旋转矩阵可逆，
-        // hit-test 可存活。
-        // .257: item tilt 恢复透视（与 .249 时代同款）——纯旋转在视觉上近似
-        // 正面（仅 4% 宽度挤压），梯形观感必须靠 m14/m34。
         CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
         {
             CGFloat sinRad = (CGFloat)sin(rad);
@@ -2650,31 +2689,38 @@ void axs_dock_enforceDockedItemTilt(void) {
             tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
             tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
         }
+        // tilt = nativeBase ∘ tilt（保留原生缩放；tilt 作用于 container 自身的
+        // App 尺寸 bounds 空间——与 ring 宿主 tilt 同空间同观感）
+        container.layer.transform = CATransform3DConcat(axs_dock_containerNativeBase, tiltRotation);
         static CFTimeInterval axs_dock_enforceLogAt = 0;
         BOOL logNow = (CACurrentMediaTime() - axs_dock_enforceLogAt > 1.0);
-        for (UIView *item in items) {
-            if (item == nil || item.layer == nil) continue;
-            if (item.hidden) item.hidden = NO;   // 侧窗本体应可见
-            // .257: item 本体透视 tilt 恢复——可见侧倾的真实来源（.256 实证：
-            // item=identity 时聚合是正面、揭示后才「闪成侧倾」，tilt 源在 dock
-            // 通道/原生延迟呈现，容器截图捕获不到）。tap 安全的真正前提是
-            // .255 的吞窗 4s 限界（log106 弹簧吞食实锤），不是 item 无透视。
-            item.layer.transform = tiltRotation;
-            if (logNow) {
-                NSMutableString *kids = [NSMutableString string];
-                for (UIView *sub in item.subviews) {
-                    [kids appendFormat:@"%@(hidden=%d) ", NSStringFromClass(sub.class), sub.hidden ? 1 : 0];
-                }
-                NSUInteger sceneN = (NSUInteger)axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect).count;
-                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=persp itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
-                           (unsigned long)items.count, rad * 180.0 / M_PI,
-                           item.hidden ? 1 : 0,
-                           axs_dock_lastWindow.hidden ? 1 : 0,
-                           kids,
-                           (unsigned long)sceneN);
+        if (logNow) {
+            NSUInteger sceneN = (NSUInteger)axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect).count;
+            axs_dm_log(@"DOCK ENFORCE items=0 tilt=%.1f contTilt=on baseValid=%d contHid=%d winHid=%d sceneRoots=%lu",
+                       rad * 180.0 / M_PI,
+                       axs_dock_containerBaseValid ? 1 : 0,
+                       container.hidden ? 1 : 0,
+                       axs_dock_lastWindow.hidden ? 1 : 0,
+                       (unsigned long)sceneN);
+            axs_dock_enforceLogAt = CACurrentMediaTime();
+        }
+        // .259: docked 态 +1.5s 缓存「无 tilt 基础图」（反向消散源用）——
+        // 先临时复位 container transform 再拍再恢复，保证图里不含 tilt
+        //（反向 src 层的侧倾由缩放矩阵呈现，避免双重叠加）。
+        if (!axs_dock_dockedShotValid
+            && (CACurrentMediaTime() - axs_dock_dockedStateAt) > 1.5) {
+            container.layer.transform = axs_dock_containerNativeBase;
+            UIImage *shot = axs_open_captureVisibleCardCheap(container);
+            container.layer.transform = CATransform3DConcat(
+                axs_dock_containerNativeBase, tiltRotation);
+            if (shot != nil) {
+                axs_dock_dockedShotCache = shot;
+                axs_dock_dockedShotValid = YES;
+                axs_dm_log(@"DOCK ENFORCE dockedShot cached %zux%zu",
+                           (size_t)CGImageGetWidth(shot.CGImage),
+                           (size_t)CGImageGetHeight(shot.CGImage));
             }
         }
-        if (logNow) axs_dock_enforceLogAt = CACurrentMediaTime();
         // .258: docked 态 +2s 一次性深转储（每次 dock 会话一次）
         if (!axs_dock_dumpDoneForSession
             && (CACurrentMediaTime() - axs_dock_dockedStateAt) > 2.0) {
@@ -2682,9 +2728,6 @@ void axs_dock_enforceDockedItemTilt(void) {
             axs_dm_log(@"DOCK DUMP2 begin (dockedStateAt+2s)");
             axs_dock_dumpDockedTree(axs_dock_lastWindow);
         }
-        // .252: 场景栈 tilt 移除。.251 实测它对 Dock 通道镜像完全不可见
-        //（item tilt 摘掉后用户报告倾斜消失，sceneRoots=2 仍在 tilt 却没有
-        // 视觉），却会污染桥接的坐标映射（点击可用但手势全失效）。纯害无利。
     } @catch (NSException *ignored) { }
 }
 
@@ -2752,6 +2795,11 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             axs_dock_dockedState = NO;
             axs_dock_dumpDoneForSession = NO;   // .258: 下次 dock 会话重新转储
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;
+            // .259: 离开 dock 态——container transform 恢复原生 base
+            if (axs_dock_containerBaseValid) {
+                container.layer.transform = axs_dock_containerNativeBase;
+                axs_dock_containerBaseValid = NO;
+            }
             for (UIView *rootView in axs_dock_sceneRootsAt(win, axs_dock_lastDockFrameRect)) {
                 rootView.layer.transform = CATransform3DIdentity;   // 场景栈交还原生
             }
@@ -2820,14 +2868,17 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         uint32_t departDir = 3u;
         uint32_t arriveDir = 3u;
 
-        // .256: 双快照烤 tilt。宿主 tilt（ring 透视）施加在 App 尺寸空间再被
-        // dock 缩放呈现，与飞行层自带的 transform 矩阵观感不一致（跳变/半张
-        // 斜卡的根源）——改为把 tilt 直接烤进图片，所有飞行层 transform 归零：
-        //   fwd：先捕浮窗正面图（宿主此刻尚未 tilt）→ forceTiltSync 施加宿主
-        //        tilt → 捕 docked 侧倾图（=聚合完成后的最终观感，逐像素一致）；
-        //   rev：先捕 docked 当前真实观感（可能已被原生 pop 转正，烤进去就是
-        //        用户看到的）→ forceTiltSync 复位宿主 → 捕浮窗正面图。
-        axs_ring_forceTiltOff();   // 确定化起点：宿主 tilt 一律先复位
+        // .259: 捕获序列（DUMP2 铁证：可见 docked 卡片=container 本体）。
+        // 所有快照都在「container transform=原生 base（无 tilt）」的确定状态
+        // 下捕获；侧倾由飞行 dock 侧层的缩放等效矩阵（S·M·S⁻¹，m14/m34 同乘
+        // s=dockW/floatW）呈现，与 container tilt 的屏幕观感一致。
+        axs_ring_forceTiltOff();   // ring 宿主 tilt 抑制（若开关开着，避免叠加）
+        if (axs_dock_containerBaseValid) {
+            container.layer.transform = axs_dock_containerNativeBase;   // 确定化：先无 tilt
+        } else {
+            axs_dock_containerNativeBase = container.layer.transform;
+            axs_dock_containerBaseValid = YES;
+        }
         UIImage *srcShot = axs_open_captureVisibleCardCheap(container);
         if (srcShot == nil) srcShot = axs_open_cachedCardSnapshotForView(container);
         if (srcShot == nil) srcShot = axs_dm_snapshot(container);
@@ -2838,23 +2889,28 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         }
         UIImage *dstShot = nil;
         if (toDock) {
-            axs_open_cacheCardSnapshot(container, srcShot);   // .257: 浮窗正面图入缓存，供反向终点复用
-            dstShot = axs_open_captureVisibleCardCheap(container);
+            // fwd：baseShot=浮窗正面（消散源+粒子纹理），入缓存供反向终点复用；
+            // dst 层=同图+缩放侧倾矩阵（=container tilt 的屏幕观感）。
+            axs_open_cacheCardSnapshot(container, srcShot);
+            dstShot = srcShot;
+            // 施加 container tilt（docked 态观感；ENFORCE 之后按帧维持）
+            container.layer.transform = CATransform3DConcat(
+                axs_dock_containerNativeBase, axs_dock_tiltMatrix(dockTilt));
         } else {
-            // .257: 浮窗聚合终点图改用【缓存的浮窗快照】优先——.256 实证 flip
-            // 时刻的现拍常为半透明（log108 opaque=0×2，原生 pop 中间态），
-            // 缓存是上次浮窗态刷新的干净正面图；无缓存才回退现拍。
-            axs_ring_forceTiltSync();          // 恢复 ring 正常运转
+            // rev：src 层=docked 稳态侧倾缓存（+1.5s 确定性图源，不依赖 flip
+            // 时刻现拍——log108 实证其为半透明）；dst 层=缓存的浮窗正面图。
+            if (axs_dock_dockedShotValid && axs_dock_dockedShotCache != nil) {
+                srcShot = axs_dock_dockedShotCache;
+            }
             UIImage *cached = axs_open_cachedCardSnapshotForView(container);
-            UIImage *fresh = axs_open_captureVisibleCardCheap(container);
-            dstShot = (cached != nil) ? cached : ((fresh != nil) ? fresh : srcShot);
+            if (cached != nil) dstShot = cached;
         }
+        axs_ring_forceTiltSync();   // 恢复 ring 正常运转（suppress 不残留）
         if (dstShot == nil) dstShot = srcShot;
         void *renderer = axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame,
                                                       duration, density, departDir, arriveDir);
         if (renderer == nil) {
             axs_dm_log(@"DOCK FLIGHT metal unavailable -> native restore");
-            axs_ring_forceTiltSync();   // .256: 恢复宿主 tilt，绝不留在 suppress 态
             return;
         }
 
@@ -2880,7 +2936,9 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                         srcTilt:srcTiltRad
                         dstTilt:dstTiltRad
                       departDir:departDir
-                      arriveDir:arriveDir];
+                      arriveDir:arriveDir
+                     perspScale:(toDock ? toFrame.size.width / fromFrame.size.width
+                                 : fromFrame.size.width / toFrame.size.width)];
         objc_setAssociatedObject(container, &axs_dock_flightDriverKey, driver,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 

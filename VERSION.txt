@@ -1,3 +1,18 @@
+beautify.259 变更（DUMP2 落地修复：tilt 施加到 container 本体）：
+- DOCK DUMP2 铁证（log110）：可见 docked 卡片=SCFloatingContainerView（App 场景
+  内容 d7 在其内，container m11=0.334 原生缩放）；SCDockedFloatingItemView 是
+  兄弟占位视图（子树=hidden UIView+28x28 图标），tilt 它毫无视觉效果——
+  历代「item tilt」的全部跳变/半倾斜都源于这个模型错误。
+- 修复：a) ENFORCE 改为对 container 施加透视 tilt（nativeBase∘tilt 复合，
+  离开 dock 态恢复 base，非 dock 自愈复位）；b) item tilt/搜索移除；
+  c) 飞行 dock 侧层用缩放等效矩阵 axs_dock_tiltMatrixScaled（S·M·S⁻¹，
+  m14/m34 同乘 s=dockW/floatW）——与 container tilt 屏幕观感一致；
+  d) docked 态 +1.5s 缓存「无 tilt 基础图」（临时复位→拍→恢复）作为反向
+  消散源（flip 时刻现拍=原生 pop 中间态不可用，log108 实证）；
+  e) ring forceTiltOff/Sync 保留用于捕获期抑制宿主 tilt 叠加。
+- 保持：等比圆角、到达顺序、吞窗 4s 限界、probeBoost、飞行隐藏/揭示、
+  反向终点图用缓存浮窗快照。
+
 beautify.258 变更（docked 态深转储：定位可见侧倾的真实载体）：
 - 用户反馈 .257：聚合时侧窗是侧倾（飞行层矩阵生效 ✓）但聚合完成后变正面；
   点击侧窗时侧窗跳变一下再开始转。ENFORCE 每帧给 item 施透视 tilt，但用户
