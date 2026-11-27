@@ -2025,8 +2025,9 @@ static id axs_dock_pref(NSString *key, id def) {
 // fromFrame : 消散源矩形（window 坐标）——浮窗或侧窗
 // toFrame   : 聚合目标矩形（window 坐标）
 // toDock    : YES=浮窗→侧窗；NO=侧窗→浮窗
-// beautify.230: 参考视频——源窗从右上→左下依次消散，粒子点对点直飞，
-// 目标窗按方向依次聚合（浮窗→侧窗右上→左下；侧窗→浮窗左下→右上）。
+// beautify.231: 参考视频——源窗从右上→左下逐批消散，先走的粒子先飞，
+// 后面的接着飞；目标窗按方向逐批聚合。原生 position/transform 动画不再被
+// 吞掉，照常跑完，只改容器可见性（layer mask），让状态机保持原生行为。
 void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, BOOL toDock) {
     @try {
         if (container == nil || container.window == nil) return;
@@ -2074,7 +2075,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         container.layer.mask = hideAll;
         objc_setAssociatedObject(container, &axs_dock_assembleMaskKey, hideAll,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        axs_open_interceptUntil = CACurrentMediaTime() + duration + 1.5;
+        // .231: 用户要求不要 hook/吞掉原生动画，原生 spring 照常执行。
         axs_msd_setCornerKill(0u, 0.0f);
 
         // 方向：源端总是右上→左下(3)；浮窗→侧窗目标右上→左下(3)，
@@ -2082,7 +2083,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         uint32_t departDir = 3u;
         uint32_t arriveDir = toDock ? 3u : 4u;
         axs_dock_assembleInFlight = YES;
-        axs_dm_log(@"DOCK TRANSFER play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f",
+        axs_dm_log(@"DOCK TRANSFER play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f staged=1 native=1",
                    NSStringFromCGRect(fromFrame), NSStringFromCGRect(toFrame),
                    toDock ? 1 : 0, departDir, arriveDir, duration, density);
         void *renderer = axs_metalDockTransferPlayRet(shot, fromFrame, toFrame,

@@ -126,6 +126,23 @@ float axsTransferOrder(float2 unit, uint mode) {\n\
     if (mode == 5u) return ((1.0-unit.x)+(1.0-unit.y))*0.5;\n\
     return ((1.0-unit.x)+unit.y)*0.5;\n\
 }\n\
+float axsTransferHash(float2 cell) {\n\
+    uint h = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
+    h ^= h >> 13u; h *= 1274126177u; h ^= h >> 16u;\n\
+    return (float)(h & 0xffffu)/65535.0;\n\
+}\n\
+float2 axsTransferLanding(float2 cell, float2 grid) {\n\
+    float2 j = (float2(axsTransferHash(cell+float2(7.3)), axsTransferHash(cell+float2(19.1)))-0.5)*0.18;\n\
+    return (cell+0.5+j)/grid;\n\
+}\n\
+float axsTransferDepart(float2 unit, uint mode, float hf) {\n\
+    float o = clamp(0.96*axsTransferOrder(unit, mode) + 0.04*hf, 0.0, 1.0);\n\
+    return 0.02 + 0.50*o;\n\
+}\n\
+float axsTransferArrive(float2 unit, uint mode, float hf) {\n\
+    float o = clamp(0.96*axsTransferOrder(unit, mode) + 0.04*hf, 0.0, 1.0);\n\
+    return 0.38 + 0.56*o;\n\
+}\n\
 vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[instance_id]],\n\
                               constant DustUniforms& u [[buffer(0)]]) {\n\
     const float2 corners[6] = {float2(0,0),float2(1,0),float2(0,1),\n\
@@ -245,27 +262,24 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         return outT;\n\
     }\n\
     if (u.openMode == 3u) {\n\
-        uint h3 = uint(cell.x)*73856093u ^ uint(cell.y)*19349663u ^ 83492791u;\n\
-        h3 ^= h3 >> 13u; h3 *= 1274126177u; h3 ^= h3 >> 16u;\n\
-        float depOrder = axsTransferOrder(unit, u.departDir);\n\
-        float arrOrder = axsTransferOrder(unit, u.arriveDir);\n\
-        float depart = 0.06 + 0.30*depOrder;\n\
-        float arrive = 0.58 + 0.34*arrOrder;\n\
-        float time3 = clamp((u.time-depart)/max(arrive-depart,0.05), 0.0, 1.0);\n\
-        float2 jitter3 = (float2(float((h3>>16)&255u), float((h3>>24)&255u))/255.0 - 0.5)*0.18;\n\
-        float2 landing3 = (cell + 0.5 + jitter3)/grid;\n\
+        float th3 = axsTransferHash(cell);\n\
+        float2 landing3 = axsTransferLanding(cell, grid);\n\
+        float depart3 = axsTransferDepart(unit, u.departDir, th3);\n\
+        float arrive3 = axsTransferArrive(unit, u.arriveDir, th3);\n\
+        float time3 = clamp((u.time-depart3)/max(arrive3-depart3,0.08), 0.0, 1.0);\n\
         float2 from3 = u.srcOrigin + landing3*u.srcSize;\n\
         float2 dest3 = u.origin + landing3*u.cardSize;\n\
-        float2 ctrl3 = mix(from3,dest3,0.5) + float2((r2-0.5)*70.0, (r3-0.5)*70.0);\n\
+        float2 ctrl3 = mix(from3,dest3,0.5) + float2((r2-0.5)*54.0, (r3-0.5)*54.0);\n\
         float b3 = 1.0-time3;\n\
         float2 pos3 = b3*b3*from3 + 2.0*b3*time3*ctrl3 + time3*time3*dest3;\n\
         pos3 += (corner-0.5)*float2(mix(1.2,2.2,r3));\n\
-        float born3 = step(depart, u.time);\n\
+        float born3 = smoothstep(depart3, depart3+0.03, u.time);\n\
+        float gone3 = 1.0 - smoothstep(arrive3-0.03, arrive3, u.time);\n\
         DustVertex out3;\n\
         out3.position=float4(2.0*pos3.x/u.viewport.x-1.0,1.0-2.0*pos3.y/u.viewport.y,0,1);\n\
         out3.uv=unit;\n\
         out3.local=corner;\n\
-        out3.fade=born3;\n\
+        out3.fade=born3*gone3;\n\
         out3.breakage=0.0;\n\
         out3.dock=time3;\n\
         out3.tint=float3(0.0);\n\
@@ -273,6 +287,46 @@ vertex DustVertex nlDustVertex(uint vertexID [[vertex_id]], uint instanceID [[in
         out3.noiseX=r;\n\
         out3.noiseY=r3;\n\
         return out3;\n\
+    }\n\
+    if (u.openMode == 4u) {\n\
+        float th4 = axsTransferHash(cell);\n\
+        float2 land4 = axsTransferLanding(cell, grid);\n\
+        float dep4 = axsTransferDepart(unit, u.departDir, th4);\n\
+        float keep4 = 1.0 - smoothstep(dep4-0.006, dep4+0.006, u.time);\n\
+        float2 tile4 = u.srcSize/grid;\n\
+        float2 p4 = u.srcOrigin + land4*u.srcSize + (corner-0.5)*tile4;\n\
+        DustVertex out4;\n\
+        out4.position=float4(2.0*p4.x/u.viewport.x-1.0,1.0-2.0*p4.y/u.viewport.y,0,1);\n\
+        out4.uv=(cell+corner)/grid;\n\
+        out4.local=corner;\n\
+        out4.fade=keep4;\n\
+        out4.breakage=0.0;\n\
+        out4.dock=0.0;\n\
+        out4.tint=float3(0.0);\n\
+        out4.isOpen=2.0;\n\
+        out4.noiseX=r;\n\
+        out4.noiseY=r3;\n\
+        return out4;\n\
+    }\n\
+    if (u.openMode == 5u) {\n\
+        float th5 = axsTransferHash(cell);\n\
+        float2 land5 = axsTransferLanding(cell, grid);\n\
+        float arr5 = axsTransferArrive(unit, u.arriveDir, th5);\n\
+        float grown5 = smoothstep(arr5-0.006, arr5+0.006, u.time);\n\
+        float2 tile5 = u.cardSize/grid;\n\
+        float2 p5 = u.origin + land5*u.cardSize + (corner-0.5)*tile5;\n\
+        DustVertex out5;\n\
+        out5.position=float4(2.0*p5.x/u.viewport.x-1.0,1.0-2.0*p5.y/u.viewport.y,0,1);\n\
+        out5.uv=(cell+corner)/grid;\n\
+        out5.local=corner;\n\
+        out5.fade=grown5;\n\
+        out5.breakage=0.0;\n\
+        out5.dock=0.0;\n\
+        out5.tint=float3(0.0);\n\
+        out5.isOpen=2.0;\n\
+        out5.noiseX=r;\n\
+        out5.noiseY=r3;\n\
+        return out5;\n\
     }\n\
     float2 rel = (unit-0.5)*u.cardSize;\n\
     float len = length(rel); if (len < 1.0) len = 1.0;\n\
@@ -730,12 +784,26 @@ static id<MTLTexture> axs_msd_makeTexture(CGImageRef cg, id<MTLDevice> device);
     id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rpd];
     if (enc == nil) return NO;
     [enc setRenderPipelineState:sMsdPipeline];
+    [enc setFragmentTexture:self.texture atIndex:0];
+    uint32_t savedOpenMode = _u.openMode;
+    if (savedOpenMode == 3u) {
+        // .231: staged wave -- draw the still-intact source card behind the
+        // dissolve front, then the growing target card, then the flying grains.
+        for (uint32_t pass = 4u; pass <= 5u; pass++) {
+            _u.openMode = pass;
+            [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+            [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
+            [enc drawPrimitives:MTLPrimitiveTypeTriangle
+                    vertexStart:0 vertexCount:6
+                  instanceCount:(NSUInteger)(_u.columns * _u.rows)];
+        }
+        _u.openMode = savedOpenMode;
+    }
     [enc setVertexBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
     // .156: the open fragment reads u.seed/u.time for the sparkle phase;
     // without this binding the whole shader failed to compile and BOTH
     // open and dissolve fell back to "no effect".
     [enc setFragmentBytes:&_u length:sizeof(AXSMetalDustUniforms) atIndex:0];
-    [enc setFragmentTexture:self.texture atIndex:0];
     // 6 vertices = one quad; one instance per grain. ONE draw call for all.
     [enc drawPrimitives:MTLPrimitiveTypeTriangle
             vertexStart:0 vertexCount:6
@@ -931,7 +999,7 @@ static BOOL axs_metalPlayCommon(UIImage *shot, CGRect frameInWindow, CGFloat dur
         AXSMetalSandRenderer *renderer = [AXSMetalSandRenderer new];
         if (sMsdActiveRenderers == nil) sMsdActiveRenderers = [NSMutableArray array];
         [sMsdActiveRenderers addObject:renderer];
-        if (openMode == 1u) sMsdActiveOpenRenderer = renderer;
+        if (openMode == 1u || openMode == 3u) sMsdActiveOpenRenderer = renderer;
 
         float seed = (float)(arc4random_uniform(100000)) / 1000.0f;
         // .105: startWithTexture does a synchronous first-frame probe and
@@ -998,9 +1066,10 @@ BOOL axs_metalAssemblePlay(UIImage *shot, CGRect frameInWindow, CGFloat duration
                                sourcePoint);
 }
 
-// beautify.230: rect-to-rect particle transfer for float<->dock.
-// fromFrame/toFrame are window coordinates; particles start at their own cell
-// inside fromFrame and fly straight to the matching cell inside toFrame.
+// beautify.231: staged rect-to-rect particle transfer for float<->dock.
+// A cell leaves the source only when the dissolve front reaches it, flies to
+// its matching target cell, and deposits there; the source stays intact behind
+// the front and the target grows cell by cell. No whole-plane translation.
 // departDir/arriveDir are the 0..7 diagonal order modes (3 = TR->BL, 4 = BL->TR).
 void *axs_metalDockTransferPlayRet(UIImage *shot, CGRect fromFrame, CGRect toFrame,
                                    CGFloat duration, CGFloat density,

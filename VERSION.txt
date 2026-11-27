@@ -1,3 +1,17 @@
+beautify.231 变更（浮窗↔侧窗逐批粒子转换，原生动画不再被吞）：
+- 根因：.230 的 DOCK TRANSFER 每次都打印 "metal failed -> restore card"——
+  openMode=3 的渲染器句柄仍只从 openMode=1 槽位读取，返回 NULL 后回退到
+  原生整卡位移，所以用户看到的是"一整面飞过去"。
+- 修复 1：sMsdActiveOpenRenderer 同时覆盖 openMode=1/3，transfer 真正启用。
+- 修复 2：按参考视频改为逐批波浪——每格按 depOrder 在 0.02~0.52 依次起飞，
+  飞行时长短，前一批已落地时后一批才起飞；粒子到达后即消失。
+- 修复 3：新增 shader pass 4（源窗遮罩层）和 pass 5（目标聚合层），与粒子同
+  时钟同格位：斜线后方源窗保持完整、逐格被削掉；目标窗逐格长出来。
+  三段同帧绘制，源层→目标层→粒子层，避免整面平移感。
+- 用户要求：dock 转场不 hook/吞掉原生 position/transform spring；本版移除
+  axs_open_interceptUntil 设置，原生动画照常跑完，仅用容器 layer mask 隐藏真卡。
+- 速度/密度滑条不变，继续控制 duration/density。
+
 beautify.230 变更（浮窗↔侧窗粒子动画重做）：
 - 按参考视频重做：源窗从右上→左下依次消散，粒子点对点直飞到目标窗对应位置，
   目标窗按方向依次聚合（浮窗→侧窗右上→左下；侧窗→浮窗左下→右上）。
