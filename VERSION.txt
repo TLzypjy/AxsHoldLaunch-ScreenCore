@@ -1,3 +1,17 @@
+beautify.249 变更（稳定化重构：自包含快照飞行，真实窗口零干预）：
+- 用户反馈 .248「侧窗有时候不显示 有时候侧窗点不了」——场景栈接管（hidden/
+  mask/tilt/z 序）与原生状态机打架的回归：item 子视图隐藏挡了触摸（点不了）；
+  hidden 拉锯与 mask 残留（不显示）。
+- 稳定化：回到自包含快照飞行（.232 方案 + 全部修正），真实窗口零干预——
+  a) src/dst 都是快照层：src 消散（反向带侧窗真实侧倾）；dst 聚合（正向=
+     侧窗矩形+侧窗侧倾；反向=浮窗矩形+浮窗侧倾），显式 m14/m34 与 ring 同款；
+  b) 圆角 36.8 走 SDF（dockedRadius 读场景链真实圆角，.248 修正生效）；
+  c) 删除：item 子视图隐藏（点不了）、场景栈 hidden/命名/z 序压制、
+     sceneSuppressed/hiddenSceneViews 全套状态机；
+  d) enforce 仅保留场景栈 tilt（无 hidden）——修正面→侧倾延迟；dock 切换时
+     场景栈 identity 复位交还原生。
+- 真实窗口的显隐/transform/命中全部交还原生，杜绝此类回归。
+
 beautify.248 变更（移除容器子树守卫——场景栈就在容器内，守卫把它挡住了）：
 - 用户反馈 .247「侧窗直接出现在边角；侧转浮四角变更圆」。日志 98 对账：
   fwd DUMP（1.5s）明确显示场景栈链在 SCFloatingHostWindow 内且 DFS 顺序为
