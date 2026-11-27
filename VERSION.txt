@@ -1,3 +1,19 @@
+beautify.252 变更（真实容器飞行错觉 + item tilt 无透视恢复 + 场景栈 tilt 移除）：
+- 用户反馈 .251：a) 粒子飞行正常但浮窗「直接弹到侧窗位置」；b) 点击侧窗内容可用
+  但手势全失效；c) 后台划掉侧窗正常消散无白卡（.251 修复生效）；d) 重开浮窗正常；
+  e) 侧窗倾斜角度消失。
+- 根源1（瞬移）：原生 dock 转场根本不给容器加动画（log103：飞行前后零条
+  native animation），frame 瞬间就位。修复：飞行期间隐藏真实容器（经原始
+  setHidden IMP，不触发 override 链），srcShot 已在可见态捕获；飞行由快照层+
+  粒子独立呈现，driver.stop（duration+0.18）在终点揭示真实窗口。
+- 根源2（倾斜消失+手势失效的拆解）：可见侧倾一直由 item 本体 tilt 承担
+  （.251 摘除后倾斜消失，sceneRoots=2 仍在 tilt 却无视觉=Dock 通道镜像里
+  场景栈 tilt 不可见）；带透视（m14/m34）的 item tilt 破坏 Dock 通道触摸映射
+  （.250 点不了）；场景栈 tilt 不可见却污染桥接坐标映射（.251 手势失效）。
+  修复：item tilt 恢复但去掉透视项（纯旋转矩阵可逆，hit-test 可存活）；
+  场景栈 tilt 移除（纯害无利）。
+- 保持：白卡守卫、缓存防污染、fresh capture、animSwallowUntil、mask 兜底。
+
 beautify.251 变更（关闭挂起会话误发反向飞行 + docked item 双重 tilt 摘除）：
 - 用户反馈 .250「后台关掉侧窗后粒子走一遍侧转浮动画，再打开浮窗有白色卡片；
   侧窗点击不了」。log102+视频取证：

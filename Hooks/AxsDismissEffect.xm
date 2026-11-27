@@ -2118,6 +2118,10 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 @property (nonatomic, assign) CGFloat dstTiltRad;
 @property (nonatomic, assign) uint32_t departDir;
 @property (nonatomic, assign) uint32_t arriveDir;
+// .252: 飞行期间隐藏真实容器（原生 dock 不给容器加转场动画，frame 瞬间
+// 就位 -> 用户看到浮窗「直接弹到侧窗位置」）。stop 时揭示。
+@property (nonatomic, weak) UIView *flightCard;
+@property (nonatomic, assign) BOOL hidCard;
 - (void)startWithWindow:(UIWindow *)window
                 srcShot:(UIImage *)srcShot
                srcFrame:(CGRect)srcFrame
@@ -2360,6 +2364,19 @@ static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
 - (void)stop {
     @try {
         [_link invalidate]; _link = nil;
+        // .252: 揭示真实容器（任意路径的 stop 都必须兜底恢复，避免永久隐身）。
+        UIView *card = _flightCard;
+        if (_hidCard && card != nil) {
+            @try {
+                if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                    ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                        card, @selector(setHidden:), NO);
+                } else {
+                    card.hidden = NO;
+                }
+            } @catch (NSException *ignored) { }
+        }
+        _hidCard = NO; _flightCard = nil;
         if (self.srcLayer != nil) { @try { [self.srcLayer removeFromSuperlayer]; } @catch (NSException *ignored) { } self.srcLayer = nil; }
         self.srcMaskLayer = nil;
         if (self.dstLayer != nil) { @try { [self.dstLayer removeFromSuperlayer]; } @catch (NSException *ignored) { } self.dstLayer = nil; }
@@ -2561,28 +2578,28 @@ void axs_dock_enforceDockedItemTilt(void) {
         CGRect f0 = [(UIView *)items[0] convertRect:[(UIView *)items[0] bounds] toView:nil];
         BOOL rightSide = (f0.origin.x + f0.size.width * 0.5f) > sw * 0.5f;
         CGFloat rad = (rightSide ? -1.0 : 1.0) * axs_dock_tiltAngleCfg() * 2.6 * M_PI / 180.0;
+        // .252: item 本体 tilt 恢复（.251 摘除后用户实测侧窗倾斜消失——可见
+        // 侧倾一直由 item 本体承担，场景栈 tilt 在 Dock 通道镜像里不可见）。
+        // 但去掉 m14/m34 透视项：.250 的「点不了」正是带透视的 item tilt 破坏
+        // Dock 通道触摸映射所致（.251 去掉 item tilt 后点击恢复，winHid=0
+        // 证明宿主窗口可见、hitView=nil 是桥接正常现象）。纯旋转矩阵可逆，
+        // hit-test 可存活。
         CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
-        CGFloat sinRad = (CGFloat)sin(rad);
-        CGFloat cosRad = (CGFloat)cos(rad);
-        tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
-        tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
+        tiltRotation.m14 = 0.0;
+        tiltRotation.m34 = 0.0;
         static CFTimeInterval axs_dock_enforceLogAt = 0;
         BOOL logNow = (CACurrentMediaTime() - axs_dock_enforceLogAt > 1.0);
         for (UIView *item in items) {
             if (item == nil || item.layer == nil) continue;
             if (item.hidden) item.hidden = NO;   // 侧窗本体应可见
-            // .251: 不再对 item 本体施加 tilt——场景栈（真实本体，sceneRoots>0
-            // 已生效）的 tilt 承担全部视觉；贴边稳态下可见小窗由原生 Dock 通道
-            // 渲染、宿主窗口隐藏（.59），对隐藏源 item 施 3D 透视变换会破坏
-            // Dock 通道的触摸映射 ->「侧窗点不了」（log102：docked 态点击
-            // hitView=nil）。且 item 与场景栈是祖孙关系，双重 tilt 本就叠加。
+            item.layer.transform = tiltRotation;
             if (logNow) {
                 NSMutableString *kids = [NSMutableString string];
                 for (UIView *sub in item.subviews) {
                     [kids appendFormat:@"%@(hidden=%d) ", NSStringFromClass(sub.class), sub.hidden ? 1 : 0];
                 }
                 NSUInteger sceneN = (NSUInteger)axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect).count;
-                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=skip itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
+                axs_dm_log(@"DOCK ENFORCE items=%lu tilt=%.1f itemTilt=flat itemHid=%d winHid=%d kids=[%@] sceneRoots=%lu",
                            (unsigned long)items.count, rad * 180.0 / M_PI,
                            item.hidden ? 1 : 0,
                            axs_dock_lastWindow.hidden ? 1 : 0,
@@ -2591,19 +2608,9 @@ void axs_dock_enforceDockedItemTilt(void) {
             }
         }
         if (logNow) axs_dock_enforceLogAt = CACurrentMediaTime();
-        // .243: App 场景内容栈直接隐藏（.242 的 tilt 会被场景机器每帧重写自身
-        // transform 覆盖，斗不过）。dock 侧窗由容器独立渲染（揭示期已验证内容
-        // 完整），场景栈是 TouchPassthrough 不承载触摸，隐藏安全。反向揭示
-        // 完成后由 dock 入口统一恢复。
-        // .247: 场景内容栈=侧窗真实本体——只施加 tilt（聚合 mask 由 driver 直接
-        // 挂在它身上，粒子聚合的就是真实侧倾小窗），不再隐藏/压层/对抗原生。
-        if (axs_dock_dockedState) {
-            @try {
-                for (UIView *rootView in axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect)) {
-                    rootView.layer.transform = tiltRotation;
-                }
-            } @catch (NSException *ignored) { }
-        }
+        // .252: 场景栈 tilt 移除。.251 实测它对 Dock 通道镜像完全不可见
+        //（item tilt 摘掉后用户报告倾斜消失，sceneRoots=2 仍在 tilt 却没有
+        // 视觉），却会污染桥接的坐标映射（点击可用但手势全失效）。纯害无利。
     } @catch (NSException *ignored) { }
 }
 
@@ -2773,6 +2780,20 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                       arriveDir:arriveDir];
         objc_setAssociatedObject(container, &axs_dock_flightDriverKey, driver,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+        // .252: 隐藏真实容器（经原始 IMP，不触发 override 的 markGone/
+        // becameVisible 链）。srcShot 已在可见态捕获完毕；飞行由快照层+粒子
+        // 独立呈现，stop 时（duration+0.18）在终点揭示真实窗口。
+        driver.flightCard = container;
+        @try {
+            if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                    container, @selector(setHidden:), YES);
+            } else {
+                container.hidden = YES;
+            }
+            driver.hidCard = YES;
+        } @catch (NSException *ignored) { }
 
         axs_dock_assembleInFlight = YES;
         axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f snap-src snap-dst",
