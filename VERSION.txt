@@ -1,3 +1,23 @@
+beautify.242 变更（App 场景内容栈 tilt + 揭示圆角按真实外观）：
+- DUMP 93 铁证（fwd+1.5s，侧窗矩形上三条分支）：
+  SCDockedFloatingItemView corner=0 contents=NO（已 tilt、空壳）
+  SCFloatingContainerView corner=0（我们的揭示层，tilt 宿主）
+  UIView corner=36.8 → _UIScenePresentationView → _UITouchPassthroughView →
+  _UIContextLayerHostView（App 场景内容栈——应用真实画面，正面、无人 tilt）
+- 根因 1（正面内容）：dock 翻转时原生把 App 场景内容栈移出容器成为宿主窗口
+  下的独立分支，而 ring tilt 宿主明确排除 scene 根 → 应用画面正面盖在侧窗上，
+  2~3s 后被 ring 探测部分拾取才侧倾。
+  修复：axs_dock_sceneRootsAt(win, dockFrame) 收集场景栈同尺寸祖先链的链根
+  （排除容器子树/item/overlay，爬链去重），enforce 每帧施加与容器一致的 tilt；
+  undock 时复位 identity 交还原生。（浮窗态 ring 对场景内容本就如此 tilt 且
+  触发可交互，机制安全。）
+- 根因 2（浮窗四角直角）：SCFloatingContainerView 自身 corner=0——.241 反向
+  揭示 dstCorner 读容器圆角得到 0 → 落 12 兜底 → 浮窗揭示 mask 被刻成 12 方角。
+  修复：揭示/消散圆角一律按「窗口真实外观」取值——浮窗=树探测(36.8，
+  axs_dm_cornerRadiusForView)，侧窗=dockedRadius(12)。正向 src 同改探测。
+  另 srcLayer.cornerRadius 改 0（圆角只由 SDF mask 刻，层树不再出现裸 CALayer
+  半径，防 ring 光晕半径探测被毒化——直角光晕的第二来源）。
+
 beautify.241 变更（dock 态探测加速 + 一次性视图转储定位）：
 - 日志 92 诊断结论：DOCK ENFORCE items=1 tilt=-15.6 contents=NO kids=[UIView(hidden=1)]
   ——item 已 tilt、本体无内容、子视图已隐藏，但正面内容仍在 → 正面内容不在

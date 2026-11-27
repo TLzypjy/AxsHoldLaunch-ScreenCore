@@ -2168,7 +2168,9 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
     self.srcLayer.contentsGravity = kCAGravityResizeAspectFill;
     self.srcLayer.frame = srcFrame;
     self.srcLayer.masksToBounds = YES;
-    self.srcLayer.cornerRadius = self.srcCorner;
+    // .242: 圆角只由 SDF mask 刻（层树里不再出现 12/36.8 的裸 CALayer 半径，
+    // 防 ring 光晕半径探测被毒化）。视觉与 cornerRadius 完全一致。
+    self.srcLayer.cornerRadius = 0.0f;
     self.srcLayer.shadowOpacity = 0.0f;
     self.srcMaskLayer = [CALayer layer];
     self.srcMaskLayer.frame = self.srcLayer.bounds;
@@ -2564,6 +2566,55 @@ static void axs_dock_dumpViewsAtFrame(CGRect frame, NSString *tag) {
     } @catch (NSException *ignored) { }
 }
 
+// .242: 收集 dock 矩形上的「App 场景内容栈」链根。DUMP 93 铁证：dock 翻转时
+// 原生把 _UIScenePresentationView 宿主链移出容器（ring tilt 宿主明确排除
+// scene 根）→ 应用真实画面正面显示在侧窗矩形上。排除容器子树（ring 域）、
+// overlay/手势区、item（单独 tilt）；对候选沿同尺寸祖先链爬到链根，避免链上
+// 多层重复 tilt。
+static NSArray *axs_dock_sceneRootsAt(UIWindow *win, CGRect dockFrame) {
+    NSMutableArray *roots = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+    @try {
+        NSMutableArray *stack = [NSMutableArray arrayWithObject:win];
+        int guardN = 0;
+        while (stack.count > 0 && guardN++ < 900) {
+            UIView *v = [stack lastObject];
+            [stack removeLastObject];
+            if (v == nil) continue;
+            NSString *cn = NSStringFromClass(v.class);
+            BOOL excluded = [cn hasPrefix:@"SCFloating"]
+                         || [cn isEqualToString:@"SCDockedFloatingItemView"]
+                         || [cn isKindOfClass:[UIWindow class]];
+            if (excluded) continue;   // 不下探容器子树（ring 域）/item/overlay
+            CGRect f = [v convertRect:v.bounds toView:nil];
+            BOOL dockSized = fabs(f.origin.x - dockFrame.origin.x) < 9.0
+                          && fabs(f.origin.y - dockFrame.origin.y) < 9.0
+                          && fabs(f.size.width - dockFrame.size.width) < 12.0
+                          && fabs(f.size.height - dockFrame.size.height) < 14.0;
+            if (dockSized && !v.hidden && v.alpha > 0.5) {
+                UIView *root = v;
+                while (root.superview != nil) {
+                    UIView *p = root.superview;
+                    NSString *pcn = NSStringFromClass(p.class);
+                    if ([pcn hasPrefix:@"SCFloating"] || [p isKindOfClass:[UIWindow class]]) break;
+                    CGRect pf = [p convertRect:p.bounds toView:nil];
+                    if (fabs(pf.origin.x - dockFrame.origin.x) > 11.0
+                        || fabs(pf.origin.y - dockFrame.origin.y) > 11.0
+                        || fabs(pf.size.width - dockFrame.size.width) > 14.0
+                        || fabs(pf.size.height - dockFrame.size.height) > 16.0) break;
+                    root = p;
+                }
+                if (root != nil && ![seen objectForKey:root]) {
+                    [seen addObject:root];
+                    [roots addObject:root];
+                }
+            }
+            [stack addObjectsFromArray:v.subviews];
+        }
+    } @catch (NSException *ignored) { }
+    return roots;
+}
+
 // 由 ring applyTilt 每帧 + driver tick 调用；自门控（非 dock 态直接返回）。
 void axs_dock_enforceDockedItemTilt(void) {
     @try {
@@ -2618,6 +2669,13 @@ void axs_dock_enforceDockedItemTilt(void) {
             }
         }
         if (logNow) axs_dock_enforceLogAt = CACurrentMediaTime();
+        // .242: App 场景内容栈与容器同 tilt——浮窗态 ring 本就这么做且可交互，
+        // dock 态它被移出容器成了 tilt 空白区，这里是补齐。
+        @try {
+            for (UIView *rootView in axs_dock_sceneRootsAt(axs_dock_lastWindow, axs_dock_lastDockFrameRect)) {
+                rootView.layer.transform = tiltRotation;
+            }
+        } @catch (NSException *ignored) { }
     } @catch (NSException *ignored) { }
 }
 
@@ -2681,6 +2739,9 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                     if (sub != nil) sub.hidden = NO;
                 }
             }
+            for (UIView *rootView in axs_dock_sceneRootsAt(win, axs_dock_lastDockFrameRect)) {
+                rootView.layer.transform = CATransform3DIdentity;   // .242: 场景栈交还原生
+            }
         }
 
         // .237: dst 永远是真容器（live card）。日志 88 实测：docked item 的
@@ -2701,16 +2762,16 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         UIView *dstView = container;
         CGRect dstFrame = toFrame;
 
-        // .239: 圆角统一走 mask SDF（容器 layer.cornerRadius 永不被改）——
-        // src：正向=浮窗快照用容器圆角；反向=侧窗消散用 item 真实圆角。
-        // dst：正向揭示侧窗用 item 真实圆角（与稳态 item 外观一致）；
-        //      反向揭示浮窗用容器圆角。
-        CGFloat srcCorner = toDock ? container.layer.cornerRadius
+        // .242: 圆角按「窗口真实外观」取值——DUMP 93 证实容器自身 corner=0，
+        // 浮窗真实圆角 36.8 在场景内容裁剪层（树探测可得），侧窗真实圆角 12
+        // 在 docked item 上。容器 layer.cornerRadius 读数(0)会掉进 12 兜底，
+        // 正是「浮窗四角直角光晕」的来源。
+        CGFloat srcCorner = toDock ? axs_dm_cornerRadiusForView(container)
                                    : (axs_dock_dockedRadius > 0.5f ? axs_dock_dockedRadius
-                                                                   : container.layer.cornerRadius);
+                                                                   : axs_dm_cornerRadiusForView(container));
         CGFloat dstCorner = toDock ? (axs_dock_dockedRadius > 0.5f ? axs_dock_dockedRadius
-                                                                   : dstView.layer.cornerRadius)
-                                   : dstView.layer.cornerRadius;
+                                                                   : axs_dm_cornerRadiusForView(dstView))
+                                   : axs_dm_cornerRadiusForView(dstView);
         if (srcCorner < 1.0f) srcCorner = 12.0f;
         if (dstCorner < 1.0f) dstCorner = 12.0f;
 
