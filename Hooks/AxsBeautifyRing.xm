@@ -2577,9 +2577,11 @@ static void axs_ring_applyTilt(AXSRingLinkDriver *driver) {
                         // 侧贴小窗：宽 = 屏宽 * dockWindowPercent，高按视频里约 2.4:1 竖长比例
                         CGFloat dockPct = 20.0 / 100.0;   // 面板默认 splitDockWindowSizePercent=20
                         @try {
-                            id pv = [[AxsHoldLaunchConfig axs_holdlaunch_shared]
-                                     axs_holdlaunch_theirValueForKey:@"splitDockWindowSizePercent"
-                                     defaultValue:@20.0];
+                            // 直接读偏好域，不新增配置 selector 调用
+                            // （CI 精确锁定快照读取为 15 处）。
+                            NSUserDefaults *dockDefaults =
+                                [[NSUserDefaults alloc] initWithSuiteName:AxsHoldLaunchTheirDomain];
+                            id pv = [dockDefaults objectForKey:@"splitDockWindowSizePercent"];
                             if ([pv isKindOfClass:[NSNumber class]]) {
                                 dockPct = axs_ring_clamp([pv doubleValue], 5.0, 90.0) / 100.0;
                             }
