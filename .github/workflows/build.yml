@@ -635,10 +635,10 @@ jobs:
           grep -Fq "if (openMode == 1u || openMode == 3u) sMsdActiveOpenRenderer = renderer;" Hooks/AxsMetalSand.xm || { echo "transfer renderer handle missing"; exit 1; }
           ! grep -Fq "axs_open_interceptUntil = CACurrentMediaTime() + duration + 1.5" Hooks/AxsDismissEffect.xm || { echo "dock still swallows native animation"; exit 1; }
           grep -Fq "DOCK FLIGHT play" Hooks/AxsDismissEffect.xm || { echo "dock flight log missing"; exit 1; }
-          grep -Fq "dstLayer.transform = axs_dock_tiltMatrix" Hooks/AxsDismissEffect.xm || { echo "dst layer tilt missing"; exit 1; }
+          grep -Fq "dstLayer.transform = axs_dock_tiltMatrixScaled" Hooks/AxsDismissEffect.xm || { echo "dst layer tilt missing"; exit 1; }
           grep -Fq "srcTilt:srcTiltRad" Hooks/AxsDismissEffect.xm || { echo "src tilt wiring missing"; exit 1; }
           grep -Fq "dstTilt:dstTiltRad" Hooks/AxsDismissEffect.xm || { echo "dst tilt wiring missing"; exit 1; }
-          grep -Fq "static CATransform3D axs_dock_tiltMatrix" Hooks/AxsDismissEffect.xm || { echo "tilt matrix helper missing"; exit 1; }
+          # .260: tilt matrix helper renamed to the scaled variant
           ! grep -Fq "axs_dock_sceneSuppressed" Hooks/AxsDismissEffect.xm || { echo "scene suppress machinery still present"; exit 1; }
           ! grep -Fq "sub.hidden = YES;" Hooks/AxsDismissEffect.xm || { echo "item children hide still present (tap regression)"; exit 1; }
           ! grep -Fq "axs_dock_inContainerSubtree" Hooks/AxsDismissEffect.xm || { echo "container subtree guard still present (blocks scene stack)"; exit 1; }
@@ -666,7 +666,7 @@ jobs:
           grep -Fq "axs_dock_enforceDockedItemTilt();" Hooks/AxsBeautifyRing.xm || { echo "ring per-frame item tilt call missing"; exit 1; }
           # .255: flight snapshot tilt = perspective (matches ring host tilt, the final look)
           grep -Fq "tiltRotation.m14 = -sinRad * (-1.0 / 600.0);" Hooks/AxsDismissEffect.xm || { echo "flight perspective matrix missing (handoff flat->persp switch)"; exit 1; }
-          grep -Fq "static CATransform3D axs_dock_tiltMatrix(CGFloat rad)" Hooks/AxsDismissEffect.xm || { echo "flight tilt matrix missing"; exit 1; }
+          grep -Fq "static CATransform3D axs_dock_tiltMatrixScaled(CGFloat rad, CGFloat s)" Hooks/AxsDismissEffect.xm || { echo "flight tilt matrix missing"; exit 1; }
           # .259: container-body tilt (DUMP2: the visible docked card is the container; the item is an icon placeholder)
           grep -Fq "static UIView *axs_dock_findContainerInWindow(UIWindow *win)" Hooks/AxsDismissEffect.xm || { echo "container finder missing"; exit 1; }
           grep -Fq "container.layer.transform = CATransform3DConcat(axs_dock_containerNativeBase, tiltRotation);" Hooks/AxsDismissEffect.xm || { echo "container tilt write missing"; exit 1; }

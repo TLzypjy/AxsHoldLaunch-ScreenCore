@@ -2183,14 +2183,6 @@ static inline CGFloat axs_dock_order(CGFloat ux, CGFloat uy, uint32_t mode) {
 // 个粒子起就是同一个观感，否则揭示瞬间 flat→透视 跳变（「先正面后侧倾」）。
 // 注意：item 本体 tilt 仍保持无透视（.252）——透视在 item 上会打死 Dock
 // 通道触摸桥（.250 实锤），ring 宿主 tilt 无此问题。
-static CATransform3D axs_dock_tiltMatrix(CGFloat rad) {
-    CATransform3D tiltRotation = CATransform3DRotate(CATransform3DIdentity, rad, 0.0, 1.0, 0.0);
-    CGFloat sinRad = (CGFloat)sin(rad);
-    CGFloat cosRad = (CGFloat)cos(rad);
-    tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
-    tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
-    return tiltRotation;
-}
 // .259: 缩放等效矩阵——container tilt 作用于 App 尺寸 bounds 空间再被
 // dock 缩放 s 呈现；飞行 dock 侧层（内容已预缩放到 dock 尺寸）用
 // M'=S·M·S⁻¹（m14/m34 同乘 s）达到同一屏幕观感。
