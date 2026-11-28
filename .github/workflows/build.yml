@@ -677,7 +677,7 @@ jobs:
           grep -Fq "driver.hidItem = YES;" Hooks/AxsDismissEffect.xm || { echo "item hide wiring missing"; exit 1; }          # .262: per-frame dock-channel suppression during flights + per-session dockedShot reset
           grep -Fq "axs_dock_dockedShotValid = NO;" Hooks/AxsDismissEffect.xm || { echo "per-session dockedShot reset missing"; exit 1; }
           grep -Fq "axs_dock_dockedShotCache = nil;" Hooks/AxsDismissEffect.xm || { echo "dockedShot cache clear missing"; exit 1; }
-          grep -Fq "rangeOfString:@"DockedFloatingItem"" Hooks/AxsDismissEffect.xm || { echo "flight-window item suppression missing"; exit 1; }
+          grep -Fq "if (!v.hidden) v.hidden = YES;" Hooks/AxsDismissEffect.xm || { echo "flight-window item suppression missing"; exit 1; }
           grep -Fq "static CATransform3D axs_dock_tiltMatrixScaled(CGFloat rad, CGFloat s)" Hooks/AxsDismissEffect.xm || { echo "scaled flight tilt matrix missing"; exit 1; }
           grep -Fq "perspScale:(CGFloat)perspScale" Hooks/AxsDismissEffect.xm || { echo "perspScale param missing"; exit 1; }
           grep -Fq "axs_dock_dockedShotCache" Hooks/AxsDismissEffect.xm || { echo "docked shot cache missing"; exit 1; }
