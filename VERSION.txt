@@ -1,3 +1,15 @@
+beautify.261 变更（飞行期隐藏原生 dock 通道 + container tilt 自适应 base）：
+- 用户反馈 .260：a) 点击挂起时真侧窗直接弹出来，粒子再聚第二个侧窗（两个侧窗
+  并存），聚合完成抖成一个；b) 侧窗稳态仍会抖动。
+- 根源1（两个侧窗）：可见 docked 卡片由【原生 dock 通道（item 的 layer 树）】
+  渲染，flip 时立即出现——我们只隐藏了 container（DUMP2 只遍历 subviews，
+  item 的 layer 子树里的远程场景内容看不到），飞行聚合层叠在其上=第二个。
+  修复：飞行期间同时隐藏 item（正向+反向），driver.stop 与 container 一起揭示。
+- 根源2（稳态抖动）：ENFORCE 每帧无条件写 container transform，与 App 自己的
+  dock 呈现管理互相覆盖。修复：自适应 base——检测 container transform !=
+  我们最后写入的值（=App 改过）时以 App 新值为 base 重新复合，消除对抗。
+- 保持：.260 全部（hide-first/缓存图源/identity 浮窗恢复/dockedShot +3s）。
+
 beautify.260 变更（消除挂起闪现 + 修复反向浮窗缩小 + dockedShot 时机修正）：
 - 用户反馈 .259：a) 点击转侧窗时浮窗直接闪过去、粒子紧跟着才到；b) 侧窗转浮窗
   动画完成后浮窗变成侧窗一样大小的小浮窗。

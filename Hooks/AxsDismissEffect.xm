@@ -689,6 +689,8 @@ static BOOL axs_dock_dumpDoneForSession = NO;       // .258: 每次 dock 会话�
 // 原生缩放 base；离开 dock 态恢复 base。
 static CATransform3D axs_dock_containerNativeBase = CATransform3DIdentity;
 static BOOL axs_dock_containerBaseValid = NO;
+static CATransform3D axs_dock_containerLastWritten = CATransform3DIdentity;   // .261: 自适应 base
+static BOOL axs_dock_containerLastWrittenValid = NO;
 static UIImage *axs_dock_dockedShotCache = nil;     // 稳态侧倾观感缓存（+1.5s 捕获）
 static BOOL axs_dock_dockedShotValid = NO;
 static UIView *axs_dock_findContainerInWindow(UIWindow *win);
@@ -2137,7 +2139,9 @@ static void axs_dm_install(NSString *name, const char *expectedSig, NSUInteger a
 // .252: 飞行期间隐藏真实容器（原生 dock 不给容器加转场动画，frame 瞬间
 // 就位 -> 用户看到浮窗「直接弹到侧窗位置」）。stop 时揭示。
 @property (nonatomic, weak) UIView *flightCard;
+@property (nonatomic, weak) UIView *itemCard;   // .261: 原生 dock 通道视图（飞行期隐藏）
 @property (nonatomic, assign) BOOL hidCard;
+@property (nonatomic, assign) BOOL hidItem;
 // .256: 目标侧快照——侧倾观感直接烤进图片（fwd=宿主 tilt 后的 docked 观感，
 // rev=宿主复位后的浮窗观感），飞行层不再自带 transform，交接零跳变。
 @property (nonatomic, strong) UIImage *dstShot;
@@ -2415,6 +2419,11 @@ static CATransform3D axs_dock_tiltMatrixScaled(CGFloat rad, CGFloat s) {
             } @catch (NSException *ignored) { }
         }
         _hidCard = NO; _flightCard = nil;
+        UIView *ic = _itemCard;
+        if (_hidItem && ic != nil) {
+            @try { ic.hidden = NO; } @catch (NSException *ignored) { }
+        }
+        _hidItem = NO; _itemCard = nil;
         if (self.srcLayer != nil) { @try { [self.srcLayer removeFromSuperlayer]; } @catch (NSException *ignored) { } self.srcLayer = nil; }
         self.srcMaskLayer = nil;
         if (self.dstLayer != nil) { @try { [self.dstLayer removeFromSuperlayer]; } @catch (NSException *ignored) { } self.dstLayer = nil; }
@@ -2686,9 +2695,18 @@ void axs_dock_enforceDockedItemTilt(void) {
             tiltRotation.m14 = -sinRad * (-1.0 / 600.0);
             tiltRotation.m34 =  cosRad * (-1.0 / 600.0);
         }
-        // tilt = nativeBase ∘ tilt（保留原生缩放；tilt 作用于 container 自身的
-        // App 尺寸 bounds 空间——与 ring 宿主 tilt 同空间同观感）
-        container.layer.transform = CATransform3DConcat(axs_dock_containerNativeBase, tiltRotation);
+        // .261: 自适应 base——App 自己也在管理 container transform（dock 呈现），
+        // 无条件覆写会与它互相打架 = 稳态抖动。检测：当前 transform != 我们
+        // 最后写入的值 => App 改过了 => 以 App 的新值为 base 重新复合。
+        if (!axs_dock_containerLastWrittenValid
+            || !CATransform3DEqualToTransform(container.layer.transform, axs_dock_containerLastWritten)) {
+            axs_dock_containerNativeBase = container.layer.transform;
+            axs_dock_containerBaseValid = YES;
+        }
+        CATransform3D want = CATransform3DConcat(axs_dock_containerNativeBase, tiltRotation);
+        container.layer.transform = want;
+        axs_dock_containerLastWritten = want;
+        axs_dock_containerLastWrittenValid = YES;
         static CFTimeInterval axs_dock_enforceLogAt = 0;
         BOOL logNow = (CACurrentMediaTime() - axs_dock_enforceLogAt > 1.0);
         if (logNow) {
@@ -2792,6 +2810,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         } else {
             axs_dock_dockedState = NO;
             axs_dock_dumpDoneForSession = NO;   // .258: 下次 dock 会话重新转储
+            axs_dock_containerLastWrittenValid = NO;   // .261: dock 态结束，written 失效
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;
             // .260: 离开 dock 态——container transform 复位为 identity。
             // .259 的教训：写 nativeBase（0.334 缩放）会把 dock 缩放带进浮窗态
@@ -2801,6 +2820,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             for (UIView *rootView in axs_dock_sceneRootsAt(win, axs_dock_lastDockFrameRect)) {
                 rootView.layer.transform = CATransform3DIdentity;   // 场景栈交还原生
             }
+        }
+        if (dockItem != nil && dockItem.window != nil) {
+            // .261: 飞行期间隐藏原生 dock 通道（item）——它在聚合层之上会形成
+            // 「第二个侧窗」（用户实测：真侧窗先弹出来，粒子再聚第二个）。
+            // stop 时与 container 一起揭示。
+            @try { dockItem.hidden = YES; } @catch (NSException *ignored) { }
         }
 
         // .250: 转场前把真实容器恢复到完整态。残留的 reveal mask（半白卡）、
@@ -2976,6 +3001,10 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         // 独立呈现，stop 时（duration+0.18）在终点揭示真实窗口。
         driver.flightCard = container;
         driver.hidCard = preHid;   // .260: 已在捕获前隐藏，stop 时负责揭示
+        if (dockItem != nil) {
+            driver.itemCard = dockItem;
+            driver.hidItem = YES;   // .261: 飞行期隐藏的 dock 通道，stop 时揭示
+        }
 
         axs_dock_assembleInFlight = YES;
         axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f snap-src snap-dst",
