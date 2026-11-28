@@ -1722,13 +1722,12 @@ static void axs_open_addAnimation(id self, SEL _cmd, CAAnimation *anim, NSString
             // .239: dock 态下 docked item 层树动画一并吞掉——原生内容弹出后
             // 会以动画把 item 拉回正面，presentation 覆盖 model，我们的每帧
             // tilt 同步就失效了。completion 手动补发（与容器同款）。
-            // .255: item 子树吞动画只在【挂起 settle 窗口 4s】内生效——
-            // 窗口外用户点击 docked item 触发的 position/bounds 弹簧（展开/
-            // 预览响应）曾被无差别吞掉，点击像死了（log106 6966.8 实锤）。
-            // 原生 ~2-3s 的延迟内容弹出仍在窗口内被吞，tilt 不被覆盖。
-            BOOL dockSettleWindow = axs_dock_dockedState
-                && (CACurrentMediaTime() - axs_dock_dockedStateAt) < 4.0;
-            BOOL isDockItem = (delegate != nil && dockSettleWindow
+            // .268: item 子树吞动画只在【飞行窗口】内生效。4s settle 窗口的
+            // 教训（log119 实锤）：反向点击侧窗时 App 的还原弹簧在飞行开始前
+            // ~0.13s 被吞 -> item 模型值瞬间跳到终点 -> 侧窗「闪一下」。
+            // 稳态下 item 弹簧=点击响应，放行；tilt 已在 container 上由
+            // ENFORCE 自适应逐帧维持，item 内容弹出不再威胁 tilt。
+            BOOL isDockItem = (delegate != nil && axs_dock_assembleInFlight
                 && strstr(object_getClassName(delegate), "DockedFloatingItem") != NULL);
             // .240: 原生动画常加在 item 的内容子层上（delegate 类名不是
             // DockedFloatingItem）——沿 superlayer 回溯判定是否处于 item 子树。
@@ -2988,7 +2987,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                 dstShot = srcShot;   // 无缓存兜底：同图+侧倾矩阵
             }
         } else {
-            dstShot = (floatShot != nil) ? floatShot : srcShot;
+            // .268: 浮窗终点图=缓存的浮窗快照优先——flip 时刻现拍会拍到原生
+            // pop 的中间态（log119 视频：聚合出的浮窗顶左探出倾斜残影=「一半
+            // 侧倾一半正面」）。挂起期间 App 冻结，缓存=浮窗的最终内容。
+            UIImage *cachedFloat = axs_open_cachedCardSnapshotForView(container);
+            dstShot = (cachedFloat != nil) ? cachedFloat
+                    : ((floatShot != nil) ? floatShot : srcShot);
         }
         axs_ring_forceTiltSync();   // 恢复 ring 正常运转（suppress 不残留）
         void *renderer = axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame,

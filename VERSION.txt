@@ -1,3 +1,16 @@
+beautify.268 变更（反向终点图换缓存浮窗快照 + item 吞窗缩到飞行窗口）：
+- 用户反馈 .267：a) 侧窗会闪一下；b) 浮窗聚合出来一半侧倾一半正面。
+- 取证（log119+视频逐帧）：a) 反向点击侧窗时 App 的还原弹簧（opacity/position/
+  bounds）在飞行开始前 ~0.13s 被 4s settle 吞窗吞掉（896.089 SWALLOW ->
+  896.216 FLIGHT），item 模型值瞬间跳到终点 -> 侧窗闪变；
+  b) 反向 dst=flip 时刻现拍，拍到原生 pop 中间态（视频 7.0-7.4s：聚合出的
+  浮窗顶左探出倾斜残影）。
+- 修复：a) item 吞窗只在 assembleInFlight 飞行窗口内生效（.255 的 4s settle
+  窗废弃——tilt 已在 container 上由 ENFORCE 自适应逐帧维持，item 内容弹出
+  不再威胁 tilt）；b) 反向浮窗终点图=缓存的浮窗快照优先（挂起期间 App 冻结，
+  缓存=浮窗最终内容；现拍只作兜底）。
+- 保持：ENFORCE 飞行让位、真实像素正向消散、dst 沉积层、等比圆角、mode 3。
+
 beautify.267 变更（ENFORCE 飞行期完全让位：修复「浮窗直接弹到侧窗位置」）：
 - 用户反馈 .266：浮窗还是会直接弹到侧窗位置，与参照效果（msOpenParticleAnimation）
   根本不一样。
