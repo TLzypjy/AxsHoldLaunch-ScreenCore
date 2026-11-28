@@ -2905,26 +2905,14 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         // 所有快照都在「container transform=原生 base（无 tilt）」的确定状态
         // 下捕获；侧倾由飞行 dock 侧层的缩放等效矩阵（S·M·S⁻¹，m14/m34 同乘
         // s=dockW/floatW）呈现，与 container tilt 的屏幕观感一致。
-        // .263: 架构定版（用户方向）——粒子是装饰层，原生转场照常播放：
-        //   fwd：真实浮窗隐藏变成粒子（消散层=缓存浮窗图 @ fromFrame），粒子飞
-        //        到 dock 位融进【原生已弹出的真实侧窗】（item 保持可见，不再
-        //        隐藏/压制，dst 聚合层取消=不再出现第二个侧窗）；
-        //   rev：真实浮窗由原生还原动画带回（container 不隐藏，原生动画照常），
-        //        真实侧窗隐藏变成粒子（消散层=dockedShot 稳态缓存 @ dock 矩形，
-        //        item 一次性隐藏让位给消散层），粒子飞到浮窗位融进真实浮窗。
+        // .264: 架构定版（用户方向修正）——真实卡片消散成粒子，飞行期原生
+        // 动画让位，结束揭示真卡：
+        //   fwd：实时现拍真实浮窗像素 -> 隐藏 container -> 在 fromFrame 消散
+        //        成粒子 -> 飞到 dock 位融进原生 docked 卡（item 保持可见）；
+        //   rev：消散源=dockedShot 本会话缓存（真实 docked 卡像素）-> 隐藏
+        //        container+item（原生还原动画让位）-> 在 dock 矩形消散成粒子
+        //        -> 飞到浮窗位 -> 揭示真实浮窗。
         BOOL preHid = NO;
-        if (toDock) {
-            @try {
-                if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                    ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
-                        container, @selector(setHidden:), YES);
-                    preHid = YES;
-                } else {
-                    container.hidden = YES;
-                    preHid = YES;
-                }
-            } @catch (NSException *ignored) { }
-        }
         axs_ring_forceTiltOff();   // ring 宿主 tilt 抑制（若开关开着，避免叠加）
         if (axs_dock_containerBaseValid) {
             // 确定化：container transform 回 base（隐藏态下仅同步模型值）
@@ -2933,51 +2921,43 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             axs_dock_containerNativeBase = container.layer.transform;
             axs_dock_containerBaseValid = YES;
         }
-        // .263: 图源全走缓存/确定性来源，飞行前零现拍（无闪现）。
-        // fwd：src=缓存浮窗正面图（浮窗变粒子）；rev：src=dockedShot 稳态缓存
-        // （侧窗变粒子；无缓存兜底现拍——此刻 container 已被原生还原为浮窗态）。
+        // .264: 图源=实时现拍的真实像素（真实卡片消散成的粒子必须是真卡内容）。
+        // fwd：现拍 container（App 尺寸 bounds 渲染=浮窗正面真像素）；
+        // rev：优先 dockedShot 本会话缓存（真实 docked 卡像素），无缓存兜底现拍。
         UIImage *srcShot = nil;
         if (toDock) {
-            srcShot = axs_open_cachedCardSnapshotForView(container);
-            if (srcShot == nil) {
-                // 无缓存兜底：临时显现现拍一张再隐藏（罕见：首次 dock 且无开启史）
-                @try {
-                    if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                        ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
-                            container, @selector(setHidden:), NO);
-                    } else {
-                        container.hidden = NO;
-                    }
-                    srcShot = axs_open_captureVisibleCardCheap(container);
-                    if (srcShot == nil) srcShot = axs_dm_snapshot(container);
-                } @catch (NSException *ignored) { }
-                @try {
-                    if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                        ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
-                            container, @selector(setHidden:), YES);
-                    } else {
-                        container.hidden = YES;
-                    }
-                } @catch (NSException *ignored) { }
-            }
+            // fwd：实时现拍=真实浮窗像素（bounds 渲染与 dock 缩放无关）
+            srcShot = axs_open_captureVisibleCardCheap(container);
         } else {
-            // rev：真实侧窗隐藏变成粒子——item 一次性隐藏让位给消散层；
-            // 消散源=dockedShot 稳态缓存（+3s，本会话内容），无缓存兜底现拍
-            //（此刻 container 已被原生还原为浮窗态，拍到的是浮窗观感）。
-            if (dockItem != nil && dockItem.window != nil) {
-                @try { dockItem.hidden = YES; } @catch (NSException *ignored) { }
-            }
+            // rev：dockedShot 本会话缓存=真实 docked 卡像素（此刻 container 已被
+            // 原生还原为浮窗态，现拍会是浮窗观感——只作兜底）
             if (axs_dock_dockedShotValid && axs_dock_dockedShotCache != nil) {
                 srcShot = axs_dock_dockedShotCache;
             } else {
                 srcShot = axs_open_captureVisibleCardCheap(container);
-                if (srcShot == nil) srcShot = axs_open_cachedCardSnapshotForView(container);
             }
         }
+        if (srcShot == nil) srcShot = axs_open_cachedCardSnapshotForView(container);
+        if (srcShot == nil) srcShot = axs_dm_snapshot(container);
         if (srcShot == nil) {
             axs_dm_log(@"DOCK FLIGHT skipped (no src snapshot)");
             axs_ring_forceTiltSync();
             return;
+        }
+        // .264: 隐藏真卡（原生动画让位）——fwd 隐藏 container（浮窗已变粒子）；
+        // rev 隐藏 container+item（侧窗已变粒子，原生还原动画在揭示时才呈现）。
+        @try {
+            if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                    container, @selector(setHidden:), YES);
+                preHid = YES;
+            } else {
+                container.hidden = YES;
+                preHid = YES;
+            }
+        } @catch (NSException *ignored) { }
+        if (!toDock && dockItem != nil && dockItem.window != nil) {
+            @try { dockItem.hidden = YES; } @catch (NSException *ignored) { }
         }
         // .263: dst 聚合层取消——粒子直接融进原生真实窗口（不再有第二个侧窗）
         UIImage *dstShot = nil;
