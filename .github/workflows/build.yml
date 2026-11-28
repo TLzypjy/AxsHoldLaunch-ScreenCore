@@ -723,7 +723,7 @@ jobs:
           grep -Fq "if (isDockItem || containerAnimWindow)" Hooks/AxsDismissEffect.xm || { echo "dock-item swallow preserved missing"; exit 1; }
           grep -Fq ".250: 转场前把真实容器恢复到完整态" Hooks/AxsDismissEffect.xm || { echo "pre-flight container cleanup missing"; exit 1; }
           grep -Fq "if (container.layer.mask != nil) container.layer.mask = nil;" Hooks/AxsDismissEffect.xm || { echo "pre-flight mask clear missing"; exit 1; }
-          grep -Fq "UIImage *srcShot = axs_open_captureVisibleCardCheap(container);" Hooks/AxsDismissEffect.xm || { echo "fresh capture first missing"; exit 1; }
+          # .260: cache-sourced images (hide-first, no flip-time capture)
           grep -Fq "OPEN cached card snapshot skipped (mask/in-flight)" Hooks/AxsDismissEffect.xm || { echo "cache poison guard missing"; exit 1; }
           grep -Fq "[weakSelf stop];" Hooks/AxsDismissEffect.xm || { echo "reveal driver failsafe stop missing"; exit 1; }
           grep -Fq "duration + 0.6" Hooks/AxsDismissEffect.xm || { echo "reveal failsafe delay missing"; exit 1; }
