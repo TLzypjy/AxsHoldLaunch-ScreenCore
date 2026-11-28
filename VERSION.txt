@@ -1,3 +1,13 @@
+beautify.266 变更（参照 msOpenParticleAnimation：恢复 dst 逐格沉积层）：
+- 用户提供参照插件（TrollOpen 美化）解剖结论：目标真卡飞行期隐藏，粒子到达时
+  逐格沉积【目标自己的真实像素】（deposited cell samples the same UV as its
+  source cell），全部落完揭示真卡；消散/到达顺序同为右上→左下（mode 3，已一致）。
+- 修复：dst 沉积层回归——fwd dst=dockedShot 会话缓存（真实 docked 卡像素，
+  无缓存兜底同图）+缩放侧倾矩阵；rev dst=flip 时刻现拍的浮窗真像素
+  （container 隐藏前拍摄，scale=1 正面）正面落位。
+- 保持：中段揭示（40%）、真像素现拍、两方向 item 隐藏、自适应 base、
+  等比圆角、吞窗限界。
+
 beautify.265 变更（中段揭示：粒子落位时真卡就位）：
 - 用户反馈 .264：a) 浮窗还是直接弹到侧窗位置（fwd 未隐藏 item=原生 dock 通道
   卡，flip 帧它就出现在 dock 位）；b) 反向粒子飞行期间浮窗位置透明，粒子走完

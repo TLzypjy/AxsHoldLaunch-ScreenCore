@@ -2944,6 +2944,12 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             axs_ring_forceTiltSync();
             return;
         }
+        // .266: rev 的浮窗终点图=flip 时刻现拍（此刻 container 可见、scale=1、
+        // 正面无 tilt——真实浮窗像素），必须赶在隐藏之前。
+        UIImage *floatShot = nil;
+        if (!toDock) {
+            floatShot = axs_open_captureVisibleCardCheap(container);
+        }
         // .264: 隐藏真卡（原生动画让位）——fwd 隐藏 container（浮窗已变粒子）；
         // rev 隐藏 container+item（侧窗已变粒子，原生还原动画在揭示时才呈现）。
         @try {
@@ -2961,8 +2967,22 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         if (dockItem != nil && dockItem.window != nil) {
             @try { dockItem.hidden = YES; } @catch (NSException *ignored) { }
         }
-        // .263: dst 聚合层取消——粒子直接融进原生真实窗口（不再有第二个侧窗）
+        // .266: 参照 msOpenParticleAnimation 恢复 dst 逐格沉积层——
+        // 目标真卡飞行期隐藏，粒子到达时逐格沉积【目标自己的真实像素】
+        //（deposited cell samples the same UV as its source cell），落完揭示。
+        //   fwd：dst=dockedShot 会话缓存（真实 docked 卡像素）+ 缩放侧倾矩阵；
+        //   rev：dst=flip 时刻现拍的浮窗真像素（此刻 container 仍可见未隐藏）
+        //        正面落位。
         UIImage *dstShot = nil;
+        if (toDock) {
+            if (axs_dock_dockedShotValid && axs_dock_dockedShotCache != nil) {
+                dstShot = axs_dock_dockedShotCache;
+            } else {
+                dstShot = srcShot;   // 无缓存兜底：同图+侧倾矩阵
+            }
+        } else {
+            dstShot = (floatShot != nil) ? floatShot : srcShot;
+        }
         axs_ring_forceTiltSync();   // 恢复 ring 正常运转（suppress 不残留）
         void *renderer = axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame,
                                                       duration, density, departDir, arriveDir);
