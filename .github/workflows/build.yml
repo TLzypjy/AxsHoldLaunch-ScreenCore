@@ -1,4 +1,4 @@
-name: Build ScreenCore beautify.264 (rootless)
+name: Build ScreenCore beautify.265 (rootless)
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ env:
 
 jobs:
   build:
-    name: Build rootless beautify.264
+    name: Build rootless beautify.265
     runs-on: ${{ inputs.runner_label || 'macos-15' }}
 
     steps:
@@ -40,7 +40,7 @@ jobs:
       - name: Pin Package Version
         run: |
           # The final deliverable version is fixed; do NOT use 5.2.0-run_number.
-          VERSION="2.0.5+beautify.264"
+          VERSION="2.0.5+beautify.265"
           echo "Using version: $VERSION"
           sed -i '' "s/^Version: .*/Version: ${VERSION}/" control
 
@@ -120,7 +120,7 @@ jobs:
           find "$EXTRACT" -name "AxsHoldLaunch.plist" -exec cp {} ./repack/ \;
           ls -la ./repack
 
-      - name: Package 2.0.5+beautify.264 (dpkg-deb)
+      - name: Package 2.0.5+beautify.265 (dpkg-deb)
         env:
           AXS_DYLIB: ${{ github.workspace }}/repack/AxsHoldLaunch.dylib
         run: |
@@ -138,7 +138,7 @@ jobs:
           echo "=== dpkg-deb -I ==="
           dpkg-deb -I "$DEB"
           echo "=== version check ==="
-          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.264"
+          dpkg-deb -f "$DEB" Version | grep -qx "2.0.5+beautify.265"
           echo "=== package contents ==="
           dpkg-deb -c "$DEB"
           echo "=== bplist check (panel plist/strings) ==="
@@ -207,7 +207,7 @@ jobs:
           idx = [keys.index(k) for k in order]
           if idx != sorted(idx):
               sys.exit("beautify group order wrong: %r" % idx)
-          # beautify.264: dock rows live inside 美化 group, right after 呼出显现方向
+          # beautify.265: dock rows live inside 美化 group, right after 呼出显现方向
           dock_order = ["splitBeautifyDockAnimEnabled", "splitBeautifyDockSpeed",
                         "splitBeautifyDockDensity"]
           di = keys.index("splitBeautifyOpenDirection")
@@ -479,7 +479,7 @@ jobs:
           grep -Fq "sc_promoteFrontmostFloatingSceneToFullscreen" Hooks/AxsFullscreenProbe.xm || { echo "probe promoteFrontmost hook missing"; exit 1; }
           grep -Fq "axs_fs_argsAreObjects" Hooks/AxsFullscreenProbe.xm || { echo "probe args-safety guard missing"; exit 1; }
           grep -Fq "FSP module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "probe load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.264 dismiss particle module check ==="
+          echo "=== beautify.265 dismiss particle module check ==="
           grep -Fq "splitBeautifyDismissAnimEnabled" Hooks/AxsDismissEffect.xm || { echo "dismiss switch key missing"; exit 1; }
           grep -Fq "DME module loaded in SpringBoard" Hooks/AxsDismissEffect.xm || { echo "dismiss load log missing"; exit 1; }
           # .111: hide the real card while the dissolve plays (no double image)
@@ -492,12 +492,12 @@ jobs:
           grep -Fq "overlay.windowScene = host.windowScene" Hooks/AxsMetalSand.xm || { echo "dismiss windowScene fix missing"; exit 1; }
           grep -Fq "axs_dm_sigMatches" Hooks/AxsDismissEffect.xm || { echo "dismiss sig guard missing"; exit 1; }
           grep -Fq "DME module loaded in SpringBoard" "$EXTRACT/dylib34.strings" || { echo "dismiss load log not compiled into dylib"; exit 1; }
-          echo "=== beautify.264 dismiss style selector check ==="
+          echo "=== beautify.265 dismiss style selector check ==="
           grep -Fq "splitBeautifyDismissStyle" Hooks/AxsDismissEffect.xm || { echo "dismiss style key missing"; exit 1; }
           grep -Fq "AXSDismissStyleGlass" Hooks/AxsDismissEffect.xm || { echo "dismiss style enum missing"; exit 1; }
           grep -Fq "style=%ld(%@)" Hooks/AxsDismissEffect.xm || { echo "dismiss style log missing"; exit 1; }
           grep -Fq "splitBeautifyDismissStyle" "$EXTRACT/dylib34.strings" || { echo "dismiss style key not compiled into dylib"; exit 1; }
-          echo "=== beautify.264 unified GPU engine (no CPU path) + density slider check ==="
+          echo "=== beautify.265 unified GPU engine (no CPU path) + density slider check ==="
           grep -Fq "AXSDismissStyleColorSand" Hooks/AxsDismissEffect.xm || { echo "ColorSand enum missing"; exit 1; }
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/plist.strings" || { echo "ColorSand panel option missing"; exit 1; }
           grep -Fq "DISMISS_STYLE_SAND" "$EXTRACT/zh.strings" || { echo "ColorSand zh label missing"; exit 1; }
@@ -511,7 +511,7 @@ jobs:
           grep -Fq "emit: gpu engine active" Hooks/AxsDismissEffect.xm || { echo "gpu engine log missing"; exit 1; }
           grep -Fq "axs_dm_styleBaseDuration" Hooks/AxsDismissEffect.xm || { echo "per-style base duration table missing"; exit 1; }
           grep -Fq "axs_metalSandPlay(shot, sourceFrameInWindow, duration," Hooks/AxsDismissEffect.xm || { echo "Metal call with style+density missing"; exit 1; }
-          echo "=== beautify.264 dismiss speed + density control check ==="
+          echo "=== beautify.265 dismiss speed + density control check ==="
           grep -Fq "static CGFloat axs_dm_speedScale" Hooks/AxsDismissEffect.xm || { echo "speed scale fn missing"; exit 1; }
           grep -Fq "splitBeautifyDismissSpeed" Hooks/AxsDismissEffect.xm || { echo "speed key missing in source"; exit 1; }
           grep -Fq "axs_dm_styleBaseDuration(style) * speedScale" Hooks/AxsDismissEffect.xm || { echo "style speed scaling missing"; exit 1; }
@@ -526,7 +526,7 @@ jobs:
           grep -Fq "DISMISS_DENSITY" "$EXTRACT/zh.strings" || { echo "density zh label missing"; exit 1; }
           grep -Fq "DISMISS_DENSITY" "$EXTRACT/en.strings" || { echo "density en label missing"; exit 1; }
           grep -Fq "splitBeautifyDismissDensity" "$EXTRACT/dylib34.strings" || { echo "density key not compiled into dylib"; exit 1; }
-          echo "=== beautify.264 ARC-open assemble animation check ==="
+          echo "=== beautify.265 ARC-open assemble animation check ==="
           grep -Fq "openMode" Hooks/AxsMetalSand.xm || { echo "shader openMode branch missing"; exit 1; }
           grep -Fq "axs_metalAssemblePlay" Hooks/AxsMetalSand.xm || { echo "assemble entry missing in Metal"; exit 1; }
           grep -Fq "axs_metalAssemblePlay" Hooks/AxsDismissEffect.xm || { echo "assemble call missing in dismiss"; exit 1; }
@@ -539,7 +539,7 @@ jobs:
           grep -Fq "BEAUTIFY_OPEN_ANIM" "$EXTRACT/en.strings" || { echo "open en label missing"; exit 1; }
           grep -Fq "splitBeautifyOpenAnimEnabled" "$EXTRACT/dylib34.strings" || { echo "open switch key not compiled into dylib"; exit 1; }
           # .188: dual open-style switch (classic .168 / wallpaper cover .182)
-          echo "=== beautify.264 dual open style check ==="
+          echo "=== beautify.265 dual open style check ==="
           grep -Fq "splitBeautifyOpenStyle" Hooks/AxsDismissEffect.xm || { echo "open style reader missing in source"; exit 1; }
           grep -Fq "splitBeautifyOpenStyle" "$EXTRACT/plist.strings" || { echo "open style panel option missing"; exit 1; }
           grep -Fq "BEAUTIFY_OPEN_STYLE" "$EXTRACT/zh.strings" || { echo "open style zh label missing"; exit 1; }
@@ -572,9 +572,9 @@ jobs:
           grep -Fq "axs_probe_dumpTouchChain(touchView, loc);" Hooks/AxsDismissEffect.xm || { echo "touch chain probe not invoked"; exit 1; }
           # .195: third open style -- LIVE DEPOSIT (real card pixels painted
           # per cell by the classic pipeline; no dark plate, no screen capture).
-          echo "=== beautify.264 live-window-reveal open style check ==="
+          echo "=== beautify.265 live-window-reveal open style check ==="
           grep -Fq "metal compiled OK pipeline ready" "$EXTRACT/dylib34.strings" || { echo "metal compile log missing in dylib"; exit 1; }
-          echo "=== beautify.264 style-3 real-window reveal check ==="
+          echo "=== beautify.265 style-3 real-window reveal check ==="
           grep -Fq "static BOOL axs_open_realRevealStyle(void)" Hooks/AxsDismissEffect.xm || { echo "real reveal style getter missing"; exit 1; }
           grep -Fq "@interface AXSOpenRevealDriver" Hooks/AxsDismissEffect.xm || { echo "reveal mask driver missing"; exit 1; }
           grep -Fq "[self paintAtTime:t]" Hooks/AxsDismissEffect.xm || { echo "reveal mask clock missing"; exit 1; }
@@ -587,36 +587,36 @@ jobs:
           plutil -p packaging/overlay/SplitSettings.plist | grep -A10 "splitBeautifyOpenStyle" | grep -q "1" || { echo "open style value 1 missing in plist"; exit 1; }
           grep -Fq "OPEN_STYLE_SHOCKWAVE" "$EXTRACT/plist.strings" || { echo "shockwave panel option missing"; exit 1; }
           grep -Fq "plutil -p packaging/overlay/SplitSettings.plist" /dev/null 2>/dev/null || true
-          echo "=== beautify.264 corner-kill halo fix check ==="
+          echo "=== beautify.265 corner-kill halo fix check ==="
           grep -Fq "void axs_msd_setCornerKill(uint32_t on, float radius)" Hooks/AxsMetalSand.xm || { echo "corner kill setter missing"; exit 1; }
           grep -Fq "uint cornerKill;" Hooks/AxsMetalSand.xm || { echo "corner kill MSL uniform fields missing"; exit 1; }
           grep -Fq "u.cornerKill = sMsdCornerKill;" Hooks/AxsMetalSand.xm || { echo "corner kill uniform fill missing"; exit 1; }
           grep -Fq "outO.fade=born*gone*kill;" Hooks/AxsMetalSand.xm || { echo "classic corner kill fade missing"; exit 1; }
           grep -Fq "axs_msd_setCornerKill(1u, (float)rr)" Hooks/AxsDismissEffect.xm || { echo "real reveal corner kill arm missing"; exit 1; }
           grep -Fq "OPEN real reveal corner kill armed radius" Hooks/AxsDismissEffect.xm || { echo "corner kill log missing"; exit 1; }
-          echo "=== beautify.264 corner-aware mask + no-flash check ==="
+          echo "=== beautify.265 corner-aware mask + no-flash check ==="
           grep -Fq "radius:(CGFloat)radius" Hooks/AxsDismissEffect.xm || { echo "reveal radius param missing"; exit 1; }
           grep -Fq "CGFloat kill = 1.0f - axs_open_smoothstep196(-1.5f, 1.5f, dOut);" Hooks/AxsDismissEffect.xm || { echo "corner-aware mask SDF missing"; exit 1; }
           grep -Fq "axs_open_staticMaskKey" Hooks/AxsDismissEffect.xm || { echo "static hide-mask key missing"; exit 1; }
           grep -Fq "if (!realReveal && card.layer.mask != nil) card.layer.mask = nil;" Hooks/AxsDismissEffect.xm || { echo "pre-driver mask keep missing"; exit 1; }
           grep -Fq "radius:revealRadius" Hooks/AxsDismissEffect.xm || { echo "reveal radius passthrough missing"; exit 1; }
-          echo "=== beautify.264 SDF minus-radius check ==="
+          echo "=== beautify.265 SDF minus-radius check ==="
           grep -Fq "self.cornerRadius;   // .199: rounded-rect SDF needs -r" Hooks/AxsDismissEffect.xm || { echo "mask SDF minus-r missing"; exit 1; }
           grep -Fq "min(max(q.x,q.y),0.0)-u.cornerRadius;" Hooks/AxsMetalSand.xm || { echo "metal cornerKill SDF minus-r missing"; exit 1; }
-          echo "=== beautify.264 glow mask rounded frame (no right-angle halo) check ==="
+          echo "=== beautify.265 glow mask rounded frame (no right-angle halo) check ==="
           grep -Fq "bezierPathWithRoundedRect:glow.bounds" Hooks/AxsBeautifyRing.xm || { echo "glow mask rounded outer frame missing"; exit 1; }
           grep -Fq "cornerRadius:(pathRadius + pad)" Hooks/AxsBeautifyRing.xm || { echo "glow mask concentric corner radius missing"; exit 1; }
           ! grep -Fq "bezierPathWithRect:glow.bounds" Hooks/AxsBeautifyRing.xm || { echo "old square glow mask frame still present"; exit 1; }
           grep -Fq "CGFloat pad = MAX(innerBlur, outerBlur) * 2.0 + lineWidth + 8.0;" Hooks/AxsBeautifyRing.xm || { echo "glow pad 2x blur fallback missing"; exit 1; }
           grep -Fq "fabs(driver.lastGlowGeomPad - pad) > 0.5" Hooks/AxsBeautifyRing.xm || { echo "glow pad geom-change gate missing"; exit 1; }
-          echo "=== beautify.264 glow brightness boost check ==="
+          echo "=== beautify.265 glow brightness boost check ==="
           grep -Fq "CGFloat innerOp = 0.50 * scale * bright;" Hooks/AxsBeautifyRing.xm || { echo "glow inner opacity boost missing"; exit 1; }
           grep -Fq "CGFloat outerOp = 0.24 * scale * bright;" Hooks/AxsBeautifyRing.xm || { echo "glow outer opacity boost missing"; exit 1; }
           grep -Fq "1.0 - (range - 116.0) / 84.0 * 0.18, 0.8, 1.0" Hooks/AxsBeautifyRing.xm || { echo "glow wide-range decay relax missing"; exit 1; }
           grep -Fq "axs_ring_glowBrightness() / 100.0 * 2.0" Hooks/AxsBeautifyRing.xm || { echo "glow 200pct brightness factor missing"; exit 1; }
-          echo "=== beautify.264 float-to-dock particle assemble check ==="
-          echo "=== beautify.264 rect-to-rect dock transfer check ==="
-          echo "=== beautify.264 staged wave + native animation untouched check ==="
+          echo "=== beautify.265 float-to-dock particle assemble check ==="
+          echo "=== beautify.265 rect-to-rect dock transfer check ==="
+          echo "=== beautify.265 staged wave + native animation untouched check ==="
           grep -Fq "float axsTransferDepart(float2 unit, uint mode, float hf)" Hooks/AxsMetalSand.xm || { echo "staged depart clock missing"; exit 1; }
           grep -Fq "float axsTransferArrive(float2 unit, uint mode, float hf)" Hooks/AxsMetalSand.xm || { echo "staged arrive clock missing"; exit 1; }
           grep -Fq "if (u.openMode == 4u)" Hooks/AxsMetalSand.xm || { echo "source cover pass missing"; exit 1; }
@@ -683,7 +683,9 @@ jobs:
           # .264: real-pixel dissolve (fresh capture fwd / per-session dockedShot rev) + hide both cards
           grep -Fq ".264: 图源=实时现拍的真实像素" Hooks/AxsDismissEffect.xm || { echo "real-pixel capture comment missing"; exit 1; }
           grep -Fq "UIImage *srcShot = nil;" Hooks/AxsDismissEffect.xm || { echo "directional srcShot missing"; exit 1; }
-          grep -Fq "if (!toDock && dockItem != nil && dockItem.window != nil)" Hooks/AxsDismissEffect.xm || { echo "rev item hide missing"; exit 1; }
+          # .265: both directions hide the item; mid-flight reveal at 40%
+          grep -Fq "duration * 0.4" Hooks/AxsDismissEffect.xm || { echo "mid-flight reveal missing"; exit 1; }
+          grep -Fq "wRevealCard = container;" Hooks/AxsDismissEffect.xm || { echo "reveal card weak missing"; exit 1; }
           grep -Fq "static CATransform3D axs_dock_tiltMatrixScaled(CGFloat rad, CGFloat s)" Hooks/AxsDismissEffect.xm || { echo "scaled flight tilt matrix missing"; exit 1; }
           grep -Fq "perspScale:(CGFloat)perspScale" Hooks/AxsDismissEffect.xm || { echo "perspScale param missing"; exit 1; }
           grep -Fq "axs_dock_dockedShotCache" Hooks/AxsDismissEffect.xm || { echo "docked shot cache missing"; exit 1; }
@@ -729,7 +731,7 @@ jobs:
           grep -Fq "axs_dockAssemblePlay(container, driver.lastDockedFrame, toF, NO);" Hooks/AxsBeautifyRing.xm || { echo "dock->float trigger missing"; exit 1; }
           grep -Fq "void *axs_metalDockTransferPlayRet(UIImage *shot, CGRect fromFrame, CGRect toFrame," Hooks/AxsMetalSand.xm || { echo "metal transfer entry missing"; exit 1; }
           grep -Fq "axs_metalDockTransferPlayRet(srcShot, fromFrame, toFrame," Hooks/AxsDismissEffect.xm || { echo "dock transfer metal play missing"; exit 1; }
-          echo "=== beautify.264 half-card / teleport regression check ==="
+          echo "=== beautify.265 half-card / teleport regression check ==="
           grep -Fq "static CFAbsoluteTime axs_open_animSwallowUntil = 0;" Hooks/AxsDismissEffect.xm || { echo "container anim swallow window state missing"; exit 1; }
           grep -Fq "axs_open_animSwallowUntil = CACurrentMediaTime() + duration + 0.3;" Hooks/AxsDismissEffect.xm || { echo "swallow window arm missing"; exit 1; }
           grep -Fq "BOOL containerAnimWindow = CACurrentMediaTime() < axs_open_animSwallowUntil;" Hooks/AxsDismissEffect.xm || { echo "container swallow gating missing"; exit 1; }
@@ -740,7 +742,7 @@ jobs:
           grep -Fq "OPEN cached card snapshot skipped (mask/in-flight)" Hooks/AxsDismissEffect.xm || { echo "cache poison guard missing"; exit 1; }
           grep -Fq "[weakSelf stop];" Hooks/AxsDismissEffect.xm || { echo "reveal driver failsafe stop missing"; exit 1; }
           grep -Fq "duration + 0.6" Hooks/AxsDismissEffect.xm || { echo "reveal failsafe delay missing"; exit 1; }
-          echo "=== beautify.264 close-misflight / double-tilt regression check ==="
+          echo "=== beautify.265 close-misflight / double-tilt regression check ==="
           grep -Fq "if (container.hidden || container.alpha < 0.05) return;" Hooks/AxsDismissEffect.xm || { echo "hidden container flight guard missing"; exit 1; }
           # .252: item 本体 tilt 恢复（无透视，纯旋转 hit-test 可存活）
           # .256: item tilt fully removed (host tilt is the single visible authority)
@@ -749,29 +751,29 @@ jobs:
           ! grep -Fq "rootView.layer.transform = tiltRotation;" Hooks/AxsDismissEffect.xm || { echo "stale scene-stack tilt still present (gesture mapping)"; exit 1; }
           # (itemTilt=off since .256)
           grep -Fq "PROBE TOUCH#%ld hitView=%@ at %.0f,%.0f" Hooks/AxsDismissEffect.xm || { echo "probe touch location missing"; exit 1; }
-          echo "=== beautify.264 flight card hide/reveal check ==="
+          echo "=== beautify.265 flight card hide/reveal check ==="
           grep -Fq "@property (nonatomic, weak) UIView *flightCard;" Hooks/AxsDismissEffect.xm || { echo "flight card property missing"; exit 1; }
           grep -Fq "driver.flightCard = container;" Hooks/AxsDismissEffect.xm || { echo "flight card wiring missing"; exit 1; }
           grep -Fq "_hidCard && card != nil" Hooks/AxsDismissEffect.xm || { echo "flight card reveal on stop missing"; exit 1; }
           grep -Fq ".252: 隐藏真实容器（经原始 IMP，不触发 override 的 markGone/" Hooks/AxsDismissEffect.xm || { echo "flight hide comment missing"; exit 1; }
           grep -Fq "if (u.openMode == 3u) {" Hooks/AxsMetalSand.xm || { echo "shader transfer branch missing"; exit 1; }
           grep -Fq "float axsTransferOrder(float2 unit, uint mode)" Hooks/AxsMetalSand.xm || { echo "shader transfer order fn missing"; exit 1; }
-          echo "=== beautify.264 quick close-reopen gate clear check ==="
+          echo "=== beautify.265 quick close-reopen gate clear check ==="
           grep -Fq "axs_open_openActiveUntil = 0;" Hooks/AxsDismissEffect.xm || { echo "close-time ownership expiry missing"; exit 1; }
           grep -Fq "axs_open_selfRestore = NO;" Hooks/AxsDismissEffect.xm || { echo "close-time self-restore disarm missing"; exit 1; }
-          echo "=== beautify.264 reveal direction option check ==="
+          echo "=== beautify.265 reveal direction option check ==="
           grep -Fq "axs_open_directionMode" Hooks/AxsDismissEffect.xm || { echo "direction getter missing"; exit 1; }
           grep -Fq "uint dirMode;" Hooks/AxsMetalSand.xm || { echo "direction MSL uniform missing"; exit 1; }
           grep -Fq "else if (u.dirMode == 1u) orderBase = (1.0-unit.y);" Hooks/AxsMetalSand.xm || { echo "direction shader bottom-up branch missing"; exit 1; }
           grep -Fq "else orderBase = ((1.0-unit.x) + (1.0-unit.y))*0.5;" Hooks/AxsMetalSand.xm || { echo "direction shader BR-TL branch missing"; exit 1; }
           grep -Fq "else if (self.dirMode == 1u) orderBase = 1.0f - uy;" Hooks/AxsDismissEffect.xm || { echo "direction mask branch missing"; exit 1; }
           grep -Fq "if (mode > 7) mode = 0;" Hooks/AxsDismissEffect.xm || { echo "direction clamp missing"; exit 1; }
-          echo "=== beautify.264 inward direction check ==="
+          echo "=== beautify.265 inward direction check ==="
           grep -Fq "else if (u.dirMode == 7u) {" Hooks/AxsMetalSand.xm || { echo "inward shader branch missing"; exit 1; }
           grep -Fq "else if (self.dirMode == 7u) {" Hooks/AxsDismissEffect.xm || { echo "inward mask branch missing"; exit 1; }
           grep -Fq "OPEN_DIR_INWARD" "$EXTRACT/plist.strings" || { echo "inward panel option missing"; exit 1; }
           grep -Fq "OPEN_DIR_INWARD" "$EXTRACT/zh.strings" || { echo "inward zh label missing"; exit 1; }
-          echo "=== beautify.264 radial-from-touch check ==="
+          echo "=== beautify.265 radial-from-touch check ==="
           grep -Fq "else if (u.dirMode == 6u) {" Hooks/AxsMetalSand.xm || { echo "radial shader branch missing"; exit 1; }
           grep -Fq "orderBase = min(distance(cp, sp) / max(length(float2(fx6, fy6)), 1.0), 1.0);\n" Hooks/AxsMetalSand.xm || { echo "radial shader normalization missing"; exit 1; }
           grep -Fq "else if (self.dirMode == 6u) {" Hooks/AxsDismissEffect.xm || { echo "radial mask branch missing"; exit 1; }
@@ -779,18 +781,18 @@ jobs:
           grep -Fq "OPEN_DIR_FROM_TOUCH" "$EXTRACT/plist.strings" || { echo "radial panel option missing"; exit 1; }
           grep -Fq "OPEN_DIR_FROM_TOUCH" "$EXTRACT/zh.strings" || { echo "radial zh label missing"; exit 1; }
           grep -Fq "OPEN_DIR_FROM_TOUCH" "$EXTRACT/en.strings" || { echo "radial en label missing"; exit 1; }
-          echo "=== beautify.264 direction info accessory check ==="
+          echo "=== beautify.265 direction info accessory check ==="
           grep -Fq 'if ([key isEqualToString:@"splitBeautifyOpenDirection"] && cell != nil) {' Hooks/AxsHoldLaunchMain.xm || { echo "direction row match missing"; exit 1; }
           grep -Fq "static void axs_showDirectionInfo_imp(id self, SEL _cmd, id sender)" Hooks/AxsHoldLaunchMain.xm || { echo "direction info action missing"; exit 1; }
           grep -Fq "axs_showDirectionInfo:" Hooks/AxsHoldLaunchMain.xm || { echo "direction info action reg missing"; exit 1; }
           grep -Fq "DIRECTION i: rowW" Hooks/AxsHoldLaunchMain.xm || { echo "direction deterministic placement log missing"; exit 1; }
           grep -Fq "rowW - 31.0 - tw - 34.0;" Hooks/AxsHoldLaunchMain.xm || { echo "direction calibrated offset missing"; exit 1; }
           grep -Fq "infoBtn.tag = 0x213;" Hooks/AxsHoldLaunchMain.xm || { echo "direction info button missing"; exit 1; }
-          echo "=== beautify.264 direction-row grey-out check ==="
-          echo "=== beautify.264 shockwave + jelly check ==="
+          echo "=== beautify.265 direction-row grey-out check ==="
+          echo "=== beautify.265 shockwave + jelly check ==="
           grep -Fq "static void axs_open_playShockwave(UIWindow *win, CGPoint point)" Hooks/AxsDismissEffect.xm || { echo "shockwave helper missing"; exit 1; }
           grep -Fq "axs_open_playShockwave(card.window, sourcePoint);" Hooks/AxsDismissEffect.xm || { echo "shockwave call missing"; exit 1; }
-          echo "=== beautify.264 standalone styles 4/5 check ==="
+          echo "=== beautify.265 standalone styles 4/5 check ==="
           grep -Fq "static BOOL axs_open_shockwaveStyle(void)" Hooks/AxsDismissEffect.xm || { echo "shockwave style getter missing"; exit 1; }
           grep -Fq "static BOOL axs_open_realRevealStyle(void)" Hooks/AxsDismissEffect.xm || { echo "realReveal family missing"; exit 1; }
           grep -Fq "on = (sv == 1 || sv == 4);   // .208: 1 = shockwave, legacy 4 migrates" Hooks/AxsDismissEffect.xm || { echo "shockwave migration missing"; exit 1; }
@@ -809,7 +811,7 @@ jobs:
           grep -Fq "OPEN_DIR_TL_BR" "$EXTRACT/plist.strings" || { echo "direction panel option missing"; exit 1; }
           grep -Fq "OPEN_DIR_TL_BR" "$EXTRACT/zh.strings" || { echo "direction zh label missing"; exit 1; }
           grep -Fq "OPEN_DIR_TL_BR" "$EXTRACT/en.strings" || { echo "direction en label missing"; exit 1; }
-          echo "=== beautify.264 finger-source assemble + loop fix check ==="
+          echo "=== beautify.265 finger-source assemble + loop fix check ==="
           grep -Fq "sourcePoint" Hooks/AxsMetalSand.xm || { echo "shader sourcePoint missing"; exit 1; }
           grep -Fq "axs_open_sendEvent" Hooks/AxsDismissEffect.xm || { echo "finger-lift tracking missing"; exit 1; }
           grep -Fq "UITouchPhaseEnded" Hooks/AxsDismissEffect.xm || { echo "touch-ended filter missing"; exit 1; }
@@ -820,7 +822,7 @@ jobs:
           grep -Fq "OPEN native animation replaced" Hooks/AxsDismissEffect.xm || { echo "animation swallow missing"; exit 1; }
           grep -Fq "animationDidStop:finished:" Hooks/AxsDismissEffect.xm || { echo "manual completion fire missing"; exit 1; }
 
-          echo "=== beautify.264 particle-is-window reveal + no-open-loop check ==="
+          echo "=== beautify.265 particle-is-window reveal + no-open-loop check ==="
           # .144: a card stays "assembled" from the first frame of an open
           # until its real dismiss -- repeated presents / overlay cleanup must
           # NOT be re-read as a new open (that caused the auto-open loop).
@@ -960,7 +962,7 @@ jobs:
           ! grep -Fq "card.alpha = 0.0;" Hooks/AxsDismissEffect.xm || { echo "whole-card alpha fade still present"; exit 1; }
           ! grep -Fq "CGFloat revealAt = duration * 0.92;" Hooks/AxsDismissEffect.xm || { echo "stale instant card swap still present"; exit 1; }
 
-          echo "=== beautify.264 GPU Metal fine-dust engine check ==="
+          echo "=== beautify.265 GPU Metal fine-dust engine check ==="
           test -f Hooks/AxsMetalSand.xm || { echo "Metal engine source missing"; exit 1; }
           grep -Fq "nlDustVertex" Hooks/AxsMetalSand.xm || { echo "Metal shader vertex fn missing"; exit 1; }
           grep -Fq "nlDustFragment" Hooks/AxsMetalSand.xm || { echo "Metal shader fragment fn missing"; exit 1; }
@@ -991,7 +993,7 @@ jobs:
           echo "=== roothide (hidden-root) variant verification ==="
           RH_DEB=$(find ./packaging/out -name "*roothide*.deb" | head -n 1)
           test -n "$RH_DEB" || { echo "roothide deb missing"; exit 1; }
-          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.264"
+          dpkg-deb -f "$RH_DEB" Version | grep -qx "2.0.5+beautify.265"
           # roothide bootstrap marker: Sileo installs arm64e directly, but pops
           # the "convert .deb" dialog for plain iphoneos-arm64 (rootless) debs.
           dpkg-deb -f "$RH_DEB" Architecture | grep -qx "iphoneos-arm64e" || { echo "roothide deb must be Architecture iphoneos-arm64e"; exit 1; }

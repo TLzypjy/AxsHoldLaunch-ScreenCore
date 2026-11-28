@@ -2956,7 +2956,9 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
                 preHid = YES;
             }
         } @catch (NSException *ignored) { }
-        if (!toDock && dockItem != nil && dockItem.window != nil) {
+        // .265: 正反向都隐藏 item（原生 dock 通道卡）——flip 帧它就出现在
+        // dock 位=「浮窗直接弹过去」；中段随粒子落位就位。
+        if (dockItem != nil && dockItem.window != nil) {
             @try { dockItem.hidden = YES; } @catch (NSException *ignored) { }
         }
         // .263: dst 聚合层取消——粒子直接融进原生真实窗口（不再有第二个侧窗）
@@ -2997,16 +2999,43 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         objc_setAssociatedObject(container, &axs_dock_flightDriverKey, driver,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
+        // .265: 中段揭示（40% 处）——粒子开始落位时真卡就位：
+        //   fwd：原生 docked 卡（item）随粒子落位出现（不再 flip 帧瞬现）；
+        //   rev：真实浮窗随粒子落位显现（终点不再空透明到最后一刻）。
+        __weak UIView *wItem = dockItem;
+        __weak UIView *wRevealCard = container;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                     (int64_t)(duration * 0.4 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            @try {
+                if (toDock) {
+                    UIView *it = wItem;
+                    if (it != nil) it.hidden = NO;
+                } else {
+                    UIView *c = wRevealCard;
+                    if (c != nil) {
+                        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                                c, @selector(setHidden:), NO);
+                        } else {
+                            c.hidden = NO;
+                        }
+                        AXSDockFlightDriver *drv = objc_getAssociatedObject(
+                            c, &axs_dock_flightDriverKey);
+                        if (drv != nil) drv.hidCard = NO;
+                    }
+                }
+            } @catch (NSException *ignored) { }
+        });
+
         // .252: 隐藏真实容器（经原始 IMP，不触发 override 的 markGone/
         // becameVisible 链）。srcShot 已在可见态捕获完毕；飞行由快照层+粒子
         // 独立呈现，stop 时（duration+0.18）在终点揭示真实窗口。
         driver.flightCard = container;
         driver.hidCard = preHid;   // .260: 已在捕获前隐藏，stop 时负责揭示
-        if (dockItem != nil && !toDock) {
-            // .263: 仅反向需要（真实侧窗隐藏变成粒子，stop 揭示交还原生）；
-            // 正向 item=聚合目标真卡，保持可见不干预。
+        if (dockItem != nil) {
             driver.itemCard = dockItem;
-            driver.hidItem = YES;
+            driver.hidItem = YES;   // .265: 两方向都隐藏，stop 兜底揭示
         }
 
         axs_dock_assembleInFlight = YES;
