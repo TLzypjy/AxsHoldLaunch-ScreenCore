@@ -1,3 +1,19 @@
+beautify.260 变更（消除挂起闪现 + 修复反向浮窗缩小 + dockedShot 时机修正）：
+- 用户反馈 .259：a) 点击转侧窗时浮窗直接闪过去、粒子紧跟着才到；b) 侧窗转浮窗
+  动画完成后浮窗变成侧窗一样大小的小浮窗。
+- 根源1（闪现）：飞行前的现拍耗时 ~0.2s，期间 App 已把 container 瞬移到 dock
+  位且可见。修复：dockAssemblePlay 入口立即隐藏容器（原始 IMP），图源全部走
+  缓存（fwd=缓存浮窗正面图；rev=稳态 docked 缓存+缓存浮窗图），飞行前零现拍；
+  无缓存兜底为临时显现现拍再隐藏。
+- 根源2（小浮窗）：containerNativeBase 在 dock 态捕获=dock 呈现缩放 0.334，
+  反向恢复它=浮窗被永久缩小。修复：离开 dock 态 container transform 复位
+  identity（浮窗态 frame=bounds、scale=1），ENFORCE 非 dock 自愈同步改 identity
+  （带 m14!=0 守卫，只清我们写的透视）。
+- 根源3（附带）：dockedShot 缓存原在 +1.5s（飞行中 container 隐藏，捕获必失败
+  =反向消散隐形）。修复：移到 +3.0s（飞行揭示后 container 可见）。
+- 保持：container tilt（nativeBase∘tilt）、飞行层缩放等效矩阵、等比圆角、
+  到达顺序、吞窗 4s 限界、probeBoost、缓存浮窗快照终点。
+
 beautify.259 变更（DUMP2 落地修复：tilt 施加到 container 本体）：
 - DOCK DUMP2 铁证（log110）：可见 docked 卡片=SCFloatingContainerView（App 场景
   内容 d7 在其内，container m11=0.334 原生缩放）；SCDockedFloatingItemView 是

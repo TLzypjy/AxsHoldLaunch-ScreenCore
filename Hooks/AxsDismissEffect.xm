@@ -2661,9 +2661,14 @@ void axs_dock_enforceDockedItemTilt(void) {
         // .259: 非 dock 态自愈——closeSession 从 dock 直接关闭不经过 reverse
         // 分支时，这里把 container transform 复位回原生 base。
         if (!axs_dock_dockedState) {
+            // .260: 自愈复位=identity（nativeBase 是 dock 缩放，带到浮窗态会
+            // 把浮窗压成侧窗大小——.259 回归实证）
             if (axs_dock_containerBaseValid && axs_dock_lastWindow != nil) {
                 UIView *c = axs_dock_findContainerInWindow(axs_dock_lastWindow);
-                if (c != nil && c.layer != nil) c.layer.transform = axs_dock_containerNativeBase;
+                if (c != nil && c.layer != nil
+                    && c.layer.transform.m14 != 0.0) {
+                    c.layer.transform = CATransform3DIdentity;
+                }
             }
             axs_dock_containerBaseValid = NO;
             return;
@@ -2708,8 +2713,9 @@ void axs_dock_enforceDockedItemTilt(void) {
         // 先临时复位 container transform 再拍再恢复，保证图里不含 tilt
         //（反向 src 层的侧倾由缩放矩阵呈现，避免双重叠加）。
         if (!axs_dock_dockedShotValid
-            && (CACurrentMediaTime() - axs_dock_dockedStateAt) > 1.5) {
-            container.layer.transform = axs_dock_containerNativeBase;
+            && (CACurrentMediaTime() - axs_dock_dockedStateAt) > 3.0) {
+            // .260: +1.5s 时飞行未结束、container 仍被隐藏，捕获必失败；
+            // 移到 +3s（飞行 2.3s+0.18s 揭示之后，container 可见）。
             UIImage *shot = axs_open_captureVisibleCardCheap(container);
             container.layer.transform = CATransform3DConcat(
                 axs_dock_containerNativeBase, tiltRotation);
@@ -2795,11 +2801,11 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
             axs_dock_dockedState = NO;
             axs_dock_dumpDoneForSession = NO;   // .258: 下次 dock 会话重新转储
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;
-            // .259: 离开 dock 态——container transform 恢复原生 base
-            if (axs_dock_containerBaseValid) {
-                container.layer.transform = axs_dock_containerNativeBase;
-                axs_dock_containerBaseValid = NO;
-            }
+            // .260: 离开 dock 态——container transform 复位为 identity。
+            // .259 的教训：写 nativeBase（0.334 缩放）会把 dock 缩放带进浮窗态
+            //（App 只改 frame 不改 transform -> 浮窗渲染成侧窗大小）。
+            container.layer.transform = CATransform3DIdentity;
+            axs_dock_containerBaseValid = NO;
             for (UIView *rootView in axs_dock_sceneRootsAt(win, axs_dock_lastDockFrameRect)) {
                 rootView.layer.transform = CATransform3DIdentity;   // 场景栈交还原生
             }
@@ -2872,16 +2878,54 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         // 所有快照都在「container transform=原生 base（无 tilt）」的确定状态
         // 下捕获；侧倾由飞行 dock 侧层的缩放等效矩阵（S·M·S⁻¹，m14/m34 同乘
         // s=dockW/floatW）呈现，与 container tilt 的屏幕观感一致。
+        // .260: 立即隐藏容器（消除「闪过去」）——App 在 flip 帧已把 container
+        // 瞬移到 dock 位，旧流程先现拍（~0.2s）再隐藏，期间卡片可见地停在
+        // dock 位。改用缓存图源后飞行前无任何现拍，隐藏即生效。
+        // 经原始 IMP 隐藏（不触发 override 的 markGone/becameVisible 链）。
+        BOOL preHid = NO;
+        @try {
+            if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                    container, @selector(setHidden:), YES);
+                preHid = YES;
+            } else {
+                container.hidden = YES;
+                preHid = YES;
+            }
+        } @catch (NSException *ignored) { }
         axs_ring_forceTiltOff();   // ring 宿主 tilt 抑制（若开关开着，避免叠加）
         if (axs_dock_containerBaseValid) {
-            container.layer.transform = axs_dock_containerNativeBase;   // 确定化：先无 tilt
+            // 确定化：container transform 回 base（隐藏态下仅同步模型值）
+            container.layer.transform = axs_dock_containerNativeBase;
         } else {
             axs_dock_containerNativeBase = container.layer.transform;
             axs_dock_containerBaseValid = YES;
         }
-        UIImage *srcShot = axs_open_captureVisibleCardCheap(container);
-        if (srcShot == nil) srcShot = axs_open_cachedCardSnapshotForView(container);
-        if (srcShot == nil) srcShot = axs_dm_snapshot(container);
+        // .260: 图源全部走缓存——隐藏态现拍不可用，且缓存消除飞行前延迟。
+        // fwd：src/dst=缓存浮窗正面图（dst 层叠加缩放侧倾矩阵=docked 观感）；
+        // rev：src=稳态 docked 缓存（+3s 图），dst=缓存浮窗正面图。
+        UIImage *srcShot = axs_open_cachedCardSnapshotForView(container);
+        if (srcShot == nil) {
+            // 无缓存兜底：临时显现现拍一张再隐藏（罕见：首次 dock 且无开启史）
+            @try {
+                if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                    ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                        container, @selector(setHidden:), NO);
+                } else {
+                    container.hidden = NO;
+                }
+                srcShot = axs_open_captureVisibleCardCheap(container);
+                if (srcShot == nil) srcShot = axs_dm_snapshot(container);
+            } @catch (NSException *ignored) { }
+            @try {
+                if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
+                    ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
+                        container, @selector(setHidden:), YES);
+                } else {
+                    container.hidden = YES;
+                }
+            } @catch (NSException *ignored) { }
+        }
         if (srcShot == nil) {
             axs_dm_log(@"DOCK FLIGHT skipped (no src snapshot)");
             axs_ring_forceTiltSync();
@@ -2889,16 +2933,9 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         }
         UIImage *dstShot = nil;
         if (toDock) {
-            // fwd：baseShot=浮窗正面（消散源+粒子纹理），入缓存供反向终点复用；
-            // dst 层=同图+缩放侧倾矩阵（=container tilt 的屏幕观感）。
-            axs_open_cacheCardSnapshot(container, srcShot);
-            dstShot = srcShot;
-            // 施加 container tilt（docked 态观感；ENFORCE 之后按帧维持）
-            container.layer.transform = CATransform3DConcat(
-                axs_dock_containerNativeBase, axs_dock_tiltMatrix(dockTilt));
+            dstShot = srcShot;   // 同一张正面图；dst 层叠加缩放侧倾矩阵
         } else {
-            // rev：src 层=docked 稳态侧倾缓存（+1.5s 确定性图源，不依赖 flip
-            // 时刻现拍——log108 实证其为半透明）；dst 层=缓存的浮窗正面图。
+            // rev：src=稳态 docked 缓存（+3s 图）；dst=缓存的浮窗正面图。
             if (axs_dock_dockedShotValid && axs_dock_dockedShotCache != nil) {
                 srcShot = axs_dock_dockedShotCache;
             }
@@ -2946,15 +2983,7 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         // becameVisible 链）。srcShot 已在可见态捕获完毕；飞行由快照层+粒子
         // 独立呈现，stop 时（duration+0.18）在终点揭示真实窗口。
         driver.flightCard = container;
-        @try {
-            if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
-                    container, @selector(setHidden:), YES);
-            } else {
-                container.hidden = YES;
-            }
-            driver.hidCard = YES;
-        } @catch (NSException *ignored) { }
+        driver.hidCard = preHid;   // .260: 已在捕获前隐藏，stop 时负责揭示
 
         axs_dock_assembleInFlight = YES;
         axs_dm_log(@"DOCK FLIGHT play from=%@ to=%@ toDock=%d dep=%u arr=%u dur=%.2f dens=%.2f srcR=%.1f dstR=%.1f snap-src snap-dst",
