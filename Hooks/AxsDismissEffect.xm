@@ -2737,6 +2737,26 @@ void axs_dock_enforceDockedItemTilt(void) {
                            (size_t)CGImageGetHeight(shot.CGImage));
             }
         }
+        // .262: 飞行期间每帧压制原生 dock 通道（item）——App 会自行恢复其
+        // 可见性，.261 的单次隐藏压不住，聚合层之上仍会叠出第二个侧窗。
+        // 仅在飞行窗口内生效（assembleInFlight），stop 揭示后不再干预。
+        if (axs_dock_assembleInFlight) {
+            @try {
+                NSMutableArray *stack = [NSMutableArray arrayWithObject:axs_dock_lastWindow];
+                int gn = 0;
+                while (stack.count > 0 && gn++ < 400) {
+                    UIView *v = [stack lastObject];
+                    [stack removeLastObject];
+                    if (v == nil) continue;
+                    if ([NSStringFromClass(v.class)
+                         rangeOfString:@"DockedFloatingItem"].location != NSNotFound) {
+                        if (!v.hidden) v.hidden = YES;
+                        continue;   // item 子树不下探（其内容由通道自管）
+                    }
+                    [stack addObjectsFromArray:v.subviews];
+                }
+            } @catch (NSException *ignored) { }
+        }
         // .258: docked 态 +2s 一次性深转储（每次 dock 会话一次）
         if (!axs_dock_dumpDoneForSession
             && (CACurrentMediaTime() - axs_dock_dockedStateAt) > 2.0) {
@@ -2806,6 +2826,11 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         if (toDock) {
             axs_dock_dockedState = YES;
             axs_dock_dockedStateAt = CACurrentMediaTime();
+            // .262: dockedShot 缓存按会话重置——全局单份跨 App/会话存活会让
+            // 反向消散源显示上一个浮窗的内容（用户实测「侧窗变成上次关闭的
+            // 浮窗」）；+3s 时按本会话重拍。
+            axs_dock_dockedShotValid = NO;
+            axs_dock_dockedShotCache = nil;
             if (dockItem != nil) dockItem.layer.transform = CATransform3DIdentity;
         } else {
             axs_dock_dockedState = NO;

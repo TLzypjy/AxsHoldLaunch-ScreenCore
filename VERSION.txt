@@ -1,3 +1,14 @@
+beautify.262 变更（飞行期每帧压制 dock 通道 + dockedShot 按会话重置）：
+- 用户反馈 .261：a) 挂起时真侧窗仍直接弹出+粒子聚第二个（两个侧窗并存）——
+  .261 的单次 item 隐藏压不住（App 自行恢复其可见性）；b) 点击侧窗转浮窗时
+  侧窗变成「上次关闭的浮窗」的内容。
+- 修复：a) ENFORCE 在 assembleInFlight 窗口内每帧把 DockedFloatingItem 压回
+  hidden（仅 2.3s 飞行窗口生效，stop 揭示后不干预）——App 恢复一帧就压回一帧；
+  b) dockedShotCache 按会话重置（fwd 开始时清空，+3s 按本会话重拍）——
+  全局单份跨 App/会话存活曾让反向消散源显示上一个浮窗的内容。
+- 保持：.261 自适应 base、飞行期 item 隐藏+stop 揭示、.260 hide-first/缓存
+  图源/identity 浮窗恢复、等比圆角、到达顺序、吞窗限界。
+
 beautify.261 变更（飞行期隐藏原生 dock 通道 + container tilt 自适应 base）：
 - 用户反馈 .260：a) 点击挂起时真侧窗直接弹出来，粒子再聚第二个侧窗（两个侧窗
   并存），聚合完成抖成一个；b) 侧窗稳态仍会抖动。
