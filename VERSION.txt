@@ -1,3 +1,18 @@
+beautify.267 变更（ENFORCE 飞行期完全让位：修复「浮窗直接弹到侧窗位置」）：
+- 用户反馈 .266：浮窗还是会直接弹到侧窗位置，与参照效果（msOpenParticleAnimation）
+  根本不一样。
+- 日志 118 铁证：飞行开始后 0.8s 的 DOCK ENFORCE 显示 contHid=0——ENFORCE 每帧
+  执行「docked 态 container 必须可见」（.259 时代写入），把 dockAssemblePlay
+  刚隐藏的真容器立刻掀开，而 App 早已把它瞬移到 dock 位 -> 用户看到真卡直接
+  弹过去，粒子飞行成了装饰。这与参照插件的「目标让位、粒子沉积、落完揭示」
+  完全相反。
+- 修复：a) ENFORCE 入口加 assembleInFlight 早退——飞行期间画面完全交给
+  「src 消散层 + 粒子 + dst 沉积层」，stop 揭示后 ENFORCE 恢复接管；
+  b) 移除 .265 的 40% 中段揭示（与 .266 恢复的 dst 沉积层冲突——参照是
+  「native real icon is revealed only on cleanup」，中段掀真卡会叠出双画面）。
+- 保持：实时现拍真实像素、dst 沉积层（fwd=dockedShot 会话缓存+缩放侧倾矩阵；
+  rev=flip 时刻现拍浮窗真像素）、两方向 item 隐藏、自适应 base、等比圆角。
+
 beautify.266 变更（参照 msOpenParticleAnimation：恢复 dst 逐格沉积层）：
 - 用户提供参照插件（TrollOpen 美化）解剖结论：目标真卡飞行期隐藏，粒子到达时
   逐格沉积【目标自己的真实像素】（deposited cell samples the same UV as its

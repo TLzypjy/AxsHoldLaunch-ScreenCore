@@ -2661,6 +2661,13 @@ static UIView *axs_dock_findContainerInWindow(UIWindow *win) {
 
 void axs_dock_enforceDockedItemTilt(void) {
     @try {
+        // .267: 飞行期间 ENFORCE 完全让位——画面由「src 消散层 + 粒子 + dst
+        // 沉积层」接管（参照 msOpenParticleAnimation：目标让位、粒子沉积、
+        // 落完揭示）。旧逻辑每帧执行「docked 态 container 必须可见」，把
+        // 飞行开始时刚隐藏的真容器立刻掀开（log118 铁证：飞行开始 0.8s 处
+        // contHid=0），而 App 已把它瞬移到 dock 位 ->「浮窗直接弹到侧窗位置」。
+        // stop 揭示后 assembleInFlight=NO，ENFORCE 自然恢复接管。
+        if (axs_dock_assembleInFlight) return;
         // .259: 非 dock 态自愈——closeSession 从 dock 直接关闭不经过 reverse
         // 分支时，这里把 container transform 复位回原生 base。
         if (!axs_dock_dockedState) {
@@ -3022,31 +3029,9 @@ void axs_dockAssemblePlay(UIView *container, CGRect fromFrame, CGRect toFrame, B
         // .265: 中段揭示（40% 处）——粒子开始落位时真卡就位：
         //   fwd：原生 docked 卡（item）随粒子落位出现（不再 flip 帧瞬现）；
         //   rev：真实浮窗随粒子落位显现（终点不再空透明到最后一刻）。
-        __weak UIView *wItem = dockItem;
-        __weak UIView *wRevealCard = container;
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                     (int64_t)(duration * 0.4 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            @try {
-                if (toDock) {
-                    UIView *it = wItem;
-                    if (it != nil) it.hidden = NO;
-                } else {
-                    UIView *c = wRevealCard;
-                    if (c != nil) {
-                        if (axs_open_orig_setHidden != NULL && axs_open_orig_setHidden != (IMP)1) {
-                            ((void (*)(id, SEL, BOOL))axs_open_orig_setHidden)(
-                                c, @selector(setHidden:), NO);
-                        } else {
-                            c.hidden = NO;
-                        }
-                        AXSDockFlightDriver *drv = objc_getAssociatedObject(
-                            c, &axs_dock_flightDriverKey);
-                        if (drv != nil) drv.hidCard = NO;
-                    }
-                }
-            } @catch (NSException *ignored) { }
-        });
+        // .267: 移除 .265 的 40% 中段揭示——dst 沉积层已恢复，目标区域由
+        // 粒子逐格沉积目标真实像素渐进覆盖（参照：native real icon is
+        // revealed only on cleanup），中段掀真卡会与沉积层叠出双画面。
 
         // .252: 隐藏真实容器（经原始 IMP，不触发 override 的 markGone/
         // becameVisible 链）。srcShot 已在可见态捕获完毕；飞行由快照层+粒子
