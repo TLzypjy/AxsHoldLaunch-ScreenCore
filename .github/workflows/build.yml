@@ -707,7 +707,7 @@ jobs:
           grep -Fq "CGFloat srcTiltRad = toDock ? 0.0 : dockTilt;" Hooks/AxsDismissEffect.xm || { echo "src tilt wiring missing"; exit 1; }
           grep -Fq "CGFloat dstTiltRad = toDock ? dockTilt : 0.0;" Hooks/AxsDismissEffect.xm || { echo "dst tilt wiring missing"; exit 1; }
           # .257: reverse float destination uses the cached float snapshot (flip-time capture is mid-pop transparent)
-          grep -Fq "UIImage *cached = axs_open_cachedCardSnapshotForView(container);" Hooks/AxsDismissEffect.xm || { echo "reverse cached float shot missing"; exit 1; }
+          # .263: reverse float destination = the native window (no dst assembly)
           # .260: hide-first + cache-sourced flight (no flash, no flip-time capture)
           grep -Fq "BOOL preHid = NO;" Hooks/AxsDismissEffect.xm || { echo "preHid flow missing"; exit 1; }
           grep -Fq "driver.hidCard = preHid;" Hooks/AxsDismissEffect.xm || { echo "preHid driver wiring missing"; exit 1; }
