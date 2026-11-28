@@ -683,6 +683,7 @@ static CGPoint axs_open_arcIconPos = {-1, -1};
 static CFAbsoluteTime axs_open_arcIconPosAt = 0;
 static IMP axs_open_orig_setHidden = NULL;   // NULL = not installed; (IMP)1 = class_addMethod super-forward
 static CFAbsoluteTime axs_dock_dockedStateAt = 0;   // .241: 进入 dock 态的时刻（.255 hook 的 settle 窗口也读）
+static BOOL axs_dock_assembleInFlight = NO;   // .249: 粒子聚合持有期间（.268 的吞窗门控也读）
 static BOOL axs_dock_dumpDoneForSession = NO;       // .258: 每次 dock 会话只转储一次
 // .259: 可见 docked 卡片=SCFloatingContainerView（DUMP2 铁证：item 只有占位
 // 图标，container 承载 App 场景内容）。tilt 施加到 container 本体，组合其
@@ -2447,7 +2448,6 @@ extern void axs_ring_forceTiltSync(void);
 // 视觉：浮窗内容碎成粒子 → 从浮窗原位置飞向侧边 → 聚合成侧窗矩形 →
 //       真侧窗显现，侧倾由现有 tilt 功能独立接管（终点保持矩形）。
 // 完全 additive + 幂等：开关默认关；任何一步失败静默 no-op，绝不卡住原生 dock。
-static BOOL axs_dock_assembleInFlight = NO;
 
 static id axs_dock_pref(NSString *key, id def) {
     @try {
